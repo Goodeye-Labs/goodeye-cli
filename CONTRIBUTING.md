@@ -36,7 +36,7 @@ uv run pytest
 ## Conventions
 
 - Python 3.12+, ruff for lint + format, pyright for types.
-- Line length 100, same ruff ruleset as the server repo.
+- Line length 100.
 - No em dashes in prose, comments, or docs; use `-`, `:`, or rephrase.
 - Never commit secrets. Tests should mock WorkOS and the Goodeye server.
 - Use obvious placeholders in example tokens (e.g. `good_live_EXAMPLE_...`).

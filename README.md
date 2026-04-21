@@ -1,12 +1,10 @@
 # goodeye-cli
 
-Public CLI for [Goodeye](https://mcp.goodeyelabs.com) - manage AI workflow
-skills from the terminal.
+Command-line client for Goodeye - manage AI workflow skills from the terminal.
 
 Goodeye is an outcome-aligned AI workflow registry: you author skills (markdown
 bodies + manifests) and verifiers that score an AI agent against a measurable
-business outcome. This CLI is the command-line companion to the Goodeye server,
-wired to the public `/v1/` REST API.
+business outcome. This CLI is wired to the public `/v1/` REST API.
 
 ## Install
 
@@ -124,9 +122,9 @@ Credential files are created with mode `0600`.
 
 ## REST API, not the CLI
 
-This CLI is pinned to the `/v1/` REST API contract defined by the Goodeye
-server. If you are integrating programmatically and want a stable contract,
-prefer the REST API directly. The CLI is a convenience layer over it.
+This CLI is pinned to the `/v1/` REST API contract. If you are integrating
+programmatically and want a stable contract, prefer the REST API directly;
+the CLI is a convenience layer over it.
 
 ## Contributing
 

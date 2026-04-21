@@ -33,7 +33,6 @@ dependencies = [
 goodeye = "goodeye_cli.__main__:main"
 
 [project.urls]
-Homepage = "https://mcp.goodeyelabs.com"
 Repository = "https://github.com/Goodeye-Labs/goodeye-cli"
 Issues = "https://github.com/Goodeye-Labs/goodeye-cli/issues"
 
