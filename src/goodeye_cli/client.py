@@ -1,0 +1,299 @@
+"""HTTP client wrapper around the Goodeye REST API.
+
+Sync-first (the CLI is sync), built on ``httpx.Client``. Injects ``Authorization``
+when an API key is present, sends a ``User-Agent`` that identifies the CLI
+version, and translates non-2xx responses into typed ``errors.GoodeyeError``
+subclasses.
+
+The client also speaks directly to WorkOS for the device authorization + token
+poll endpoints because those aren't proxied by the Goodeye server.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import httpx
+
+from goodeye_cli import __version__
+from goodeye_cli.errors import GoodeyeError, error_from_body
+from goodeye_cli.wire import (
+    ApiKeyCreated,
+    ApiKeyList,
+    ClientConfig,
+    DeviceAuthResponse,
+    ExchangeResult,
+    MeResponse,
+    SignupVerifyResult,
+    SkillDeleteResult,
+    SkillDetail,
+    SkillList,
+    SkillSaveResult,
+    SkillVisibilityResult,
+)
+
+
+def _user_agent() -> str:
+    return f"goodeye-cli/{__version__}"
+
+
+def _raise_for_status(response: httpx.Response) -> None:
+    if response.is_success:
+        return
+    body: dict[str, Any] | None
+    try:
+        parsed = response.json()
+        body = parsed if isinstance(parsed, dict) else None
+    except (ValueError, httpx.DecodingError):
+        body = None
+    raise error_from_body(response.status_code, body)
+
+
+class GoodeyeClient:
+    """Sync HTTP client for the Goodeye REST API.
+
+    Use as a context manager to ensure the underlying connection pool is closed::
+
+        with GoodeyeClient(server="https://mcp.goodeyelabs.com") as client:
+            me = client.get_me()
+    """
+
+    def __init__(
+        self,
+        server: str,
+        *,
+        api_key: str | None = None,
+        timeout: float = 30.0,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        self.server = server.rstrip("/")
+        self.api_key = api_key
+        headers = {"User-Agent": _user_agent(), "Accept": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        self._http = httpx.Client(
+            base_url=self.server,
+            headers=headers,
+            timeout=timeout,
+            transport=transport,
+        )
+
+    # ----- context manager plumbing -----
+    def __enter__(self) -> GoodeyeClient:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        self._http.close()
+
+    # ----- low-level helpers -----
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json_body: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        accept: str | None = None,
+    ) -> httpx.Response:
+        headers: dict[str, str] = {}
+        if accept is not None:
+            headers["Accept"] = accept
+        response = self._http.request(
+            method,
+            path,
+            json=json_body,
+            params=params,
+            headers=headers or None,
+        )
+        _raise_for_status(response)
+        return response
+
+    # ----- client config / auth -----
+    def get_client_config(self) -> ClientConfig:
+        response = self._request("GET", "/.well-known/goodeye-client-config")
+        return ClientConfig.model_validate(response.json())
+
+    def signup(self, email: str) -> None:
+        self._request("POST", "/v1/signup", json_body={"email": email})
+
+    def signup_verify(self, email: str, code: str) -> SignupVerifyResult:
+        response = self._request(
+            "POST", "/v1/signup/verify", json_body={"email": email, "code": code}
+        )
+        return SignupVerifyResult.model_validate(response.json())
+
+    def login(self, email: str) -> None:
+        self._request("POST", "/v1/login", json_body={"email": email})
+
+    def login_verify(self, email: str, code: str) -> SignupVerifyResult:
+        response = self._request(
+            "POST", "/v1/login/verify", json_body={"email": email, "code": code}
+        )
+        return SignupVerifyResult.model_validate(response.json())
+
+    def exchange(self, hostname: str | None = None) -> ExchangeResult:
+        body: dict[str, Any] = {}
+        if hostname:
+            body["hostname"] = hostname
+        response = self._request("POST", "/v1/auth/exchange", json_body=body)
+        return ExchangeResult.model_validate(response.json())
+
+    # ----- me / api keys -----
+    def get_me(self) -> MeResponse:
+        response = self._request("GET", "/v1/me")
+        return MeResponse.model_validate(response.json())
+
+    def create_api_key(self, name: str) -> ApiKeyCreated:
+        response = self._request("POST", "/v1/api-keys", json_body={"name": name})
+        return ApiKeyCreated.model_validate(response.json())
+
+    def list_api_keys(self, limit: int = 50, cursor: str | None = None) -> ApiKeyList:
+        params: dict[str, Any] = {"limit": limit}
+        if cursor:
+            params["cursor"] = cursor
+        response = self._request("GET", "/v1/api-keys", params=params)
+        return ApiKeyList.model_validate(response.json())
+
+    def revoke_api_key(self, key_id: str) -> None:
+        self._request("DELETE", f"/v1/api-keys/{key_id}")
+
+    # ----- skills -----
+    def list_skills(
+        self,
+        filter_: str | None = None,
+        tag: str | None = None,
+        search: str | None = None,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> SkillList:
+        params: dict[str, Any] = {"limit": limit}
+        if filter_:
+            params["filter"] = filter_
+        if tag:
+            params["tag"] = tag
+        if search:
+            params["search"] = search
+        if cursor:
+            params["cursor"] = cursor
+        response = self._request("GET", "/v1/skills", params=params)
+        return SkillList.model_validate(response.json())
+
+    def get_skill(
+        self,
+        id_or_slug: str,
+        *,
+        version: int | None = None,
+        accept_markdown: bool = False,
+    ) -> SkillDetail | str:
+        """Fetch a skill. Returns a ``SkillDetail`` for JSON responses or a raw
+        markdown string when ``accept_markdown=True``.
+        """
+        params: dict[str, Any] = {}
+        if version is not None:
+            params["version"] = version
+        accept = "text/markdown" if accept_markdown else "application/json"
+        response = self._request("GET", f"/v1/skills/{id_or_slug}", params=params, accept=accept)
+        if accept_markdown:
+            return response.text
+        return SkillDetail.model_validate(response.json())
+
+    def save_skill(
+        self,
+        *,
+        slug: str,
+        body: str,
+        manifest: dict[str, Any],
+        visibility: str = "private",
+        skill_id: str | None = None,
+    ) -> SkillSaveResult:
+        payload: dict[str, Any] = {
+            "slug": slug,
+            "body": body,
+            "manifest": manifest,
+            "visibility": visibility,
+        }
+        if skill_id:
+            payload["skill_id"] = skill_id
+        response = self._request("POST", "/v1/skills", json_body=payload)
+        return SkillSaveResult.model_validate(response.json())
+
+    def set_skill_visibility(self, skill_id: str, visibility: str) -> SkillVisibilityResult:
+        response = self._request(
+            "PUT",
+            f"/v1/skills/{skill_id}/visibility",
+            json_body={"visibility": visibility},
+        )
+        return SkillVisibilityResult.model_validate(response.json())
+
+    def delete_skill(self, skill_id: str) -> SkillDeleteResult:
+        response = self._request("DELETE", f"/v1/skills/{skill_id}")
+        return SkillDeleteResult.model_validate(response.json())
+
+    def get_design_prompt(self) -> dict[str, Any]:
+        response = self._request("GET", "/v1/design/workflow-prompt")
+        data = response.json()
+        if not isinstance(data, dict):
+            raise GoodeyeError(
+                slug="internal_error",
+                message="Unexpected response from /v1/design/workflow-prompt.",
+            )
+        return data
+
+
+def request_device_authorization(
+    device_authorization_uri: str,
+    client_id: str,
+    *,
+    timeout: float = 30.0,
+    transport: httpx.BaseTransport | None = None,
+) -> DeviceAuthResponse:
+    """Issue the initial device-authorization request to WorkOS."""
+    with httpx.Client(
+        timeout=timeout, transport=transport, headers={"User-Agent": _user_agent()}
+    ) as http:
+        response = http.post(device_authorization_uri, data={"client_id": client_id})
+    if response.is_error:
+        body: dict[str, Any] | None
+        try:
+            parsed = response.json()
+            body = parsed if isinstance(parsed, dict) else None
+        except (ValueError, httpx.DecodingError):
+            body = None
+        raise error_from_body(response.status_code, body)
+    return DeviceAuthResponse.model_validate(response.json())
+
+
+def poll_device_token(
+    token_uri: str,
+    client_id: str,
+    device_code: str,
+    *,
+    timeout: float = 30.0,
+    transport: httpx.BaseTransport | None = None,
+) -> tuple[int, dict[str, Any]]:
+    """Single poll against the WorkOS token endpoint.
+
+    Returns ``(status_code, parsed_json)``. Callers inspect status + body to
+    decide whether to continue polling (``authorization_pending`` / ``slow_down``)
+    or stop (``200`` success, any other error).
+    """
+    with httpx.Client(
+        timeout=timeout, transport=transport, headers={"User-Agent": _user_agent()}
+    ) as http:
+        response = http.post(
+            token_uri,
+            data={
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                "client_id": client_id,
+                "device_code": device_code,
+            },
+        )
+    try:
+        parsed = response.json()
+        body: dict[str, Any] = parsed if isinstance(parsed, dict) else {}
+    except (ValueError, httpx.DecodingError):
+        body = {}
+    return response.status_code, body

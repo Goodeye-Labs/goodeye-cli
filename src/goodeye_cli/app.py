@@ -1,0 +1,69 @@
+"""Typer app root. Wires subcommands and a global error handler."""
+
+from __future__ import annotations
+
+import sys
+
+import typer
+from rich.console import Console
+
+from goodeye_cli import __version__
+from goodeye_cli.commands import auth as auth_cmds
+from goodeye_cli.commands import design as design_cmd
+from goodeye_cli.commands import login as login_cmd
+from goodeye_cli.commands import logout as logout_cmd
+from goodeye_cli.commands import signup as signup_cmd
+from goodeye_cli.commands import skills as skills_cmds
+from goodeye_cli.commands import whoami as whoami_cmd
+from goodeye_cli.errors import GoodeyeError
+
+app = typer.Typer(
+    name="goodeye",
+    help="Public CLI for Goodeye - manage AI workflow skills from the terminal.",
+    no_args_is_help=True,
+    add_completion=False,
+)
+
+# Top-level commands.
+app.command("login")(login_cmd.login)
+app.command("signup")(signup_cmd.signup)
+app.command("logout")(logout_cmd.logout)
+app.command("whoami")(whoami_cmd.whoami)
+app.command("design")(design_cmd.design)
+
+# Command groups.
+app.add_typer(auth_cmds.app, name="auth", help="Manage API keys.")
+app.add_typer(skills_cmds.app, name="skills", help="Browse and manage skills.")
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f"goodeye {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _root(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show the CLI version and exit.",
+    ),
+) -> None:
+    """Global options processed before any subcommand."""
+    # Body intentionally empty; the callback fires only to register the option.
+    _ = version
+
+
+def main() -> None:
+    """Console-script entrypoint with a structured-error-friendly wrapper."""
+    console = Console(stderr=True)
+    try:
+        app()
+    except GoodeyeError as exc:
+        console.print(f"[bold red]{exc.slug}[/bold red]: {exc.message}")
+        if exc.hint:
+            console.print(f"[dim]hint: {exc.hint}[/dim]")
+        sys.exit(1)
