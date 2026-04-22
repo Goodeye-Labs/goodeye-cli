@@ -1,14 +1,14 @@
 [project]
 name = "goodeye"
 version = "0.1.1"
-description = "Public CLI for Goodeye - manage AI workflow skills from the terminal."
+description = "Goodeye CLI: share and run outcome-aligned AI workflows from the terminal."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.12"
 authors = [
   { name = "Goodeye Labs" },
 ]
-keywords = ["goodeye", "cli", "ai", "workflows", "mcp"]
+keywords = ["goodeye", "cli", "ai", "agents", "llm", "mcp", "skills", "workflows"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",
@@ -17,6 +17,7 @@ classifiers = [
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
   "Topic :: Software Development",
   "Topic :: Utilities",
 ]
