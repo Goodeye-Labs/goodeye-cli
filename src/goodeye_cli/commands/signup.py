@@ -19,8 +19,8 @@ def signup(
 ) -> None:
     """Create a Goodeye account.
 
-    Uses the magic-auth flow: we email a one-time code, you paste it back, and
-    we mint your initial API key.
+    We email a one-time code to confirm your address, then sign you in on this
+    machine.
     """
     console = Console()
     server = get_server()

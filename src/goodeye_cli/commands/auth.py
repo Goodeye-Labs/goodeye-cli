@@ -53,7 +53,7 @@ def create_key(
     name: str = typer.Option(..., "--name", "-n", help="Human-readable name for the key."),
     copy: bool = typer.Option(False, "--copy", help="Copy the key to the clipboard."),
 ) -> None:
-    """Mint a new API key. The secret is shown exactly once."""
+    """Create a new API key. The secret is shown once - save it somewhere safe."""
     console = Console()
     with _require_client() as client:
         created = client.create_api_key(name)
@@ -75,9 +75,9 @@ def create_key(
 
 @app.command("list-keys")
 def list_keys(
-    json_output: bool = typer.Option(False, "--json", help="Emit raw JSON."),
+    json_output: bool = typer.Option(False, "--json", help="Print results as JSON."),
 ) -> None:
-    """List your API keys (secrets are never returned)."""
+    """List your API keys. Secrets are never shown."""
     console = Console()
     with _require_client() as client:
         # Auto-follow cursor so we show everything the user owns.
@@ -112,7 +112,7 @@ def revoke_key(
         ..., help="Key ID (ULID) to revoke; run `goodeye auth list-keys` to find it."
     ),
 ) -> None:
-    """Revoke (soft-delete) an API key by ID."""
+    """Revoke an API key. The key stops working immediately."""
     console = Console()
     with _require_client() as client:
         client.revoke_api_key(key_id)

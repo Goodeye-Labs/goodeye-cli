@@ -36,11 +36,11 @@ def _render_prompt_pack(payload: dict[str, Any]) -> str | None:
 
 
 def design(
-    json_output: bool = typer.Option(False, "--json", help="Emit raw JSON envelope."),
+    json_output: bool = typer.Option(False, "--json", help="Print the full response as JSON."),
 ) -> None:
-    """Print the Goodeye workflow-designer prompt pack to stdout.
+    """Print the workflow-designer prompt to stdout.
 
-    Save to a file, then load it as context in your AI assistant session:
+    Pipe it into your AI assistant to start designing a skill + verifier:
 
     \b
         goodeye design > prompt.md

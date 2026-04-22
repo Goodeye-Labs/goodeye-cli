@@ -8,12 +8,11 @@ from goodeye_cli.config import delete_credentials
 
 
 def logout() -> None:
-    """Delete local credentials.
+    """Sign out on this machine by removing saved credentials.
 
-    This does **not** revoke the key server-side. Run ``goodeye auth list-keys``
-    (while still authenticated) or use the REST API to revoke keys you no longer
-    want to be usable. If you already deleted the local credentials, sign in
-    again to manage existing keys.
+    Your API key stays valid on the server. To actually disable it, run
+    ``goodeye auth revoke-key <id>`` before logging out (or sign back in
+    later to manage existing keys).
     """
     console = Console()
     removed = delete_credentials()
@@ -22,6 +21,6 @@ def logout() -> None:
     else:
         console.print("[yellow]No local credentials to remove.[/yellow]")
     console.print(
-        "Note: your API key is still valid on the server. Run "
+        "Note: your API key is still valid on the server. Sign in again and run "
         "`goodeye auth list-keys` to see it, or `goodeye auth revoke-key <id>` to revoke it."
     )

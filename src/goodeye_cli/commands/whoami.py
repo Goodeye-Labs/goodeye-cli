@@ -13,15 +13,12 @@ from goodeye_cli.errors import AuthRequired
 
 
 def whoami(
-    json_output: bool = typer.Option(False, "--json", help="Emit raw JSON."),
+    json_output: bool = typer.Option(False, "--json", help="Print results as JSON."),
 ) -> None:
-    """Show which user the current credentials identify.
+    """Show who you're signed in as.
 
-    By default, prints just the authenticated email. When the active server
-    differs from the built-in default (``GOODEYE_SERVER`` set, or a
-    credentials file pointing elsewhere), the server URL is included too so
-    you can't accidentally run destructive commands against the wrong
-    environment.
+    Prints your email. If you're signed in to a non-default server, the
+    server URL is shown too so you can see which environment you're hitting.
     """
     console = Console()
     server = get_server()

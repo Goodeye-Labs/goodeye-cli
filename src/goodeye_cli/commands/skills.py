@@ -41,9 +41,9 @@ def list_cmd(
     ),
     tag: str | None = typer.Option(None, "--tag", "-t", help="Filter by tag."),
     search: str | None = typer.Option(None, "--search", "-s", help="Search query."),
-    json_output: bool = typer.Option(False, "--json", help="Emit raw JSON."),
+    json_output: bool = typer.Option(False, "--json", help="Print results as JSON."),
 ) -> None:
-    """List skills visible to the caller. Auto-follows pagination."""
+    """List skills you can access."""
     console = Console()
     items: list[Any] = []
     with _client(require_auth=False) as client:
@@ -88,10 +88,10 @@ def get_cmd(
         None, "--output", "-o", help="Write body to this path instead of stdout."
     ),
     json_output: bool = typer.Option(
-        False, "--json", help="Return the JSON envelope (default is raw markdown)."
+        False, "--json", help="Print the full skill record as JSON instead of markdown."
     ),
 ) -> None:
-    """Fetch a skill. Emits raw markdown by default; use ``--json`` for the envelope."""
+    """Download a skill. Prints the skill's markdown to stdout."""
     console = Console(stderr=True)
     with _client(require_auth=False) as client:
         result = client.get_skill(id_or_name, version=version, accept_markdown=not json_output)
@@ -256,7 +256,7 @@ def delete(
     skill_id: str = typer.Argument(..., help="Skill ID or name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
-    """Soft-delete a skill."""
+    """Delete a skill you own."""
     console = Console()
     if not yes:
         confirm = typer.confirm(f"Delete skill {skill_id}?", default=False)

@@ -17,17 +17,16 @@ def login(
         None,
         "--email",
         "-e",
-        help="Use the magic-auth flow with this email. Omit for the device-code flow.",
+        help="Sign in by email code instead of opening the browser.",
     ),
 ) -> None:
-    """Authenticate this machine with Goodeye.
+    """Sign in to Goodeye on this machine.
 
-    With no ``--email``, opens your browser to complete a WorkOS device-code
-    approval. With ``--email``, sends a one-time code to that address and
-    prompts you to paste it back.
+    Without ``--email``, opens your browser to sign in. With ``--email``,
+    emails a one-time code to that address for you to paste back.
 
-    On success, writes ``~/.config/goodeye/credentials.json`` (mode 0600) with
-    the newly minted API key and the server URL.
+    On success, your API key is saved locally so future commands stay signed
+    in. Run ``goodeye logout`` to remove it.
     """
     console = Console()
     server = get_server()

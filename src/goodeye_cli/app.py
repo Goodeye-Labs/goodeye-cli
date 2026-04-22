@@ -19,7 +19,7 @@ from goodeye_cli.errors import GoodeyeError
 
 app = typer.Typer(
     name="goodeye",
-    help="Public CLI for Goodeye - manage AI workflow skills from the terminal.",
+    help="Goodeye CLI - manage AI workflow skills from the terminal.",
     no_args_is_help=True,
     add_completion=False,
 )

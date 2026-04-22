@@ -74,52 +74,51 @@ is stored on the server, so `goodeye skills get` round-trips a drop-in
 
 ```
 goodeye login [--email EMAIL]
-    Without --email: opens the browser for WorkOS device-code approval.
-    With --email: sends a one-time code to your inbox.
+    Sign in on this machine. Opens the browser by default; with --email,
+    signs in via a one-time code sent to your inbox.
 
 goodeye signup --email EMAIL
-    Creates an account and mints your initial API key.
+    Create a Goodeye account. A one-time code is sent to your email.
 
 goodeye logout
-    Deletes local credentials. Does not revoke the key server-side; see
-    `goodeye auth list-keys` and `goodeye auth revoke-key`.
+    Sign out on this machine by removing saved credentials. The key stays
+    valid on the server; use `goodeye auth revoke-key` to disable it.
 
 goodeye whoami
-    Shows the current user identified by your credentials.
+    Show who you're signed in as.
 
 goodeye auth create-key --name NAME [--copy]
-    Mints a new API key. The secret is printed once.
+    Create a new API key. The secret is shown once - save it somewhere safe.
 
 goodeye auth list-keys
-    Table of your API keys (secrets are never returned).
+    List your API keys. Secrets are never shown.
 
 goodeye auth revoke-key <key-id>
-    Revokes (soft-deletes) a key. <key-id> is the ULID shown by `auth list-keys`.
+    Revoke an API key. The key stops working immediately. <key-id> is the
+    ID shown by `auth list-keys`.
 
 goodeye skills list [--filter all|public|mine] [--tag TAG] [--search QUERY] [--json]
-    Paginated listing; auto-follows cursor. The ID column in the output is what
-    `delete`, `set-visibility`, and `publish --id` expect.
+    List skills you can access. The ID column in the output is accepted by
+    `get`, `delete`, and `set-visibility` (name also works).
 
 goodeye skills get <id-or-name> [--version N] [--output PATH] [--json]
-    Accepts either the skill's ULID or its name. Emits raw markdown by default;
-    --json returns the envelope.
+    Download a skill by ID or name. Prints the skill's markdown to stdout;
+    --json prints the full skill record instead.
 
-goodeye skills publish <file.md> [--id SKILL-ID] [--public] [--name NAME]
-    Creates a new skill or, when --id is given, appends a new version to the
-    existing skill with that ULID. Front-matter must include `name:` and
-    `description:`.
+goodeye skills publish <file.md> [--public] [--name NAME]
+    Publish a skill from a markdown file. If a skill with the same name
+    already exists under your account, a new version is appended. Front-matter
+    must include `name:` and `description:`.
 
-goodeye skills set-visibility <skill-id> <private|public>
-    Change visibility of a skill. <skill-id> must be the ULID (not the name);
-    run `skills list` to find it.
+goodeye skills set-visibility <id-or-name> <private|public>
+    Change a skill's visibility.
 
-goodeye skills delete <skill-id> [--yes]
-    Soft-delete a skill. <skill-id> must be the ULID (not the name);
-    run `skills list` to find it.
+goodeye skills delete <id-or-name> [--yes]
+    Delete a skill you own.
 
 goodeye design
-    Prints the workflow-designer prompt pack to stdout. Save to a file and
-    load it as context in your AI assistant session:
+    Print the workflow-designer prompt to stdout. Pipe it into your AI
+    assistant to start designing a skill + verifier:
         goodeye design > prompt.md
 ```
 
