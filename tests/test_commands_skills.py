@@ -114,7 +114,8 @@ def test_skills_get_json_flag(tmp_config_paths: ConfigPaths, monkeypatch) -> Non
                 "version": 1,
                 "body": "hi",
                 "description": "example skill",
-                "manifest": {},
+                "outcome": "ship more reliable refunds",
+                "tags": ["demo"],
             },
         )
     )
@@ -122,6 +123,7 @@ def test_skills_get_json_flag(tmp_config_paths: ConfigPaths, monkeypatch) -> Non
     result = runner.invoke(app, ["skills", "get", "example", "--json"])
     assert result.exit_code == 0, result.output
     assert '"name": "example"' in result.output
+    assert '"outcome": "ship more reliable refunds"' in result.output
 
 
 @respx.mock
@@ -157,9 +159,11 @@ def test_publish_minimal_front_matter(
     assert sent["name"] == "hello"
     assert sent["description"].startswith("Say hi")
     assert sent["visibility"] == "private"
-    # No manifest / no tags in the payload when front-matter doesn't define them.
-    assert "manifest" not in sent
+    # No discovery facets in the payload when front-matter omits them.
+    assert "outcome" not in sent
     assert "tags" not in sent
+    # Server dropped the nested manifest field on Apr 22, 2026.
+    assert "manifest" not in sent
     # Body round-trips with the front-matter intact so consumers can drop the
     # downloaded file into ~/.claude/skills/hello/SKILL.md unchanged.
     assert sent["body"].startswith("---\n")
@@ -211,7 +215,7 @@ def test_publish_missing_description_errors(
 
 
 @respx.mock
-def test_publish_tags_and_manifest(
+def test_publish_tags_and_outcome(
     tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
@@ -219,10 +223,9 @@ def test_publish_tags_and_manifest(
     skill_file.write_text(
         "---\n"
         "name: rich-skill\n"
-        "description: A skill with verifier metadata.\n"
+        "description: A skill with discovery facets.\n"
         "tags: [csv, stripe]\n"
-        "manifest:\n"
-        "  outcome: Reduce refund-row errors\n"
+        "outcome: Reduce refund-row errors\n"
         "---\n"
         "# Body\n",
     )
@@ -243,7 +246,88 @@ def test_publish_tags_and_manifest(
 
     sent = _json.loads(route.calls.last.request.content.decode())
     assert sent["tags"] == ["csv", "stripe"]
-    assert sent["manifest"] == {"outcome": "Reduce refund-row errors"}
+    assert sent["outcome"] == "Reduce refund-row errors"
+    assert "manifest" not in sent
+
+
+@respx.mock
+def test_publish_legacy_manifest_promotes_outcome_and_tags(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """Pre-cleanup files nest outcome/tags under manifest:; promote them and warn."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    skill_file = tmp_path / "legacy.md"
+    skill_file.write_text(
+        "---\n"
+        "name: legacy-skill\n"
+        "description: An old-style skill with a manifest block.\n"
+        "manifest:\n"
+        "  outcome: Reduce refund-row errors\n"
+        "  tags: [csv, stripe]\n"
+        "  kpi:\n"
+        "    name: error_rate\n"
+        "    definition: rows mislabeled / total\n"
+        "  programmatic_verifiers: []\n"
+        "---\n"
+        "# Body\n",
+    )
+    route = respx.post(f"{SERVER}/v1/skills").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "skill_id": "skl_01",
+                "version": 1,
+                "name": "legacy-skill",
+                "visibility": "private",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["skills", "publish", str(skill_file)])
+    assert result.exit_code == 0, result.output
+
+    sent = _json.loads(route.calls.last.request.content.decode())
+    assert sent["outcome"] == "Reduce refund-row errors"
+    assert sent["tags"] == ["csv", "stripe"]
+    assert "manifest" not in sent
+    assert "deprecated" in result.output.lower()
+    assert "kpi" in result.output
+    assert "programmatic_verifiers" in result.output
+
+
+@respx.mock
+def test_publish_top_level_outcome_wins_over_manifest(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """When both top-level outcome and manifest.outcome exist, top-level wins."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    skill_file = tmp_path / "mixed.md"
+    skill_file.write_text(
+        "---\n"
+        "name: mixed-skill\n"
+        "description: Has both shapes.\n"
+        "outcome: Top-level wins\n"
+        "manifest:\n"
+        "  outcome: Legacy loses\n"
+        "---\n"
+        "# Body\n",
+    )
+    route = respx.post(f"{SERVER}/v1/skills").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "skill_id": "skl_01",
+                "version": 1,
+                "name": "mixed-skill",
+                "visibility": "private",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["skills", "publish", str(skill_file)])
+    assert result.exit_code == 0, result.output
+    sent = _json.loads(route.calls.last.request.content.decode())
+    assert sent["outcome"] == "Top-level wins"
 
 
 @respx.mock

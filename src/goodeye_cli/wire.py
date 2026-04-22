@@ -8,7 +8,6 @@ do not break old CLI releases.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -72,7 +71,8 @@ class SkillDetail(_WireBase):
     version: int
     body: str
     description: str = ""
-    manifest: dict[str, Any] = Field(default_factory=dict)
+    outcome: str = ""
+    tags: list[str] = Field(default_factory=list)
     owner_user_id: str | None = None
     updated_at: datetime | None = None
 

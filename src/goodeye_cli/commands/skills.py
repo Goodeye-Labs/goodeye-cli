@@ -140,6 +140,70 @@ def _parse_front_matter(source: str) -> tuple[dict[str, Any], str]:
     return {}, source
 
 
+def _coerce_legacy_manifest(front_matter: dict[str, Any]) -> dict[str, Any]:
+    raw = front_matter.get("manifest")
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValidationFailed(
+            slug="validation_error",
+            message="`manifest` in front-matter must be a mapping.",
+        )
+    return dict(raw)
+
+
+def _coerce_outcome(front_matter: dict[str, Any], legacy: dict[str, Any]) -> str | None:
+    raw = front_matter.get("outcome", legacy.get("outcome"))
+    if raw is None:
+        return None
+    if isinstance(raw, str) and raw.strip():
+        return raw
+    raise ValidationFailed(
+        slug="validation_error",
+        message="`outcome` in front-matter must be a non-empty string.",
+    )
+
+
+def _coerce_tags(front_matter: dict[str, Any], legacy: dict[str, Any]) -> list[str]:
+    raw = front_matter.get("tags", legacy.get("tags"))
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return [str(t) for t in raw]
+    raise ValidationFailed(
+        slug="validation_error",
+        message="`tags` in front-matter must be a list of strings.",
+    )
+
+
+def _extract_discovery_facets(
+    front_matter: dict[str, Any], *, console: Console
+) -> tuple[str | None, list[str]]:
+    """Pull outcome+tags from the front-matter, promoting legacy manifest keys."""
+    legacy = _coerce_legacy_manifest(front_matter)
+    outcome = _coerce_outcome(front_matter, legacy)
+    tags = _coerce_tags(front_matter, legacy)
+    if legacy:
+        dropped = sorted(set(legacy) - {"outcome", "tags"})
+        if dropped:
+            console.print(
+                "[yellow]Warning:[/yellow] front-matter `manifest:` block is "
+                "deprecated. Promoted `outcome` / `tags` to the top level; "
+                f"dropped: {', '.join(dropped)}. The server no longer stores "
+                "these fields; move verifier scripts and cURLs into the body."
+            )
+    return outcome, tags
+
+
+def _resolve_visibility(*, public: bool, front_matter: dict[str, Any]) -> str:
+    if public:
+        return "public"
+    fm_visibility = front_matter.get("visibility")
+    if fm_visibility in ("public", "private"):
+        return str(fm_visibility)
+    return "private"
+
+
 @app.command("publish")
 def publish(
     file: Path = typer.Argument(..., exists=True, readable=True, help="Markdown file to upload."),
@@ -156,14 +220,21 @@ def publish(
     ---
     name: incident-postmortem
     description: Draft a postmortem from an incident transcript. Use when ...
-    # Optional:
+    # Optional discovery facets:
     # visibility: public
     # tags: [sre, postmortem]
-    # manifest: { outcome: ..., kpi: {...}, ... }  # full verifier block
+    # outcome: Reduce mean-time-to-postmortem from days to hours.
     ---
 
     Only ``name`` and ``description`` are required. Everything else is optional.
     ``--public`` overrides the front-matter ``visibility`` when provided.
+
+    Verifier scripts and Truesight cURLs belong in the body as fenced code
+    blocks; the registry treats the body as opaque markdown. Pre-cleanup
+    files that nest ``outcome`` / ``tags`` under a ``manifest:`` block are
+    still accepted for back-compat: those two keys are promoted to the
+    top level and the rest of the manifest is dropped (the server no
+    longer stores ``kpi`` / ``programmatic_verifiers`` / etc.).
     """
     console = Console()
     source = file.read_text(encoding="utf-8")
@@ -188,41 +259,15 @@ def publish(
             message="Missing `description`. Add `description:` to the front-matter.",
         )
 
-    manifest_raw = front_matter.get("manifest")
-    if manifest_raw is not None and not isinstance(manifest_raw, dict):
-        raise ValidationFailed(
-            slug="validation_error",
-            message="`manifest` in front-matter must be a mapping.",
-        )
-    manifest: dict[str, Any] | None = dict(manifest_raw) if manifest_raw else None
-
-    tags_raw = front_matter.get("tags")
-    if tags_raw is None:
-        tags: list[str] = []
-    elif isinstance(tags_raw, list):
-        tags = [str(t) for t in tags_raw]
-    else:
-        raise ValidationFailed(
-            slug="validation_error",
-            message="`tags` in front-matter must be a list of strings.",
-        )
-
-    visibility = (
-        "public"
-        if public
-        else (
-            str(front_matter.get("visibility"))
-            if front_matter.get("visibility") in ("public", "private")
-            else "private"
-        )
-    )
+    outcome, tags = _extract_discovery_facets(front_matter, console=console)
+    visibility = _resolve_visibility(public=public, front_matter=front_matter)
 
     with _client(require_auth=True) as client:
         result = client.save_skill(
             name=effective_name,
             description=description,
             body=body,
-            manifest=manifest,
+            outcome=outcome,
             tags=tags,
             visibility=visibility,
         )

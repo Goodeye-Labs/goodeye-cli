@@ -132,6 +132,28 @@ def test_get_skill_json_returns_detail_model() -> None:
         "version": 1,
         "body": "hello",
         "description": "ex",
+        "outcome": "ship reliable refunds",
+        "tags": ["demo"],
+    }
+    respx.get(f"{SERVER}/v1/skills/example").mock(return_value=httpx.Response(200, json=payload))
+    with GoodeyeClient(SERVER) as client:
+        result = client.get_skill("example", accept_markdown=False)
+    assert not isinstance(result, str)
+    assert result.name == "example"
+    assert result.outcome == "ship reliable refunds"
+    assert result.tags == ["demo"]
+
+
+@respx.mock
+def test_get_skill_json_tolerates_legacy_manifest_field() -> None:
+    """Older deploys may still echo a `manifest` field; SkillDetail should ignore it."""
+    payload = {
+        "id": "skl_1",
+        "name": "example",
+        "visibility": "public",
+        "version": 1,
+        "body": "hello",
+        "description": "ex",
         "manifest": {"tags": ["x"]},
     }
     respx.get(f"{SERVER}/v1/skills/example").mock(return_value=httpx.Response(200, json=payload))
@@ -139,7 +161,8 @@ def test_get_skill_json_returns_detail_model() -> None:
         result = client.get_skill("example", accept_markdown=False)
     assert not isinstance(result, str)
     assert result.name == "example"
-    assert result.manifest == {"tags": ["x"]}
+    assert not hasattr(result, "manifest")
+    assert result.tags == []
 
 
 @respx.mock

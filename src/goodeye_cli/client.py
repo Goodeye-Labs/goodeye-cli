@@ -206,18 +206,26 @@ class GoodeyeClient:
         name: str,
         description: str,
         body: str,
-        manifest: dict[str, Any] | None = None,
+        outcome: str | None = None,
         tags: list[str] | None = None,
         visibility: str = "private",
     ) -> SkillSaveResult:
+        """POST /v1/skills with the flat ``save_skill`` payload.
+
+        ``outcome`` and ``tags`` are top-level discovery facets surfaced by
+        ``list_skills``. The legacy ``manifest`` JSONB shape (with nested
+        ``kpi`` / ``programmatic_verifiers`` / ``semantic_verifiers`` / etc)
+        was removed server-side on Apr 22, 2026; verifier scripts and
+        Truesight cURLs now live as fenced blocks inside ``body``.
+        """
         payload: dict[str, Any] = {
             "name": name,
             "description": description,
             "body": body,
             "visibility": visibility,
         }
-        if manifest:
-            payload["manifest"] = manifest
+        if outcome:
+            payload["outcome"] = outcome
         if tags:
             payload["tags"] = list(tags)
         response = self._request("POST", "/v1/skills", json_body=payload)
