@@ -57,7 +57,7 @@ def test_device_code_login_happy_path_after_pending() -> None:
     respx.post(f"{SERVER}/v1/auth/exchange").mock(
         return_value=httpx.Response(
             200,
-            json={"api_key": "good_live_EXAMPLE", "key_id": "key_01", "user_id": "usr_01"},
+            json={"api_key": "good_live_EXAMPLE", "key_id": "key_01"},
         )
     )
 
@@ -106,9 +106,7 @@ def test_device_code_login_handles_slow_down() -> None:
     )
     respx.post(TOKEN_URI).mock(side_effect=lambda request: next(responses))
     respx.post(f"{SERVER}/v1/auth/exchange").mock(
-        return_value=httpx.Response(
-            200, json={"api_key": "good_live_EXAMPLE", "key_id": "k", "user_id": "u"}
-        )
+        return_value=httpx.Response(200, json={"api_key": "good_live_EXAMPLE", "key_id": "k"})
     )
 
     clock = FakeClock()
@@ -196,7 +194,7 @@ def test_magic_auth_flow_login_happy_path() -> None:
         return_value=httpx.Response(202, json={"status": "code_sent"})
     )
     respx.post(f"{SERVER}/v1/login/verify").mock(
-        return_value=httpx.Response(200, json={"api_key": "good_live_EXAMPLE", "user_id": "usr_01"})
+        return_value=httpx.Response(200, json={"api_key": "good_live_EXAMPLE"})
     )
     api_key = magic_auth_flow(SERVER, "e@x.com", intent="login", prompt_code=lambda: "123456")
     assert api_key == "good_live_EXAMPLE"
@@ -208,7 +206,7 @@ def test_magic_auth_flow_signup_happy_path() -> None:
         return_value=httpx.Response(202, json={"status": "code_sent"})
     )
     respx.post(f"{SERVER}/v1/signup/verify").mock(
-        return_value=httpx.Response(200, json={"api_key": "good_live_EXAMPLE", "user_id": "usr_01"})
+        return_value=httpx.Response(200, json={"api_key": "good_live_EXAMPLE"})
     )
     api_key = magic_auth_flow(SERVER, "e@x.com", intent="signup", prompt_code=lambda: "123456")
     assert api_key == "good_live_EXAMPLE"

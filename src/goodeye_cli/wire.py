@@ -26,7 +26,6 @@ class ClientConfig(_WireBase):
 
 
 class MeResponse(_WireBase):
-    user_id: str
     email: str
 
 
@@ -95,13 +94,11 @@ class SkillDeleteResult(_WireBase):
 
 class SignupVerifyResult(_WireBase):
     api_key: str
-    user_id: str
 
 
 class ExchangeResult(_WireBase):
     api_key: str
     key_id: str
-    user_id: str
 
 
 class DeviceAuthResponse(_WireBase):

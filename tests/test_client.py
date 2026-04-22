@@ -21,20 +21,15 @@ SERVER = "https://example.test"
 
 @respx.mock
 def test_get_me_happy_path() -> None:
-    respx.get(f"{SERVER}/v1/me").mock(
-        return_value=httpx.Response(200, json={"user_id": "usr_1", "email": "e@x.com"})
-    )
+    respx.get(f"{SERVER}/v1/me").mock(return_value=httpx.Response(200, json={"email": "e@x.com"}))
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
         me = client.get_me()
-    assert me.user_id == "usr_1"
     assert me.email == "e@x.com"
 
 
 @respx.mock
 def test_authorization_header_is_sent() -> None:
-    route = respx.get(f"{SERVER}/v1/me").mock(
-        return_value=httpx.Response(200, json={"user_id": "u", "email": "e"})
-    )
+    route = respx.get(f"{SERVER}/v1/me").mock(return_value=httpx.Response(200, json={"email": "e"}))
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
         client.get_me()
     assert route.calls.last.request.headers["Authorization"] == "Bearer good_live_EXAMPLE"
@@ -52,9 +47,7 @@ def test_no_auth_header_when_missing_key() -> None:
 
 @respx.mock
 def test_user_agent_is_set() -> None:
-    route = respx.get(f"{SERVER}/v1/me").mock(
-        return_value=httpx.Response(200, json={"user_id": "u", "email": "e"})
-    )
+    route = respx.get(f"{SERVER}/v1/me").mock(return_value=httpx.Response(200, json={"email": "e"}))
     with GoodeyeClient(SERVER, api_key="k") as client:
         client.get_me()
     assert route.calls.last.request.headers["User-Agent"].startswith("goodeye-cli/")
@@ -186,7 +179,7 @@ def test_exchange_sends_hostname() -> None:
     route = respx.post(f"{SERVER}/v1/auth/exchange").mock(
         return_value=httpx.Response(
             200,
-            json={"api_key": "good_live_EXAMPLE", "key_id": "key_01", "user_id": "usr_01"},
+            json={"api_key": "good_live_EXAMPLE", "key_id": "key_01"},
         )
     )
     with GoodeyeClient(SERVER, api_key="jwt_placeholder") as client:

@@ -26,16 +26,49 @@ def _env(monkeypatch, tmp_config_paths: ConfigPaths, *, api_key: str | None) -> 
 
 
 @respx.mock
-def test_whoami_prints_user(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+def test_whoami_shows_server_when_overridden(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    """Non-default GOODEYE_SERVER should surface in the output so callers
+    can't mistake a staging instance for prod."""
     _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE")
-    respx.get(f"{SERVER}/v1/me").mock(
-        return_value=httpx.Response(200, json={"user_id": "usr_01", "email": "e@x.com"})
+    respx.get(f"{SERVER}/v1/me").mock(return_value=httpx.Response(200, json={"email": "e@x.com"}))
+    runner = CliRunner()
+    result = runner.invoke(app, ["whoami"])
+    assert result.exit_code == 0, result.output
+    assert "Server:" in result.output
+    assert SERVER in result.output
+    assert "e@x.com" in result.output
+    assert "User ID" not in result.output
+
+
+@respx.mock
+def test_whoami_hides_server_when_default(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    """On the built-in default server, omit the noisy server line."""
+    from goodeye_cli.config import DEFAULT_SERVER
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_config_paths.config_dir.parent))
+    monkeypatch.delenv("GOODEYE_SERVER", raising=False)
+    monkeypatch.setenv("GOODEYE_API_KEY", "good_live_EXAMPLE")
+    respx.get(f"{DEFAULT_SERVER}/v1/me").mock(
+        return_value=httpx.Response(200, json={"email": "e@x.com"})
     )
     runner = CliRunner()
     result = runner.invoke(app, ["whoami"])
     assert result.exit_code == 0, result.output
-    assert "usr_01" in result.output
+    assert "Server:" not in result.output
     assert "e@x.com" in result.output
+
+
+@respx.mock
+def test_whoami_json_includes_server_only_when_overridden(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE")
+    respx.get(f"{SERVER}/v1/me").mock(return_value=httpx.Response(200, json={"email": "e@x.com"}))
+    runner = CliRunner()
+    result = runner.invoke(app, ["whoami", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output.strip())
+    assert payload == {"email": "e@x.com", "server": SERVER}
 
 
 def test_whoami_without_credentials_errors(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
@@ -52,7 +85,7 @@ def test_signup_end_to_end_writes_credentials(tmp_config_paths: ConfigPaths, mon
         return_value=httpx.Response(202, json={"status": "code_sent"})
     )
     respx.post(f"{SERVER}/v1/signup/verify").mock(
-        return_value=httpx.Response(200, json={"api_key": "good_live_EXAMPLE", "user_id": "usr_01"})
+        return_value=httpx.Response(200, json={"api_key": "good_live_EXAMPLE"})
     )
 
     # Patch the magic_auth_flow's code prompt via monkeypatching Console.input.
@@ -74,9 +107,7 @@ def test_login_with_email_writes_credentials(tmp_config_paths: ConfigPaths, monk
         return_value=httpx.Response(202, json={"status": "code_sent"})
     )
     respx.post(f"{SERVER}/v1/login/verify").mock(
-        return_value=httpx.Response(
-            200, json={"api_key": "good_live_EXAMPLE_L", "user_id": "usr_01"}
-        )
+        return_value=httpx.Response(200, json={"api_key": "good_live_EXAMPLE_L"})
     )
     runner = CliRunner()
     result = runner.invoke(app, ["login", "--email", "e@x.com"], input="654321\n")
