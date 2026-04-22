@@ -134,7 +134,39 @@ def test_logout_with_no_credentials_is_friendly(tmp_config_paths: ConfigPaths, m
 
 
 @respx.mock
-def test_design_prints_prompt(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+def test_design_renders_skill_md_and_references(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    """The server returns ``{skill_md, references}``; the CLI should
+    concatenate both into one pipe-ready markdown doc."""
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE")
+    respx.get(f"{SERVER}/v1/design/workflow-prompt").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "skill_md": "# Designer\n\nStart here.\n",
+                "references": {
+                    "references/02-kpi.md": "# KPI ranking\n\nDetails.",
+                    "references/01-outcome.md": "# Outcome scoping\n\nDetails.",
+                },
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["design"])
+    assert result.exit_code == 0, result.output
+    out = result.output
+    assert "# Designer" in out
+    assert "# Reference files" in out
+    # References are emitted in sorted path order so output is deterministic.
+    assert out.index("references/01-outcome.md") < out.index("references/02-kpi.md")
+    assert "Outcome scoping" in out and "KPI ranking" in out
+    # Raw JSON must not leak into the rendered output.
+    assert "Unrecognized design payload" not in out
+    assert '"skill_md"' not in out
+
+
+@respx.mock
+def test_design_legacy_prompt_key_still_renders(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    """Legacy payload shape (``{"prompt": ...}``) remains supported."""
     _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE")
     respx.get(f"{SERVER}/v1/design/workflow-prompt").mock(
         return_value=httpx.Response(200, json={"prompt": "Hello designer."})
@@ -149,13 +181,13 @@ def test_design_prints_prompt(tmp_config_paths: ConfigPaths, monkeypatch) -> Non
 def test_design_json_flag(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE")
     respx.get(f"{SERVER}/v1/design/workflow-prompt").mock(
-        return_value=httpx.Response(200, json={"prompt": "Hello."})
+        return_value=httpx.Response(200, json={"skill_md": "# x", "references": {}})
     )
     runner = CliRunner()
     result = runner.invoke(app, ["design", "--json"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output.strip())
-    assert payload == {"prompt": "Hello."}
+    assert payload == {"skill_md": "# x", "references": {}}
 
 
 def test_version_flag() -> None:

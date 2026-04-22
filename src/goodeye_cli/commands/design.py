@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -10,6 +11,28 @@ from rich.console import Console
 from goodeye_cli.client import GoodeyeClient
 from goodeye_cli.config import get_api_key, get_server
 from goodeye_cli.errors import AuthRequired
+
+
+def _render_prompt_pack(payload: dict[str, Any]) -> str | None:
+    """Collapse a `design_workflow` payload into pipe-ready markdown.
+
+    The MCP tool returns ``{"skill_md": <SKILL.md>, "references": {path: body}}``.
+    Emit the SKILL.md first, then each reference file as a sub-section so the
+    assistant on the other end of the pipe sees the full pack in order.
+    """
+    skill_md = payload.get("skill_md")
+    if not isinstance(skill_md, str):
+        return None
+    out: list[str] = [skill_md.rstrip() + "\n"]
+    references = payload.get("references")
+    if isinstance(references, dict) and references:
+        out.append("\n---\n\n# Reference files\n")
+        for path in sorted(references):
+            body = references[path]
+            if not isinstance(body, str):
+                continue
+            out.append(f"\n## {path}\n\n{body.rstrip()}\n")
+    return "".join(out)
 
 
 def design(
@@ -36,8 +59,11 @@ def design(
         typer.echo(json.dumps(payload))
         return
 
-    # The MCP tool returns a dict with a human-readable prompt under common keys.
-    # Try the most likely keys, fall back to the whole payload.
+    rendered = _render_prompt_pack(payload)
+    if rendered is not None:
+        typer.echo(rendered)
+        return
+    # Legacy fallbacks for future payload shapes.
     for key in ("prompt", "body", "content", "text"):
         value = payload.get(key)
         if isinstance(value, str):
