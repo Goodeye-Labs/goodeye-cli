@@ -36,7 +36,7 @@ def list_cmd(
         "all",
         "--filter",
         "-f",
-        help="Scope filter: all, public, or own.",
+        help="Scope filter: all, public, or mine.",
         case_sensitive=False,
     ),
     tag: str | None = typer.Option(None, "--tag", "-t", help="Filter by manifest tag."),
@@ -70,7 +70,7 @@ def list_cmd(
     table.add_column("Visibility")
     table.add_column("Version", justify="right")
     for item in items:
-        table.add_row(item.id, item.slug, item.visibility, str(item.version))
+        table.add_row(item.id, item.slug, item.visibility, str(item.current_version))
     if not items:
         console.print("[dim]No skills matched.[/dim]")
     else:

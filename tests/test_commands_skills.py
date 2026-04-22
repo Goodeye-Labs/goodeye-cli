@@ -34,13 +34,13 @@ def test_skills_list_renders_table(tmp_config_paths: ConfigPaths, monkeypatch) -
                         "id": "skl_01",
                         "slug": "one",
                         "visibility": "public",
-                        "version": 1,
+                        "current_version": 1,
                     },
                     {
                         "id": "skl_02",
                         "slug": "two",
                         "visibility": "private",
-                        "version": 3,
+                        "current_version": 3,
                     },
                 ],
                 "next_cursor": None,
@@ -61,14 +61,18 @@ def test_skills_list_follows_cursor(tmp_config_paths: ConfigPaths, monkeypatch) 
         httpx.Response(
             200,
             json={
-                "items": [{"id": "skl_01", "slug": "a", "visibility": "public", "version": 1}],
+                "items": [
+                    {"id": "skl_01", "slug": "a", "visibility": "public", "current_version": 1}
+                ],
                 "next_cursor": "c1",
             },
         ),
         httpx.Response(
             200,
             json={
-                "items": [{"id": "skl_02", "slug": "b", "visibility": "public", "version": 1}],
+                "items": [
+                    {"id": "skl_02", "slug": "b", "visibility": "public", "current_version": 1}
+                ],
                 "next_cursor": None,
             },
         ),

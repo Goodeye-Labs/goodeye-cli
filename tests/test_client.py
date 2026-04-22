@@ -154,9 +154,9 @@ def test_list_skills_params_passthrough() -> None:
         return_value=httpx.Response(200, json={"items": [], "next_cursor": None})
     )
     with GoodeyeClient(SERVER, api_key="k") as client:
-        client.list_skills(filter_="own", tag="data", search="foo", limit=10, cursor="abc")
+        client.list_skills(filter_="mine", tag="data", search="foo", limit=10, cursor="abc")
     params = dict(route.calls.last.request.url.params)
-    assert params["filter"] == "own"
+    assert params["filter"] == "mine"
     assert params["tag"] == "data"
     assert params["search"] == "foo"
     assert params["limit"] == "10"

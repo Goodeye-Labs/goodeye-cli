@@ -34,6 +34,7 @@ class ApiKey(_WireBase):
     id: str
     name: str
     created_at: datetime
+    last_used_at: datetime | None = None
 
 
 class ApiKeyCreated(_WireBase):
@@ -52,10 +53,11 @@ class SkillSummary(_WireBase):
     id: str
     slug: str
     visibility: str
-    version: int
+    current_version: int
+    outcome: str = ""
+    tags: list[str] = Field(default_factory=list)
     updated_at: datetime | None = None
     owner_user_id: str | None = None
-    manifest: dict[str, Any] = Field(default_factory=dict)
 
 
 class SkillList(_WireBase):
