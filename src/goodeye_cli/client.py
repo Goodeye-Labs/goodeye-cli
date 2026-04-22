@@ -209,7 +209,6 @@ class GoodeyeClient:
         manifest: dict[str, Any] | None = None,
         tags: list[str] | None = None,
         visibility: str = "private",
-        skill_id: str | None = None,
     ) -> SkillSaveResult:
         payload: dict[str, Any] = {
             "name": name,
@@ -221,8 +220,6 @@ class GoodeyeClient:
             payload["manifest"] = manifest
         if tags:
             payload["tags"] = list(tags)
-        if skill_id:
-            payload["skill_id"] = skill_id
         response = self._request("POST", "/v1/skills", json_body=payload)
         return SkillSaveResult.model_validate(response.json())
 

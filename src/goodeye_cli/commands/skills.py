@@ -143,9 +143,6 @@ def _parse_front_matter(source: str) -> tuple[dict[str, Any], str]:
 @app.command("publish")
 def publish(
     file: Path = typer.Argument(..., exists=True, readable=True, help="Markdown file to upload."),
-    skill_id: str | None = typer.Option(
-        None, "--id", help="Skill ID (ULID) to append a new version to; run `goodeye skills list` to find it."
-    ),
     public: bool = typer.Option(False, "--public", help="Mark as public. Default is private."),
     name_override: str | None = typer.Option(
         None, "--name", help="Override the `name` from front-matter."
@@ -228,7 +225,6 @@ def publish(
             manifest=manifest,
             tags=tags,
             visibility=visibility,
-            skill_id=skill_id,
         )
 
     console.print(
@@ -239,7 +235,7 @@ def publish(
 
 @app.command("set-visibility")
 def set_visibility(
-    skill_id: str = typer.Argument(..., help="Skill ID (ULID); run `goodeye skills list` to find it. Names are not accepted here (unlike `skills get`)."),
+    skill_id: str = typer.Argument(..., help="Skill ID or name."),
     visibility: str = typer.Argument(..., help="`private` or `public`."),
 ) -> None:
     """Change a skill's visibility."""
@@ -252,12 +248,12 @@ def set_visibility(
         )
     with _client(require_auth=True) as client:
         result = client.set_skill_visibility(skill_id, visibility_norm)
-    console.print(f"[green]Updated[/green] {result.skill_id} -> visibility={result.visibility}")
+    console.print(f"[green]Updated[/green] {result.name} -> visibility={result.visibility}")
 
 
 @app.command("delete")
 def delete(
-    skill_id: str = typer.Argument(..., help="Skill ID (ULID) to delete; run `goodeye skills list` to find it. Names are not accepted here (unlike `skills get`)."),
+    skill_id: str = typer.Argument(..., help="Skill ID or name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
     """Soft-delete a skill."""
@@ -270,9 +266,9 @@ def delete(
     with _client(require_auth=True) as client:
         result = client.delete_skill(skill_id)
     if result.deleted:
-        console.print(f"[green]Deleted[/green] {result.skill_id}")
+        console.print(f"[green]Deleted[/green] {result.name}")
     else:
-        console.print(f"[yellow]Not deleted[/yellow] {result.skill_id}")
+        console.print(f"[yellow]Not deleted[/yellow] {result.name}")
 
 
 __all__ = [

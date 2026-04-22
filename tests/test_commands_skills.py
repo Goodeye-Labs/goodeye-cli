@@ -278,7 +278,9 @@ def test_publish_public_flag_overrides_front_matter(
 def test_skills_set_visibility(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
     respx.put(f"{SERVER}/v1/skills/skl_01/visibility").mock(
-        return_value=httpx.Response(200, json={"skill_id": "skl_01", "visibility": "public"})
+        return_value=httpx.Response(
+            200, json={"skill_id": "skl_01", "name": "skl_01", "visibility": "public"}
+        )
     )
     runner = CliRunner()
     result = runner.invoke(app, ["skills", "set-visibility", "skl_01", "public"])
@@ -289,7 +291,9 @@ def test_skills_set_visibility(tmp_config_paths: ConfigPaths, monkeypatch) -> No
 def test_skills_delete_with_yes_flag(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
     respx.delete(f"{SERVER}/v1/skills/skl_01").mock(
-        return_value=httpx.Response(200, json={"skill_id": "skl_01", "deleted": True})
+        return_value=httpx.Response(
+            200, json={"skill_id": "skl_01", "name": "skl_01", "deleted": True}
+        )
     )
     runner = CliRunner()
     result = runner.invoke(app, ["skills", "delete", "skl_01", "--yes"])

@@ -195,7 +195,9 @@ def test_exchange_sends_hostname() -> None:
 @respx.mock
 def test_delete_skill_happy_path() -> None:
     respx.delete(f"{SERVER}/v1/skills/skl_01").mock(
-        return_value=httpx.Response(200, json={"skill_id": "skl_01", "deleted": True})
+        return_value=httpx.Response(
+            200, json={"skill_id": "skl_01", "name": "skl_01", "deleted": True}
+        )
     )
     with GoodeyeClient(SERVER, api_key="k") as client:
         result = client.delete_skill("skl_01")

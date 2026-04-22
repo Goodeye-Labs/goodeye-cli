@@ -86,11 +86,13 @@ class SkillSaveResult(_WireBase):
 
 class SkillVisibilityResult(_WireBase):
     skill_id: str
+    name: str
     visibility: str
 
 
 class SkillDeleteResult(_WireBase):
     skill_id: str
+    name: str
     deleted: bool
 
 
