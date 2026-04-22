@@ -40,8 +40,10 @@ def design(
 ) -> None:
     """Print the Goodeye workflow-designer prompt pack to stdout.
 
-    Pipe this into your AI coding assistant to kick off a skill + verifier
-    design session.
+    Save to a file, then load it as context in your AI assistant session:
+
+    \b
+        goodeye design > prompt.md
     """
     console = Console(stderr=True)
     server = get_server()

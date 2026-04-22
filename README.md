@@ -93,24 +93,34 @@ goodeye auth create-key --name NAME [--copy]
 goodeye auth list-keys
     Table of your API keys (secrets are never returned).
 
-goodeye auth revoke-key <id>
-    Revokes (soft-deletes) a key.
+goodeye auth revoke-key <key-id>
+    Revokes (soft-deletes) a key. <key-id> is the ULID shown by `auth list-keys`.
 
 goodeye skills list [--filter all|public|mine] [--tag TAG] [--search QUERY] [--json]
-    Paginated listing; auto-follows cursor.
+    Paginated listing; auto-follows cursor. The ID column in the output is what
+    `delete`, `set-visibility`, and `publish --id` expect.
 
 goodeye skills get <id-or-name> [--version N] [--output PATH] [--json]
-    Emits raw markdown by default; --json returns the envelope.
+    Accepts either the skill's ULID or its name. Emits raw markdown by default;
+    --json returns the envelope.
 
-goodeye skills publish <file.md> [--id ID] [--public] [--name NAME]
-    Creates or appends a skill version. Front-matter must include `name:`
-    and `description:`.
+goodeye skills publish <file.md> [--id SKILL-ID] [--public] [--name NAME]
+    Creates a new skill or, when --id is given, appends a new version to the
+    existing skill with that ULID. Front-matter must include `name:` and
+    `description:`.
 
-goodeye skills set-visibility <id> <private|public>
-goodeye skills delete <id> [--yes]
+goodeye skills set-visibility <skill-id> <private|public>
+    Change visibility of a skill. <skill-id> must be the ULID (not the name);
+    run `skills list` to find it.
+
+goodeye skills delete <skill-id> [--yes]
+    Soft-delete a skill. <skill-id> must be the ULID (not the name);
+    run `skills list` to find it.
 
 goodeye design
-    Prints the workflow-designer prompt pack to stdout.
+    Prints the workflow-designer prompt pack to stdout. Save to a file and
+    load it as context in your AI assistant session:
+        goodeye design > prompt.md
 ```
 
 ## Configuration

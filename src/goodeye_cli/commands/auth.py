@@ -108,7 +108,7 @@ def list_keys(
 
 @app.command("revoke-key")
 def revoke_key(
-    key_id: str = typer.Argument(..., help="ID of the key to revoke."),
+    key_id: str = typer.Argument(..., help="Key ID (ULID) to revoke; run `goodeye auth list-keys` to find it."),
 ) -> None:
     """Revoke (soft-delete) an API key by ID."""
     console = Console()

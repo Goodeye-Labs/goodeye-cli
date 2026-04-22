@@ -144,7 +144,7 @@ def _parse_front_matter(source: str) -> tuple[dict[str, Any], str]:
 def publish(
     file: Path = typer.Argument(..., exists=True, readable=True, help="Markdown file to upload."),
     skill_id: str | None = typer.Option(
-        None, "--id", help="Append a new version to this existing skill ID."
+        None, "--id", help="Skill ID (ULID) to append a new version to; run `goodeye skills list` to find it."
     ),
     public: bool = typer.Option(False, "--public", help="Mark as public. Default is private."),
     name_override: str | None = typer.Option(
@@ -239,7 +239,7 @@ def publish(
 
 @app.command("set-visibility")
 def set_visibility(
-    skill_id: str = typer.Argument(..., help="Skill ID (ULID)."),
+    skill_id: str = typer.Argument(..., help="Skill ID (ULID); run `goodeye skills list` to find it. Names are not accepted here (unlike `skills get`)."),
     visibility: str = typer.Argument(..., help="`private` or `public`."),
 ) -> None:
     """Change a skill's visibility."""
@@ -257,7 +257,7 @@ def set_visibility(
 
 @app.command("delete")
 def delete(
-    skill_id: str = typer.Argument(..., help="Skill ID (ULID)."),
+    skill_id: str = typer.Argument(..., help="Skill ID (ULID) to delete; run `goodeye skills list` to find it. Names are not accepted here (unlike `skills get`)."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
     """Soft-delete a skill."""
