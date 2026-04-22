@@ -36,8 +36,10 @@ goodeye login
 # Confirm who you are
 goodeye whoami
 
-# Fetch a public skill as markdown
-goodeye skills get brand-voice > brand-voice.md
+# Fetch a public skill as markdown (copy `id` from the JSON; without a login,
+# `get` resolves public skills by UUID only, not by name)
+goodeye skills list --filter public --json
+goodeye skills get <id-from-above> > example-skill.md
 
 # Publish a local skill
 goodeye skills publish ./my-skill.md --public
@@ -53,23 +55,29 @@ required:
 ---
 name: my-skill
 description: One sentence on what this skill does and when to use it.
-# Optional:
+# Optional discovery facets:
 # visibility: public        # overridden by --public
 # tags: [data, cleanup]
-# manifest:                 # optional verifier block
-#   outcome: Reduce refund-row mislabels
-#   kpi: { name: error_rate, definition: rows mislabeled / total }
+# outcome: Reduce refund-row mislabels.
 ---
 
 # Body
 
 The rest of the file is the skill body rendered to the agent at runtime.
+Verifier scripts and Truesight cURLs belong here as fenced code blocks; the
+registry stores the body verbatim.
 ```
 
 `--public` on the command line overrides `visibility`. `--name` on the command
 line overrides the front-matter `name`. The full file (front-matter included)
 is stored on the server, so `goodeye skills get` round-trips a drop-in
 `~/.claude/skills/<name>/SKILL.md`.
+
+Pre-cleanup files that nest `outcome` / `tags` under a `manifest:` block are
+still accepted: those two keys are promoted to the top level and a deprecation
+warning lists any other manifest keys (`kpi`, `programmatic_verifiers`, etc.)
+that the server no longer stores. Move verifier scripts and cURLs into the body
+when you next edit such a file.
 
 ## Command reference
 
@@ -99,12 +107,14 @@ goodeye auth revoke-key <key-id>
     ID shown by `auth list-keys`.
 
 goodeye skills list [--filter all|public|mine] [--tag TAG] [--search QUERY] [--json]
-    List skills you can access. The ID column in the output is accepted by
-    `get`, `delete`, and `set-visibility` (name also works).
+    List skills you can access. The ID column is accepted by `get`, `delete`,
+    and `set-visibility`. When signed in, you can also use your own skill
+    name (slug) with those commands.
 
 goodeye skills get <id-or-name> [--version N] [--output PATH] [--json]
-    Download a skill by ID or name. Prints the skill's markdown to stdout;
-    --json prints the full skill record instead.
+    Download a skill. Prints markdown to stdout; --json prints the full
+    record. When you are not signed in, use the skill's UUID from `list`
+    (name/slug resolution is for your own skills once authenticated).
 
 goodeye skills publish <file.md> [--public] [--name NAME]
     Publish a skill from a markdown file. If a skill with the same name
