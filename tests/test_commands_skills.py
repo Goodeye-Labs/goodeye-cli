@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json as _json
 from pathlib import Path
 
 import httpx
@@ -32,15 +33,17 @@ def test_skills_list_renders_table(tmp_config_paths: ConfigPaths, monkeypatch) -
                 "items": [
                     {
                         "id": "skl_01",
-                        "slug": "one",
+                        "name": "one",
                         "visibility": "public",
                         "current_version": 1,
+                        "description": "first skill",
                     },
                     {
                         "id": "skl_02",
-                        "slug": "two",
+                        "name": "two",
                         "visibility": "private",
                         "current_version": 3,
+                        "description": "second skill",
                     },
                 ],
                 "next_cursor": None,
@@ -62,7 +65,7 @@ def test_skills_list_follows_cursor(tmp_config_paths: ConfigPaths, monkeypatch) 
             200,
             json={
                 "items": [
-                    {"id": "skl_01", "slug": "a", "visibility": "public", "current_version": 1}
+                    {"id": "skl_01", "name": "a", "visibility": "public", "current_version": 1}
                 ],
                 "next_cursor": "c1",
             },
@@ -71,7 +74,7 @@ def test_skills_list_follows_cursor(tmp_config_paths: ConfigPaths, monkeypatch) 
             200,
             json={
                 "items": [
-                    {"id": "skl_02", "slug": "b", "visibility": "public", "current_version": 1}
+                    {"id": "skl_02", "name": "b", "visibility": "public", "current_version": 1}
                 ],
                 "next_cursor": None,
             },
@@ -106,10 +109,11 @@ def test_skills_get_json_flag(tmp_config_paths: ConfigPaths, monkeypatch) -> Non
             200,
             json={
                 "id": "skl_01",
-                "slug": "example",
+                "name": "example",
                 "visibility": "public",
                 "version": 1,
                 "body": "hi",
+                "description": "example skill",
                 "manifest": {},
             },
         )
@@ -117,17 +121,22 @@ def test_skills_get_json_flag(tmp_config_paths: ConfigPaths, monkeypatch) -> Non
     runner = CliRunner()
     result = runner.invoke(app, ["skills", "get", "example", "--json"])
     assert result.exit_code == 0, result.output
-    assert '"slug": "example"' in result.output
+    assert '"name": "example"' in result.output
 
 
 @respx.mock
-def test_skills_push_uses_front_matter(
+def test_publish_minimal_front_matter(
     tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
+    """Claude-Code-style minimal skill: just name + description + body."""
     _setup_creds(monkeypatch, tmp_config_paths)
-    skill_file = tmp_path / "skill.md"
+    skill_file = tmp_path / "hello.md"
     skill_file.write_text(
-        "---\n" "slug: my-skill\n" "manifest:\n" "  tags: [data]\n" "---\n" "# Body\n"
+        "---\n"
+        "name: hello\n"
+        "description: Say hi to the world. Use when onboarding.\n"
+        "---\n"
+        "# Hello\n\nGreet the user.\n"
     )
     route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
@@ -135,42 +144,131 @@ def test_skills_push_uses_front_matter(
             json={
                 "skill_id": "skl_01",
                 "version": 1,
-                "slug": "my-skill",
+                "name": "hello",
                 "visibility": "private",
             },
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["skills", "push", str(skill_file)])
+    result = runner.invoke(app, ["skills", "publish", str(skill_file)])
     assert result.exit_code == 0, result.output
 
-    import json as _json
-
     sent = _json.loads(route.calls.last.request.content.decode())
-    assert sent["slug"] == "my-skill"
-    assert sent["manifest"] == {"tags": ["data"]}
+    assert sent["name"] == "hello"
+    assert sent["description"].startswith("Say hi")
     assert sent["visibility"] == "private"
-    assert "# Body" in sent["body"]
+    # No manifest / no tags in the payload when front-matter doesn't define them.
+    assert "manifest" not in sent
+    assert "tags" not in sent
+    # Body round-trips with the front-matter intact so consumers can drop the
+    # downloaded file into ~/.claude/skills/hello/SKILL.md unchanged.
+    assert sent["body"].startswith("---\n")
+    assert "# Hello" in sent["body"]
 
 
 @respx.mock
-def test_skills_push_public_flag_overrides_front_matter(
+def test_publish_accepts_slug_alias_in_front_matter(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """Transitional: older authored files may still use `slug:` instead of `name:`."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    skill_file = tmp_path / "legacy.md"
+    skill_file.write_text(
+        "---\nslug: my-skill\ndescription: test desc\n---\nBody\n",
+    )
+    route = respx.post(f"{SERVER}/v1/skills").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "skill_id": "skl_01",
+                "version": 1,
+                "name": "my-skill",
+                "visibility": "private",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["skills", "publish", str(skill_file)])
+    assert result.exit_code == 0, result.output
+    sent = _json.loads(route.calls.last.request.content.decode())
+    assert sent["name"] == "my-skill"
+
+
+@respx.mock
+def test_publish_missing_description_errors(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    skill_file = tmp_path / "no-desc.md"
+    skill_file.write_text("---\nname: no-desc\n---\nBody\n")
+    runner = CliRunner()
+    result = runner.invoke(app, ["skills", "publish", str(skill_file)])
+    assert result.exit_code != 0
+    # ValidationFailed bubbles up as an exception under CliRunner; inspect
+    # the exception message rather than captured output.
+    assert result.exception is not None
+    assert "description" in str(result.exception).lower()
+
+
+@respx.mock
+def test_publish_tags_and_manifest(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    skill_file = tmp_path / "rich.md"
+    skill_file.write_text(
+        "---\n"
+        "name: rich-skill\n"
+        "description: A skill with verifier metadata.\n"
+        "tags: [csv, stripe]\n"
+        "manifest:\n"
+        "  outcome: Reduce refund-row errors\n"
+        "---\n"
+        "# Body\n",
+    )
+    route = respx.post(f"{SERVER}/v1/skills").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "skill_id": "skl_01",
+                "version": 1,
+                "name": "rich-skill",
+                "visibility": "private",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["skills", "publish", str(skill_file)])
+    assert result.exit_code == 0, result.output
+
+    sent = _json.loads(route.calls.last.request.content.decode())
+    assert sent["tags"] == ["csv", "stripe"]
+    assert sent["manifest"] == {"outcome": "Reduce refund-row errors"}
+
+
+@respx.mock
+def test_publish_public_flag_overrides_front_matter(
     tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
     skill_file = tmp_path / "skill.md"
-    skill_file.write_text("---\nslug: my-skill\nvisibility: private\n---\nBody\n")
+    skill_file.write_text(
+        "---\nname: my-skill\ndescription: test\nvisibility: private\n---\nBody\n",
+    )
     route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
-            json={"skill_id": "skl_01", "version": 1, "slug": "my-skill", "visibility": "public"},
+            json={
+                "skill_id": "skl_01",
+                "version": 1,
+                "name": "my-skill",
+                "visibility": "public",
+            },
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["skills", "push", str(skill_file), "--public"])
+    result = runner.invoke(app, ["skills", "publish", str(skill_file), "--public"])
     assert result.exit_code == 0, result.output
-
-    import json as _json
 
     sent = _json.loads(route.calls.last.request.content.decode())
     assert sent["visibility"] == "public"
@@ -200,9 +298,9 @@ def test_skills_delete_with_yes_flag(tmp_config_paths: ConfigPaths, monkeypatch)
 
 
 def test_parse_front_matter_extracts_manifest() -> None:
-    source = "---\nslug: foo\nmanifest:\n  tags:\n    - a\n---\nBody text\n"
+    source = "---\nname: foo\ndescription: bar\nmanifest:\n  outcome: x\n---\nBody text\n"
     fm, body = _parse_front_matter(source)
-    assert fm == {"slug": "foo", "manifest": {"tags": ["a"]}}
+    assert fm == {"name": "foo", "description": "bar", "manifest": {"outcome": "x"}}
     assert body == "Body text\n"
 
 

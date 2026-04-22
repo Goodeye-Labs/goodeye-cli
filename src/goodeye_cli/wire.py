@@ -50,9 +50,10 @@ class ApiKeyList(_WireBase):
 
 class SkillSummary(_WireBase):
     id: str
-    slug: str
+    name: str
     visibility: str
     current_version: int
+    description: str = ""
     outcome: str = ""
     tags: list[str] = Field(default_factory=list)
     updated_at: datetime | None = None
@@ -66,10 +67,11 @@ class SkillList(_WireBase):
 
 class SkillDetail(_WireBase):
     id: str
-    slug: str
+    name: str
     visibility: str
     version: int
     body: str
+    description: str = ""
     manifest: dict[str, Any] = Field(default_factory=dict)
     owner_user_id: str | None = None
     updated_at: datetime | None = None
@@ -78,7 +80,7 @@ class SkillDetail(_WireBase):
 class SkillSaveResult(_WireBase):
     skill_id: str
     version: int
-    slug: str
+    name: str
     visibility: str
 
 

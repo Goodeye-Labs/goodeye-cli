@@ -38,21 +38,26 @@ goodeye whoami
 # Fetch a public skill as markdown
 goodeye skills get brand-voice > brand-voice.md
 
-# Push a local skill
-goodeye skills push ./my-skill.md --public
+# Publish a local skill
+goodeye skills publish ./my-skill.md --public
 ```
 
 ### Skill files
 
-`goodeye skills push` reads a markdown file with optional YAML front-matter:
+`goodeye skills publish` reads a markdown file with YAML front-matter that
+follows the Claude Code skills convention. Only `name` and `description` are
+required:
 
 ```markdown
 ---
-slug: my-skill
-visibility: private
-manifest:
-  title: My skill
-  tags: [data, cleanup]
+name: my-skill
+description: One sentence on what this skill does and when to use it.
+# Optional:
+# visibility: public        # overridden by --public
+# tags: [data, cleanup]
+# manifest:                 # optional verifier block
+#   outcome: Reduce refund-row mislabels
+#   kpi: { name: error_rate, definition: rows mislabeled / total }
 ---
 
 # Body
@@ -60,8 +65,10 @@ manifest:
 The rest of the file is the skill body rendered to the agent at runtime.
 ```
 
-`--public` on the command line overrides `visibility`. `--slug` on the command
-line overrides the front-matter `slug`.
+`--public` on the command line overrides `visibility`. `--name` on the command
+line overrides the front-matter `name`. The full file (front-matter included)
+is stored on the server, so `goodeye skills get` round-trips a drop-in
+`~/.claude/skills/<name>/SKILL.md`.
 
 ## Command reference
 
@@ -89,14 +96,15 @@ goodeye auth list-keys
 goodeye auth revoke-key <id>
     Revokes (soft-deletes) a key.
 
-goodeye skills list [--filter all|public|own] [--tag TAG] [--search QUERY] [--json]
+goodeye skills list [--filter all|public|mine] [--tag TAG] [--search QUERY] [--json]
     Paginated listing; auto-follows cursor.
 
-goodeye skills get <id-or-slug> [--version N] [--output PATH] [--json]
+goodeye skills get <id-or-name> [--version N] [--output PATH] [--json]
     Emits raw markdown by default; --json returns the envelope.
 
-goodeye skills push <file.md> [--id ID] [--public] [--slug SLUG]
-    Creates or appends a skill version.
+goodeye skills publish <file.md> [--id ID] [--public] [--name NAME]
+    Creates or appends a skill version. Front-matter must include `name:`
+    and `description:`.
 
 goodeye skills set-visibility <id> <private|public>
 goodeye skills delete <id> [--yes]

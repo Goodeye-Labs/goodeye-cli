@@ -127,17 +127,18 @@ def test_get_skill_markdown_returns_raw_text() -> None:
 def test_get_skill_json_returns_detail_model() -> None:
     payload = {
         "id": "skl_1",
-        "slug": "example",
+        "name": "example",
         "visibility": "public",
         "version": 1,
         "body": "hello",
+        "description": "ex",
         "manifest": {"tags": ["x"]},
     }
     respx.get(f"{SERVER}/v1/skills/example").mock(return_value=httpx.Response(200, json=payload))
     with GoodeyeClient(SERVER) as client:
         result = client.get_skill("example", accept_markdown=False)
     assert not isinstance(result, str)
-    assert result.slug == "example"
+    assert result.name == "example"
     assert result.manifest == {"tags": ["x"]}
 
 

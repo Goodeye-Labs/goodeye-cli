@@ -39,7 +39,7 @@ def list_cmd(
         help="Scope filter: all, public, or mine.",
         case_sensitive=False,
     ),
-    tag: str | None = typer.Option(None, "--tag", "-t", help="Filter by manifest tag."),
+    tag: str | None = typer.Option(None, "--tag", "-t", help="Filter by tag."),
     search: str | None = typer.Option(None, "--search", "-s", help="Search query."),
     json_output: bool = typer.Option(False, "--json", help="Emit raw JSON."),
 ) -> None:
@@ -66,11 +66,14 @@ def list_cmd(
 
     table = Table(title=f"Skills ({filter_})")
     table.add_column("ID", no_wrap=True)
-    table.add_column("Slug")
+    table.add_column("Name")
     table.add_column("Visibility")
     table.add_column("Version", justify="right")
+    table.add_column("Description")
     for item in items:
-        table.add_row(item.id, item.slug, item.visibility, str(item.current_version))
+        table.add_row(
+            item.id, item.name, item.visibility, str(item.current_version), item.description
+        )
     if not items:
         console.print("[dim]No skills matched.[/dim]")
     else:
@@ -79,7 +82,7 @@ def list_cmd(
 
 @app.command("get")
 def get_cmd(
-    id_or_slug: str = typer.Argument(..., help="Skill ID (ULID) or slug."),
+    id_or_name: str = typer.Argument(..., help="Skill ID (ULID) or name."),
     version: int | None = typer.Option(None, "--version", "-v", help="Pinned version."),
     output: Path | None = typer.Option(
         None, "--output", "-o", help="Write body to this path instead of stdout."
@@ -91,7 +94,7 @@ def get_cmd(
     """Fetch a skill. Emits raw markdown by default; use ``--json`` for the envelope."""
     console = Console(stderr=True)
     with _client(require_auth=False) as client:
-        result = client.get_skill(id_or_slug, version=version, accept_markdown=not json_output)
+        result = client.get_skill(id_or_name, version=version, accept_markdown=not json_output)
 
     if json_output:
         assert isinstance(result, SkillDetail)
@@ -110,7 +113,7 @@ def get_cmd(
 
 
 def _parse_front_matter(source: str) -> tuple[dict[str, Any], str]:
-    """Extract a YAML front-matter manifest from a markdown source.
+    """Extract a YAML front-matter block from a markdown source.
 
     Front-matter is recognised when the file begins with ``---`` on its own line
     and a matching terminator ``---`` appears later. Everything between is parsed
@@ -125,7 +128,6 @@ def _parse_front_matter(source: str) -> tuple[dict[str, Any], str]:
         if lines[idx].rstrip() == "---":
             yaml_text = "".join(lines[1:idx])
             body = "".join(lines[idx + 1 :])
-            # Strip a single leading blank line if present for cleanliness.
             if body.startswith("\n"):
                 body = body[1:]
             parsed = yaml.safe_load(yaml_text) or {}
@@ -138,41 +140,74 @@ def _parse_front_matter(source: str) -> tuple[dict[str, Any], str]:
     return {}, source
 
 
-@app.command("push")
-def push(
+@app.command("publish")
+def publish(
     file: Path = typer.Argument(..., exists=True, readable=True, help="Markdown file to upload."),
     skill_id: str | None = typer.Option(
         None, "--id", help="Append a new version to this existing skill ID."
     ),
     public: bool = typer.Option(False, "--public", help="Mark as public. Default is private."),
-    slug: str | None = typer.Option(None, "--slug", help="Override the slug from front-matter."),
+    name_override: str | None = typer.Option(
+        None, "--name", help="Override the `name` from front-matter."
+    ),
 ) -> None:
-    """Upload a skill from a markdown file with optional YAML front-matter.
+    """Upload a skill from a markdown file with YAML front-matter.
 
-    Front-matter keys:
+    The front-matter follows the Claude Code skills convention:
 
-    * ``slug`` (required unless ``--slug`` is passed)
-    * ``manifest`` (dict): arbitrary manifest fields kept on the skill row
-    * ``visibility``: overridden by ``--public`` when provided
+    \b
+    ---
+    name: incident-postmortem
+    description: Draft a postmortem from an incident transcript. Use when ...
+    # Optional:
+    # visibility: public
+    # tags: [sre, postmortem]
+    # manifest: { outcome: ..., kpi: {...}, ... }  # full verifier block
+    ---
+
+    Only ``name`` and ``description`` are required. Everything else is optional.
+    ``--public`` overrides the front-matter ``visibility`` when provided.
     """
     console = Console()
     source = file.read_text(encoding="utf-8")
-    front_matter, body = _parse_front_matter(source)
+    front_matter, _stripped_body = _parse_front_matter(source)
+    # Server stores the full markdown (including front-matter) so the skill
+    # round-trips as a drop-in Claude Code SKILL.md.
+    body = source
 
-    effective_slug: str | None = slug or (
-        str(front_matter["slug"]) if isinstance(front_matter.get("slug"), str) else None
+    effective_name: str | None = (
+        name_override or front_matter.get("name") or front_matter.get("slug")
     )
-    if not effective_slug:
+    if not isinstance(effective_name, str) or not effective_name:
         raise ValidationFailed(
             slug="validation_error",
-            message="Missing `slug`. Provide --slug or add `slug:` to the front-matter.",
+            message="Missing `name`. Add `name:` to the front-matter or pass --name.",
         )
 
-    manifest = front_matter.get("manifest") or {}
-    if not isinstance(manifest, dict):
+    description = front_matter.get("description")
+    if not isinstance(description, str) or not description.strip():
+        raise ValidationFailed(
+            slug="validation_error",
+            message="Missing `description`. Add `description:` to the front-matter.",
+        )
+
+    manifest_raw = front_matter.get("manifest")
+    if manifest_raw is not None and not isinstance(manifest_raw, dict):
         raise ValidationFailed(
             slug="validation_error",
             message="`manifest` in front-matter must be a mapping.",
+        )
+    manifest: dict[str, Any] | None = dict(manifest_raw) if manifest_raw else None
+
+    tags_raw = front_matter.get("tags")
+    if tags_raw is None:
+        tags: list[str] = []
+    elif isinstance(tags_raw, list):
+        tags = [str(t) for t in tags_raw]
+    else:
+        raise ValidationFailed(
+            slug="validation_error",
+            message="`tags` in front-matter must be a list of strings.",
         )
 
     visibility = (
@@ -187,15 +222,17 @@ def push(
 
     with _client(require_auth=True) as client:
         result = client.save_skill(
-            slug=effective_slug,
+            name=effective_name,
+            description=description,
             body=body,
-            manifest=dict(manifest),
+            manifest=manifest,
+            tags=tags,
             visibility=visibility,
             skill_id=skill_id,
         )
 
     console.print(
-        f"[green]Saved[/green] {result.slug} v{result.version} "
+        f"[green]Saved[/green] {result.name} v{result.version} "
         f"(skill_id={result.skill_id}, visibility={result.visibility})"
     )
 
@@ -244,6 +281,6 @@ __all__ = [
     "delete",
     "get_cmd",
     "list_cmd",
-    "push",
+    "publish",
     "set_visibility",
 ]

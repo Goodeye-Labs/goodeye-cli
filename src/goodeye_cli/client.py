@@ -203,18 +203,24 @@ class GoodeyeClient:
     def save_skill(
         self,
         *,
-        slug: str,
+        name: str,
+        description: str,
         body: str,
-        manifest: dict[str, Any],
+        manifest: dict[str, Any] | None = None,
+        tags: list[str] | None = None,
         visibility: str = "private",
         skill_id: str | None = None,
     ) -> SkillSaveResult:
         payload: dict[str, Any] = {
-            "slug": slug,
+            "name": name,
+            "description": description,
             "body": body,
-            "manifest": manifest,
             "visibility": visibility,
         }
+        if manifest:
+            payload["manifest"] = manifest
+        if tags:
+            payload["tags"] = list(tags)
         if skill_id:
             payload["skill_id"] = skill_id
         response = self._request("POST", "/v1/skills", json_body=payload)
