@@ -1,6 +1,6 @@
 [project]
 name = "goodeye"
-version = "0.1.0"
+version = "0.1.1"
 description = "Public CLI for Goodeye - manage AI workflow skills from the terminal."
 readme = "README.md"
 license = { file = "LICENSE" }
