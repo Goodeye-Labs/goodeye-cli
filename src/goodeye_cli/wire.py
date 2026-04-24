@@ -124,3 +124,33 @@ class DeviceAuthResponse(_WireBase):
 class DeviceTokenResponse(_WireBase):
     access_token: str
     token_type: str | None = None
+
+
+class TeamCreated(_WireBase):
+    team_id: str
+    handle: str
+
+
+class TeamSummary(_WireBase):
+    team_id: str
+    handle: str
+    owner_user_id: str
+    role: str
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class TeamList(_WireBase):
+    items: list[TeamSummary]
+
+
+class TeamMember(_WireBase):
+    user_id: str
+    email: str
+    handle: str | None = None
+    role: str
+
+
+class TeamDeleteResult(_WireBase):
+    team_id: str
+    deleted: bool
