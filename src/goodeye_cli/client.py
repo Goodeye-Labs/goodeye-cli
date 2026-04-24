@@ -37,6 +37,10 @@ from goodeye_cli.wire import (
     TemplateUnpublishResult,
     WorkflowDeleteResult,
     WorkflowDetail,
+    WorkflowGrantList,
+    WorkflowGrantResult,
+    WorkflowGrantRevokeResult,
+    WorkflowLeaveResult,
     WorkflowLineage,
     WorkflowList,
     WorkflowSaveResult,
@@ -222,6 +226,7 @@ class GoodeyeClient:
         body: str,
         outcome: str | None = None,
         tags: list[str] | None = None,
+        expected_version_token: str | None = None,
     ) -> WorkflowSaveResult:
         """POST /v1/workflows with the flat ``save_workflow`` payload.
 
@@ -234,6 +239,7 @@ class GoodeyeClient:
             "name": name,
             "description": description,
             "body": body,
+            "expected_version_token": expected_version_token,
         }
         if outcome:
             payload["outcome"] = outcome
@@ -245,6 +251,37 @@ class GoodeyeClient:
     def delete_workflow(self, workflow_id: str) -> WorkflowDeleteResult:
         response = self._request("DELETE", f"/v1/workflows/{workflow_id}")
         return WorkflowDeleteResult.model_validate(response.json())
+
+    def grant_workflow(
+        self, workflow_id: str, grantee_email_or_at_team_handle: str, role: str
+    ) -> WorkflowGrantResult:
+        response = self._request(
+            "POST",
+            f"/v1/workflows/{workflow_id}/grants",
+            json_body={
+                "grantee_email_or_at_team_handle": grantee_email_or_at_team_handle,
+                "role": role,
+            },
+        )
+        return WorkflowGrantResult.model_validate(response.json())
+
+    def revoke_workflow_grant(
+        self, workflow_id: str, grantee_email_or_at_team_handle: str
+    ) -> WorkflowGrantRevokeResult:
+        response = self._request(
+            "DELETE",
+            f"/v1/workflows/{workflow_id}/grants",
+            json_body={"grantee_email_or_at_team_handle": grantee_email_or_at_team_handle},
+        )
+        return WorkflowGrantRevokeResult.model_validate(response.json())
+
+    def list_workflow_grants(self, workflow_id: str) -> WorkflowGrantList:
+        response = self._request("GET", f"/v1/workflows/{workflow_id}/grants")
+        return WorkflowGrantList.model_validate(response.json())
+
+    def leave_shared_workflow(self, workflow_id: str) -> WorkflowLeaveResult:
+        response = self._request("POST", f"/v1/workflows/{workflow_id}/leave")
+        return WorkflowLeaveResult.model_validate(response.json())
 
     def lookup_workflow_lineage(self, id_or_slug: str) -> WorkflowLineage:
         response = self._request("GET", f"/v1/workflows/{id_or_slug}/lineage")

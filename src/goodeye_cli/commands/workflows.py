@@ -202,6 +202,11 @@ def publish(
     name_override: str | None = typer.Option(
         None, "--name", help="Override the `name` from front-matter."
     ),
+    expected_version_token: str | None = typer.Option(
+        None,
+        "--expected-version-token",
+        help="Required token when updating an existing workflow. Omit only for creates.",
+    ),
 ) -> None:
     """Upload a workflow from a markdown file with YAML front-matter.
 
@@ -257,11 +262,12 @@ def publish(
             body=body,
             outcome=outcome,
             tags=tags,
+            expected_version_token=expected_version_token,
         )
 
     console.print(
         f"[green]Saved[/green] {result.name} v{result.version} "
-        f"(workflow_id={result.workflow_id})"
+        f"(workflow_id={result.workflow_id}, version_token={result.version_token})"
     )
 
 
@@ -308,12 +314,94 @@ def delete(
         console.print(f"[yellow]Not deleted[/yellow] {result.name}")
 
 
+@app.command("grant")
+def grant(
+    workflow_id: str = typer.Argument(..., help="Workflow ID or name."),
+    grantee: str = typer.Argument(..., help="User email or @team handle."),
+    role: str = typer.Argument(..., help="Role to grant: view, edit, or admin."),
+) -> None:
+    """Grant workflow access to a named user or team."""
+    console = Console()
+    with _client(require_auth=True) as client:
+        result = client.grant_workflow(workflow_id, grantee, role.lower())
+    console.print(f"[green]Granted[/green] {result.role} on {result.workflow_id} to {grantee}")
+
+
+@app.command("revoke-grant")
+def revoke_grant(
+    workflow_id: str = typer.Argument(..., help="Workflow ID or name."),
+    grantee: str = typer.Argument(..., help="User email or @team handle."),
+) -> None:
+    """Revoke a direct workflow grant."""
+    console = Console()
+    with _client(require_auth=True) as client:
+        result = client.revoke_workflow_grant(workflow_id, grantee)
+    if result.revoked:
+        console.print(f"[green]Revoked[/green] grant for {grantee}")
+    else:
+        console.print(f"[yellow]No direct grant found[/yellow] for {grantee}")
+
+
+@app.command("grants")
+def grants(
+    workflow_id: str = typer.Argument(..., help="Workflow ID or name."),
+    json_output: bool = typer.Option(False, "--json", help="Print grants as JSON."),
+) -> None:
+    """List workflow grants."""
+    console = Console()
+    with _client(require_auth=True) as client:
+        result = client.list_workflow_grants(workflow_id)
+    if json_output:
+        typer.echo(result.model_dump_json(indent=2))
+        return
+    table = Table(title=f"Workflow grants ({workflow_id})")
+    table.add_column("Grantee")
+    table.add_column("Type")
+    table.add_column("Role")
+    table.add_column("Via team")
+    for grant_row in result.items:
+        table.add_row(
+            grant_row.grantee_identifier,
+            grant_row.grantee_type,
+            grant_row.role,
+            "yes" if grant_row.is_via_team else "no",
+        )
+    if not result.items:
+        console.print("[dim]No grants.[/dim]")
+    else:
+        console.print(table)
+
+
+@app.command("leave")
+def leave(
+    workflow_id: str = typer.Argument(..., help="Workflow ID or name."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
+) -> None:
+    """Remove your direct grant on a shared workflow."""
+    console = Console()
+    if not yes:
+        confirm = typer.confirm(f"Leave shared workflow {workflow_id}?", default=False)
+        if not confirm:
+            console.print("Cancelled.")
+            raise typer.Exit(code=1)
+    with _client(require_auth=True) as client:
+        result = client.leave_shared_workflow(workflow_id)
+    console.print(
+        f"[green]Left[/green] {result.workflow_id}; "
+        f"removed {result.removed_direct_grants} direct grant(s)."
+    )
+
+
 __all__ = [
     "_parse_front_matter",
     "app",
     "delete",
     "get_cmd",
+    "grant",
+    "grants",
+    "leave",
     "lineage",
     "list_cmd",
     "publish",
+    "revoke_grant",
 ]

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json as _json
+
 import httpx
 import pytest
 import respx
@@ -178,6 +180,76 @@ def test_list_workflows_params_passthrough() -> None:
     assert params["search"] == "foo"
     assert params["limit"] == "10"
     assert params["cursor"] == "abc"
+
+
+@respx.mock
+def test_save_workflow_sends_expected_version_token() -> None:
+    route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "workflow_id": "skl_01",
+                "version": 2,
+                "version_token": "tok-new",
+                "name": "example",
+            },
+        )
+    )
+    with GoodeyeClient(SERVER, api_key="k") as client:
+        result = client.save_workflow(
+            name="example",
+            description="desc",
+            body="body",
+            expected_version_token="tok-old",
+        )
+    body = _json.loads(route.calls.last.request.content.decode())
+    assert body["expected_version_token"] == "tok-old"
+    assert result.version_token == "tok-new"
+
+
+@respx.mock
+def test_workflow_grant_client_methods() -> None:
+    grant_route = respx.post(f"{SERVER}/v1/workflows/wf_1/grants").mock(
+        return_value=httpx.Response(201, json={"workflow_id": "wf_1", "role": "edit"})
+    )
+    respx.get(f"{SERVER}/v1/workflows/wf_1/grants").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "grantee_type": "user",
+                        "grantee_identifier": "user@example.com",
+                        "role": "edit",
+                        "granted_by": "owner",
+                        "granted_at": "2026-04-24T00:00:00Z",
+                        "is_via_team": False,
+                    }
+                ]
+            },
+        )
+    )
+    revoke_route = respx.delete(f"{SERVER}/v1/workflows/wf_1/grants").mock(
+        return_value=httpx.Response(200, json={"workflow_id": "wf_1", "revoked": True})
+    )
+    leave_route = respx.post(f"{SERVER}/v1/workflows/wf_1/leave").mock(
+        return_value=httpx.Response(
+            200, json={"workflow_id": "wf_1", "removed_direct_grants": 1}
+        )
+    )
+
+    with GoodeyeClient(SERVER, api_key="k") as client:
+        client.grant_workflow("wf_1", "user@example.com", "edit")
+        grants = client.list_workflow_grants("wf_1")
+        client.revoke_workflow_grant("wf_1", "user@example.com")
+        leave = client.leave_shared_workflow("wf_1")
+
+    assert _json.loads(grant_route.calls.last.request.content.decode())["role"] == "edit"
+    assert grants.items[0].grantee_identifier == "user@example.com"
+    revoke_body = _json.loads(revoke_route.calls.last.request.content.decode())
+    assert revoke_body["grantee_email_or_at_team_handle"] == "user@example.com"
+    assert leave_route.called
+    assert leave.removed_direct_grants == 1
 
 
 @respx.mock

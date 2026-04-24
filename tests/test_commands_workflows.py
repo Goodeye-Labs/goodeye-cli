@@ -146,6 +146,7 @@ def test_publish_minimal_front_matter(
             json={
                 "workflow_id": "skl_01",
                 "version": 1,
+                "version_token": "tok-1",
                 "name": "hello",
                 "visibility": "private",
             },
@@ -169,6 +170,44 @@ def test_publish_minimal_front_matter(
     # downloaded file into ~/.claude/skills/hello/SKILL.md unchanged.
     assert sent["body"].startswith("---\n")
     assert "# Hello" in sent["body"]
+    assert sent["expected_version_token"] is None
+
+
+@respx.mock
+def test_publish_accepts_expected_version_token_option(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    workflow_file = tmp_path / "hello.md"
+    workflow_file.write_text("---\nname: hello\ndescription: Say hi.\n---\n# Hello\n")
+    route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "workflow_id": "skl_01",
+                "version": 2,
+                "version_token": "new-token",
+                "name": "hello",
+            },
+        )
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "workflows",
+            "publish",
+            str(workflow_file),
+            "--expected-version-token",
+            "old-token",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    sent = _json.loads(route.calls.last.request.content.decode())
+    assert sent["expected_version_token"] == "old-token"
+    assert "new-token" in result.output
 
 
 @respx.mock
@@ -187,6 +226,7 @@ def test_publish_accepts_slug_alias_in_front_matter(
             json={
                 "workflow_id": "skl_01",
                 "version": 1,
+                "version_token": "tok-1",
                 "name": "my-workflow",
                 "visibility": "private",
             },
@@ -236,6 +276,7 @@ def test_publish_tags_and_outcome(
             json={
                 "workflow_id": "skl_01",
                 "version": 1,
+                "version_token": "tok-1",
                 "name": "rich-workflow",
                 "visibility": "private",
             },
@@ -278,6 +319,7 @@ def test_publish_legacy_manifest_promotes_outcome_and_tags(
             json={
                 "workflow_id": "skl_01",
                 "version": 1,
+                "version_token": "tok-1",
                 "name": "legacy-workflow",
                 "visibility": "private",
             },
@@ -319,6 +361,7 @@ def test_publish_top_level_outcome_wins_over_manifest(
             json={
                 "workflow_id": "skl_01",
                 "version": 1,
+                "version_token": "tok-1",
                 "name": "mixed-workflow",
                 "visibility": "private",
             },
@@ -343,6 +386,54 @@ def test_workflows_delete_with_yes_flag(tmp_config_paths: ConfigPaths, monkeypat
     result = runner.invoke(app, ["workflows", "delete", "skl_01", "--yes"])
     assert result.exit_code == 0, result.output
     assert "Deleted" in result.output
+
+
+@respx.mock
+def test_workflow_grant_commands(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    grant_route = respx.post(f"{SERVER}/v1/workflows/wf_1/grants").mock(
+        return_value=httpx.Response(201, json={"workflow_id": "wf_1", "role": "admin"})
+    )
+    respx.get(f"{SERVER}/v1/workflows/wf_1/grants").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "grantee_type": "team",
+                        "grantee_identifier": "@analytics",
+                        "role": "admin",
+                        "granted_by": "owner",
+                        "granted_at": "2026-04-24T00:00:00Z",
+                        "is_via_team": True,
+                    }
+                ]
+            },
+        )
+    )
+    revoke_route = respx.delete(f"{SERVER}/v1/workflows/wf_1/grants").mock(
+        return_value=httpx.Response(200, json={"workflow_id": "wf_1", "revoked": True})
+    )
+    respx.post(f"{SERVER}/v1/workflows/wf_1/leave").mock(
+        return_value=httpx.Response(
+            200, json={"workflow_id": "wf_1", "removed_direct_grants": 1}
+        )
+    )
+
+    runner = CliRunner()
+    grant = runner.invoke(app, ["workflows", "grant", "wf_1", "@analytics", "admin"])
+    grants = runner.invoke(app, ["workflows", "grants", "wf_1"])
+    revoke = runner.invoke(app, ["workflows", "revoke-grant", "wf_1", "@analytics"])
+    leave = runner.invoke(app, ["workflows", "leave", "wf_1", "--yes"])
+
+    assert grant.exit_code == 0, grant.output
+    grant_body = _json.loads(grant_route.calls.last.request.content.decode())
+    assert grant_body["grantee_email_or_at_team_handle"] == "@analytics"
+    assert "@analytics" in grants.output
+    assert revoke.exit_code == 0, revoke.output
+    revoke_body = _json.loads(revoke_route.calls.last.request.content.decode())
+    assert revoke_body["grantee_email_or_at_team_handle"] == "@analytics"
+    assert leave.exit_code == 0, leave.output
 
 
 def test_parse_front_matter_extracts_manifest() -> None:

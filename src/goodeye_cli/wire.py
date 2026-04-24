@@ -66,6 +66,8 @@ class WorkflowSummary(_WireBase):
     parent_template_id: str | None = None
     parent_template_version: int | None = None
     is_ephemeral: bool = False
+    effective_role: str | None = None
+    version_token: str | None = None
 
 
 class WorkflowList(_WireBase):
@@ -86,12 +88,43 @@ class WorkflowDetail(_WireBase):
     parent_template_id: str | None = None
     parent_template_version: int | None = None
     is_ephemeral: bool = False
+    effective_role: str | None = None
+    version_token: str | None = None
 
 
 class WorkflowSaveResult(_WireBase):
     workflow_id: str
     version: int
     name: str
+    version_token: str
+
+
+class WorkflowGrantResult(_WireBase):
+    workflow_id: str
+    role: str
+
+
+class WorkflowGrant(_WireBase):
+    grantee_type: str
+    grantee_identifier: str
+    role: str
+    granted_by: str
+    granted_at: datetime | None = None
+    is_via_team: bool = False
+
+
+class WorkflowGrantList(_WireBase):
+    items: list[WorkflowGrant]
+
+
+class WorkflowGrantRevokeResult(_WireBase):
+    workflow_id: str
+    revoked: bool
+
+
+class WorkflowLeaveResult(_WireBase):
+    workflow_id: str
+    removed_direct_grants: int
 
 
 class WorkflowDeleteResult(_WireBase):
@@ -164,6 +197,7 @@ class TemplateForkResult(_WireBase):
     parent_template_id: str
     parent_template_version: int
     is_ephemeral: bool = False
+    version_token: str | None = None
 
 
 class SignupVerifyResult(_WireBase):
