@@ -26,6 +26,13 @@ class ClientConfig(_WireBase):
 
 class MeResponse(_WireBase):
     email: str
+    handle: str | None = None
+    handle_claimed_at: datetime | None = None
+
+
+class ClaimHandleResult(_WireBase):
+    handle: str
+    claimed_at: datetime | None = None
 
 
 class ApiKey(_WireBase):

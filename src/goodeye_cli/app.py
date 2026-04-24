@@ -12,6 +12,7 @@ from goodeye_cli.commands import auth as auth_cmds
 from goodeye_cli.commands import design as design_cmd
 from goodeye_cli.commands import login as login_cmd
 from goodeye_cli.commands import logout as logout_cmd
+from goodeye_cli.commands import me as me_cmds
 from goodeye_cli.commands import signup as signup_cmd
 from goodeye_cli.commands import whoami as whoami_cmd
 from goodeye_cli.commands import workflows as workflows_cmds
@@ -33,6 +34,7 @@ app.command("design")(design_cmd.design)
 
 # Command groups.
 app.add_typer(auth_cmds.app, name="auth", help="Manage API keys.")
+app.add_typer(me_cmds.app, name="me", help="View and update your profile.")
 app.add_typer(workflows_cmds.app, name="workflows", help="Browse and manage workflows.")
 
 

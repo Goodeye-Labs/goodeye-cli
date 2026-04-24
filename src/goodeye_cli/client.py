@@ -20,6 +20,7 @@ from goodeye_cli.errors import GoodeyeError, error_from_body
 from goodeye_cli.wire import (
     ApiKeyCreated,
     ApiKeyList,
+    ClaimHandleResult,
     ClientConfig,
     DeviceAuthResponse,
     ExchangeResult,
@@ -145,6 +146,10 @@ class GoodeyeClient:
     def get_me(self) -> MeResponse:
         response = self._request("GET", "/v1/me")
         return MeResponse.model_validate(response.json())
+
+    def claim_handle(self, handle: str) -> ClaimHandleResult:
+        response = self._request("PATCH", "/v1/me", json_body={"handle": handle})
+        return ClaimHandleResult.model_validate(response.json())
 
     def create_api_key(self, name: str) -> ApiKeyCreated:
         response = self._request("POST", "/v1/api-keys", json_body={"name": name})
