@@ -37,11 +37,11 @@ def test_authorization_header_is_sent() -> None:
 
 @respx.mock
 def test_no_auth_header_when_missing_key() -> None:
-    route = respx.get(f"{SERVER}/v1/skills").mock(
+    route = respx.get(f"{SERVER}/v1/workflows").mock(
         return_value=httpx.Response(200, json={"items": [], "next_cursor": None})
     )
     with GoodeyeClient(SERVER) as client:
-        client.list_skills(filter_="public")
+        client.list_workflows(filter_="public")
     assert "Authorization" not in route.calls.last.request.headers
 
 
@@ -79,11 +79,11 @@ def test_error_translation_invalid_credentials() -> None:
 
 @respx.mock
 def test_error_translation_not_found() -> None:
-    respx.get(f"{SERVER}/v1/skills/nope").mock(
+    respx.get(f"{SERVER}/v1/workflows/nope").mock(
         return_value=httpx.Response(404, json={"error": "not_found", "message": "nope"})
     )
     with GoodeyeClient(SERVER, api_key="k") as client, pytest.raises(NotFound):
-        client.get_skill("nope")
+        client.get_workflow("nope")
 
 
 @respx.mock
@@ -110,21 +110,21 @@ def test_error_translation_unstructured_400() -> None:
 
 
 @respx.mock
-def test_get_skill_markdown_returns_raw_text() -> None:
-    route = respx.get(f"{SERVER}/v1/skills/example").mock(
+def test_get_workflow_markdown_returns_raw_text() -> None:
+    route = respx.get(f"{SERVER}/v1/workflows/example").mock(
         return_value=httpx.Response(
             200, text="# hello\nbody", headers={"content-type": "text/markdown"}
         )
     )
     with GoodeyeClient(SERVER) as client:
-        result = client.get_skill("example", accept_markdown=True)
+        result = client.get_workflow("example", accept_markdown=True)
     assert isinstance(result, str)
     assert result == "# hello\nbody"
     assert route.calls.last.request.headers["Accept"] == "text/markdown"
 
 
 @respx.mock
-def test_get_skill_json_returns_detail_model() -> None:
+def test_get_workflow_json_returns_detail_model() -> None:
     payload = {
         "id": "skl_1",
         "name": "example",
@@ -135,9 +135,9 @@ def test_get_skill_json_returns_detail_model() -> None:
         "outcome": "ship reliable refunds",
         "tags": ["demo"],
     }
-    respx.get(f"{SERVER}/v1/skills/example").mock(return_value=httpx.Response(200, json=payload))
+    respx.get(f"{SERVER}/v1/workflows/example").mock(return_value=httpx.Response(200, json=payload))
     with GoodeyeClient(SERVER) as client:
-        result = client.get_skill("example", accept_markdown=False)
+        result = client.get_workflow("example", accept_markdown=False)
     assert not isinstance(result, str)
     assert result.name == "example"
     assert result.outcome == "ship reliable refunds"
@@ -145,8 +145,8 @@ def test_get_skill_json_returns_detail_model() -> None:
 
 
 @respx.mock
-def test_get_skill_json_tolerates_legacy_manifest_field() -> None:
-    """Older deploys may still echo a `manifest` field; SkillDetail should ignore it."""
+def test_get_workflow_json_tolerates_legacy_manifest_field() -> None:
+    """Older deploys may still echo a `manifest` field; WorkflowDetail should ignore it."""
     payload = {
         "id": "skl_1",
         "name": "example",
@@ -156,9 +156,9 @@ def test_get_skill_json_tolerates_legacy_manifest_field() -> None:
         "description": "ex",
         "manifest": {"tags": ["x"]},
     }
-    respx.get(f"{SERVER}/v1/skills/example").mock(return_value=httpx.Response(200, json=payload))
+    respx.get(f"{SERVER}/v1/workflows/example").mock(return_value=httpx.Response(200, json=payload))
     with GoodeyeClient(SERVER) as client:
-        result = client.get_skill("example", accept_markdown=False)
+        result = client.get_workflow("example", accept_markdown=False)
     assert not isinstance(result, str)
     assert result.name == "example"
     assert not hasattr(result, "manifest")
@@ -166,12 +166,12 @@ def test_get_skill_json_tolerates_legacy_manifest_field() -> None:
 
 
 @respx.mock
-def test_list_skills_params_passthrough() -> None:
-    route = respx.get(f"{SERVER}/v1/skills").mock(
+def test_list_workflows_params_passthrough() -> None:
+    route = respx.get(f"{SERVER}/v1/workflows").mock(
         return_value=httpx.Response(200, json={"items": [], "next_cursor": None})
     )
     with GoodeyeClient(SERVER, api_key="k") as client:
-        client.list_skills(filter_="mine", tag="data", search="foo", limit=10, cursor="abc")
+        client.list_workflows(filter_="mine", tag="data", search="foo", limit=10, cursor="abc")
     params = dict(route.calls.last.request.url.params)
     assert params["filter"] == "mine"
     assert params["tag"] == "data"
@@ -216,14 +216,14 @@ def test_exchange_sends_hostname() -> None:
 
 
 @respx.mock
-def test_delete_skill_happy_path() -> None:
-    respx.delete(f"{SERVER}/v1/skills/skl_01").mock(
+def test_delete_workflow_happy_path() -> None:
+    respx.delete(f"{SERVER}/v1/workflows/skl_01").mock(
         return_value=httpx.Response(
-            200, json={"skill_id": "skl_01", "name": "skl_01", "deleted": True}
+            200, json={"workflow_id": "skl_01", "name": "skl_01", "deleted": True}
         )
     )
     with GoodeyeClient(SERVER, api_key="k") as client:
-        result = client.delete_skill("skl_01")
+        result = client.delete_workflow("skl_01")
     assert result.deleted is True
 
 

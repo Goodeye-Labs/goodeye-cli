@@ -1,4 +1,4 @@
-"""`goodeye skills ...` subcommand group."""
+"""`goodeye workflows ...` subcommand group."""
 
 from __future__ import annotations
 
@@ -14,9 +14,9 @@ from rich.table import Table
 from goodeye_cli.client import GoodeyeClient
 from goodeye_cli.config import get_api_key, get_server
 from goodeye_cli.errors import AuthRequired, ValidationFailed
-from goodeye_cli.wire import SkillDetail
+from goodeye_cli.wire import WorkflowDetail
 
-app = typer.Typer(help="Browse and manage skills.", no_args_is_help=True)
+app = typer.Typer(help="Browse and manage workflows.", no_args_is_help=True)
 
 
 def _client(*, require_auth: bool) -> GoodeyeClient:
@@ -43,13 +43,13 @@ def list_cmd(
     search: str | None = typer.Option(None, "--search", "-s", help="Search query."),
     json_output: bool = typer.Option(False, "--json", help="Print results as JSON."),
 ) -> None:
-    """List skills you can access."""
+    """List workflows you can access."""
     console = Console()
     items: list[Any] = []
     with _client(require_auth=False) as client:
         cursor: str | None = None
         while True:
-            page = client.list_skills(
+            page = client.list_workflows(
                 filter_=filter_.lower() if filter_ else None,
                 tag=tag,
                 search=search,
@@ -64,7 +64,7 @@ def list_cmd(
         typer.echo("[" + ",".join(i.model_dump_json() for i in items) + "]")
         return
 
-    table = Table(title=f"Skills ({filter_})")
+    table = Table(title=f"Workflows ({filter_})")
     table.add_column("ID", no_wrap=True)
     table.add_column("Name")
     table.add_column("Visibility")
@@ -75,29 +75,29 @@ def list_cmd(
             item.id, item.name, item.visibility, str(item.current_version), item.description
         )
     if not items:
-        console.print("[dim]No skills matched.[/dim]")
+        console.print("[dim]No workflows matched.[/dim]")
     else:
         console.print(table)
 
 
 @app.command("get")
 def get_cmd(
-    id_or_name: str = typer.Argument(..., help="Skill ID (ULID) or name."),
+    id_or_name: str = typer.Argument(..., help="Workflow ID (ULID) or name."),
     version: int | None = typer.Option(None, "--version", "-v", help="Pinned version."),
     output: Path | None = typer.Option(
         None, "--output", "-o", help="Write body to this path instead of stdout."
     ),
     json_output: bool = typer.Option(
-        False, "--json", help="Print the full skill record as JSON instead of markdown."
+        False, "--json", help="Print the full workflow record as JSON instead of markdown."
     ),
 ) -> None:
-    """Download a skill. Prints the skill's markdown to stdout."""
+    """Download a workflow. Prints the workflow's markdown to stdout."""
     console = Console(stderr=True)
     with _client(require_auth=False) as client:
-        result = client.get_skill(id_or_name, version=version, accept_markdown=not json_output)
+        result = client.get_workflow(id_or_name, version=version, accept_markdown=not json_output)
 
     if json_output:
-        assert isinstance(result, SkillDetail)
+        assert isinstance(result, WorkflowDetail)
         text = result.model_dump_json(indent=2)
     else:
         assert isinstance(result, str)
@@ -212,7 +212,7 @@ def publish(
         None, "--name", help="Override the `name` from front-matter."
     ),
 ) -> None:
-    """Upload a skill from a markdown file with YAML front-matter.
+    """Upload a workflow from a markdown file with YAML front-matter.
 
     The front-matter follows the Claude Code skills convention:
 
@@ -239,7 +239,7 @@ def publish(
     console = Console()
     source = file.read_text(encoding="utf-8")
     front_matter, _stripped_body = _parse_front_matter(source)
-    # Server stores the full markdown (including front-matter) so the skill
+    # Server stores the full markdown (including front-matter) so the workflow
     # round-trips as a drop-in Claude Code SKILL.md.
     body = source
 
@@ -263,7 +263,7 @@ def publish(
     visibility = _resolve_visibility(public=public, front_matter=front_matter)
 
     with _client(require_auth=True) as client:
-        result = client.save_skill(
+        result = client.save_workflow(
             name=effective_name,
             description=description,
             body=body,
@@ -274,16 +274,16 @@ def publish(
 
     console.print(
         f"[green]Saved[/green] {result.name} v{result.version} "
-        f"(skill_id={result.skill_id}, visibility={result.visibility})"
+        f"(workflow_id={result.workflow_id}, visibility={result.visibility})"
     )
 
 
 @app.command("set-visibility")
 def set_visibility(
-    skill_id: str = typer.Argument(..., help="Skill ID or name."),
+    workflow_id: str = typer.Argument(..., help="Workflow ID or name."),
     visibility: str = typer.Argument(..., help="`private` or `public`."),
 ) -> None:
-    """Change a skill's visibility."""
+    """Change a workflow's visibility."""
     console = Console()
     visibility_norm = visibility.lower()
     if visibility_norm not in ("public", "private"):
@@ -292,24 +292,24 @@ def set_visibility(
             message="visibility must be 'public' or 'private'.",
         )
     with _client(require_auth=True) as client:
-        result = client.set_skill_visibility(skill_id, visibility_norm)
+        result = client.set_workflow_visibility(workflow_id, visibility_norm)
     console.print(f"[green]Updated[/green] {result.name} -> visibility={result.visibility}")
 
 
 @app.command("delete")
 def delete(
-    skill_id: str = typer.Argument(..., help="Skill ID or name."),
+    workflow_id: str = typer.Argument(..., help="Workflow ID or name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
-    """Delete a skill you own."""
+    """Delete a workflow you own."""
     console = Console()
     if not yes:
-        confirm = typer.confirm(f"Delete skill {skill_id}?", default=False)
+        confirm = typer.confirm(f"Delete workflow {workflow_id}?", default=False)
         if not confirm:
             console.print("Cancelled.")
             raise typer.Exit(code=1)
     with _client(require_auth=True) as client:
-        result = client.delete_skill(skill_id)
+        result = client.delete_workflow(workflow_id)
     if result.deleted:
         console.print(f"[green]Deleted[/green] {result.name}")
     else:

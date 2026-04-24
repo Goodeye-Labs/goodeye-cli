@@ -47,7 +47,7 @@ class ApiKeyList(_WireBase):
     next_cursor: str | None = None
 
 
-class SkillSummary(_WireBase):
+class WorkflowSummary(_WireBase):
     id: str
     name: str
     visibility: str
@@ -59,12 +59,12 @@ class SkillSummary(_WireBase):
     owner_user_id: str | None = None
 
 
-class SkillList(_WireBase):
-    items: list[SkillSummary]
+class WorkflowList(_WireBase):
+    items: list[WorkflowSummary]
     next_cursor: str | None = None
 
 
-class SkillDetail(_WireBase):
+class WorkflowDetail(_WireBase):
     id: str
     name: str
     visibility: str
@@ -77,21 +77,21 @@ class SkillDetail(_WireBase):
     updated_at: datetime | None = None
 
 
-class SkillSaveResult(_WireBase):
-    skill_id: str
+class WorkflowSaveResult(_WireBase):
+    workflow_id: str
     version: int
     name: str
     visibility: str
 
 
-class SkillVisibilityResult(_WireBase):
-    skill_id: str
+class WorkflowVisibilityResult(_WireBase):
+    workflow_id: str
     name: str
     visibility: str
 
 
-class SkillDeleteResult(_WireBase):
-    skill_id: str
+class WorkflowDeleteResult(_WireBase):
+    workflow_id: str
     name: str
     deleted: bool
 

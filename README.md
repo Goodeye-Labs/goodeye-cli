@@ -1,8 +1,8 @@
 # goodeye-cli
 
-Command-line client for Goodeye - manage AI workflow skills from the terminal.
+Command-line client for Goodeye - manage AI workflow workflows from the terminal.
 
-Goodeye is an outcome-aligned AI workflow registry: you author skills as
+Goodeye is an outcome-aligned AI workflow registry: you author workflows as
 markdown runbooks tagged with the business outcome they serve, and verifiers
 that score an AI agent against a measurable business result. This CLI is wired
 to the public `/v1/` REST API.
@@ -25,7 +25,7 @@ Once installed, the `goodeye` command is available on your `PATH`.
 
 ```sh
 # Browse the public registry without an account
-goodeye skills list --filter public
+goodeye workflows list --filter public
 
 # Create an account (emails a one-time code)
 goodeye signup --email you@example.com
@@ -36,25 +36,25 @@ goodeye login
 # Confirm who you are
 goodeye whoami
 
-# Fetch a public skill as markdown (copy `id` from the JSON; without a login,
-# `get` resolves public skills by UUID only, not by name)
-goodeye skills list --filter public --json
-goodeye skills get <id-from-above> > example-skill.md
+# Fetch a public workflow as markdown (copy `id` from the JSON; without a login,
+# `get` resolves public workflows by UUID only, not by name)
+goodeye workflows list --filter public --json
+goodeye workflows get <id-from-above> > example-workflow.md
 
-# Publish a local skill
-goodeye skills publish ./my-skill.md --public
+# Publish a local workflow
+goodeye workflows publish ./my-workflow.md --public
 ```
 
-### Skill files
+### Workflow files
 
-`goodeye skills publish` reads a markdown file with YAML front-matter that
+`goodeye workflows publish` reads a markdown file with YAML front-matter that
 follows the Claude Code skills convention. Only `name` and `description` are
 required:
 
 ```markdown
 ---
-name: my-skill
-description: One sentence on what this skill does and when to use it.
+name: my-workflow
+description: One sentence on what this workflow does and when to use it.
 # Optional discovery facets:
 # visibility: public        # overridden by --public
 # tags: [data, cleanup]
@@ -63,14 +63,14 @@ description: One sentence on what this skill does and when to use it.
 
 # Body
 
-The rest of the file is the skill body rendered to the agent at runtime.
+The rest of the file is the workflow body rendered to the agent at runtime.
 Verifier scripts and Truesight cURLs belong here as fenced code blocks; the
 registry stores the body verbatim.
 ```
 
 `--public` on the command line overrides `visibility`. `--name` on the command
 line overrides the front-matter `name`. The full file (front-matter included)
-is stored on the server, so `goodeye skills get` round-trips a drop-in
+is stored on the server, so `goodeye workflows get` round-trips a drop-in
 `~/.claude/skills/<name>/SKILL.md`.
 
 Pre-cleanup files that nest `outcome` / `tags` under a `manifest:` block are
@@ -106,30 +106,30 @@ goodeye auth revoke-key <key-id>
     Revoke an API key. The key stops working immediately. <key-id> is the
     ID shown by `auth list-keys`.
 
-goodeye skills list [--filter all|public|mine] [--tag TAG] [--search QUERY] [--json]
-    List skills you can access. The ID column is accepted by `get`, `delete`,
-    and `set-visibility`. When signed in, you can also use your own skill
+goodeye workflows list [--filter all|public|mine] [--tag TAG] [--search QUERY] [--json]
+    List workflows you can access. The ID column is accepted by `get`, `delete`,
+    and `set-visibility`. When signed in, you can also use your own workflow
     name (slug) with those commands.
 
-goodeye skills get <id-or-name> [--version N] [--output PATH] [--json]
-    Download a skill. Prints markdown to stdout; --json prints the full
-    record. When you are not signed in, use the skill's UUID from `list`
-    (name/slug resolution is for your own skills once authenticated).
+goodeye workflows get <id-or-name> [--version N] [--output PATH] [--json]
+    Download a workflow. Prints markdown to stdout; --json prints the full
+    record. When you are not signed in, use the workflow's UUID from `list`
+    (name/slug resolution is for your own workflows once authenticated).
 
-goodeye skills publish <file.md> [--public] [--name NAME]
-    Publish a skill from a markdown file. If a skill with the same name
+goodeye workflows publish <file.md> [--public] [--name NAME]
+    Publish a workflow from a markdown file. If a workflow with the same name
     already exists under your account, a new version is appended. Front-matter
     must include `name:` and `description:`.
 
-goodeye skills set-visibility <id-or-name> <private|public>
-    Change a skill's visibility.
+goodeye workflows set-visibility <id-or-name> <private|public>
+    Change a workflow's visibility.
 
-goodeye skills delete <id-or-name> [--yes]
-    Delete a skill you own.
+goodeye workflows delete <id-or-name> [--yes]
+    Delete a workflow you own.
 
 goodeye design
     Print the workflow-designer prompt to stdout. Pipe it into your AI
-    assistant to start designing a skill + verifier:
+    assistant to start designing a workflow + verifier:
         goodeye design > prompt.md
 ```
 

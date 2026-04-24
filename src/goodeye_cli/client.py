@@ -25,11 +25,11 @@ from goodeye_cli.wire import (
     ExchangeResult,
     MeResponse,
     SignupVerifyResult,
-    SkillDeleteResult,
-    SkillDetail,
-    SkillList,
-    SkillSaveResult,
-    SkillVisibilityResult,
+    WorkflowDeleteResult,
+    WorkflowDetail,
+    WorkflowList,
+    WorkflowSaveResult,
+    WorkflowVisibilityResult,
 )
 
 
@@ -160,15 +160,15 @@ class GoodeyeClient:
     def revoke_api_key(self, key_id: str) -> None:
         self._request("DELETE", f"/v1/api-keys/{key_id}")
 
-    # ----- skills -----
-    def list_skills(
+    # ----- workflows -----
+    def list_workflows(
         self,
         filter_: str | None = None,
         tag: str | None = None,
         search: str | None = None,
         limit: int = 50,
         cursor: str | None = None,
-    ) -> SkillList:
+    ) -> WorkflowList:
         params: dict[str, Any] = {"limit": limit}
         if filter_:
             params["filter"] = filter_
@@ -178,29 +178,29 @@ class GoodeyeClient:
             params["search"] = search
         if cursor:
             params["cursor"] = cursor
-        response = self._request("GET", "/v1/skills", params=params)
-        return SkillList.model_validate(response.json())
+        response = self._request("GET", "/v1/workflows", params=params)
+        return WorkflowList.model_validate(response.json())
 
-    def get_skill(
+    def get_workflow(
         self,
         id_or_slug: str,
         *,
         version: int | None = None,
         accept_markdown: bool = False,
-    ) -> SkillDetail | str:
-        """Fetch a skill. Returns a ``SkillDetail`` for JSON responses or a raw
+    ) -> WorkflowDetail | str:
+        """Fetch a workflow. Returns a ``WorkflowDetail`` for JSON responses or a raw
         markdown string when ``accept_markdown=True``.
         """
         params: dict[str, Any] = {}
         if version is not None:
             params["version"] = version
         accept = "text/markdown" if accept_markdown else "application/json"
-        response = self._request("GET", f"/v1/skills/{id_or_slug}", params=params, accept=accept)
+        response = self._request("GET", f"/v1/workflows/{id_or_slug}", params=params, accept=accept)
         if accept_markdown:
             return response.text
-        return SkillDetail.model_validate(response.json())
+        return WorkflowDetail.model_validate(response.json())
 
-    def save_skill(
+    def save_workflow(
         self,
         *,
         name: str,
@@ -209,11 +209,11 @@ class GoodeyeClient:
         outcome: str | None = None,
         tags: list[str] | None = None,
         visibility: str = "private",
-    ) -> SkillSaveResult:
-        """POST /v1/skills with the flat ``save_skill`` payload.
+    ) -> WorkflowSaveResult:
+        """POST /v1/workflows with the flat ``save_workflow`` payload.
 
         ``outcome`` and ``tags`` are top-level discovery facets surfaced by
-        ``list_skills``. The legacy ``manifest`` JSONB shape (with nested
+        ``list_workflows``. The legacy ``manifest`` JSONB shape (with nested
         ``kpi`` / ``programmatic_verifiers`` / ``semantic_verifiers`` / etc)
         was removed server-side on Apr 22, 2026; verifier scripts and
         Truesight cURLs now live as fenced blocks inside ``body``.
@@ -228,20 +228,22 @@ class GoodeyeClient:
             payload["outcome"] = outcome
         if tags:
             payload["tags"] = list(tags)
-        response = self._request("POST", "/v1/skills", json_body=payload)
-        return SkillSaveResult.model_validate(response.json())
+        response = self._request("POST", "/v1/workflows", json_body=payload)
+        return WorkflowSaveResult.model_validate(response.json())
 
-    def set_skill_visibility(self, skill_id: str, visibility: str) -> SkillVisibilityResult:
+    def set_workflow_visibility(
+        self, workflow_id: str, visibility: str
+    ) -> WorkflowVisibilityResult:
         response = self._request(
             "PUT",
-            f"/v1/skills/{skill_id}/visibility",
+            f"/v1/workflows/{workflow_id}/visibility",
             json_body={"visibility": visibility},
         )
-        return SkillVisibilityResult.model_validate(response.json())
+        return WorkflowVisibilityResult.model_validate(response.json())
 
-    def delete_skill(self, skill_id: str) -> SkillDeleteResult:
-        response = self._request("DELETE", f"/v1/skills/{skill_id}")
-        return SkillDeleteResult.model_validate(response.json())
+    def delete_workflow(self, workflow_id: str) -> WorkflowDeleteResult:
+        response = self._request("DELETE", f"/v1/workflows/{workflow_id}")
+        return WorkflowDeleteResult.model_validate(response.json())
 
     def get_design_prompt(self) -> dict[str, Any]:
         response = self._request("GET", "/v1/design/workflow-prompt")

@@ -1,4 +1,4 @@
-"""Tests for the skills subcommand group."""
+"""Tests for the workflows subcommand group."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import respx
 from typer.testing import CliRunner
 
 from goodeye_cli.app import app
-from goodeye_cli.commands.skills import _parse_front_matter
+from goodeye_cli.commands.workflows import _parse_front_matter
 from goodeye_cli.config import ConfigPaths, save_credentials
 
 SERVER = "https://example.test"
@@ -24,9 +24,9 @@ def _setup_creds(monkeypatch, tmp_config_paths: ConfigPaths) -> None:
 
 
 @respx.mock
-def test_skills_list_renders_table(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+def test_workflows_list_renders_table(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.get(f"{SERVER}/v1/skills").mock(
+    respx.get(f"{SERVER}/v1/workflows").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -36,14 +36,14 @@ def test_skills_list_renders_table(tmp_config_paths: ConfigPaths, monkeypatch) -
                         "name": "one",
                         "visibility": "public",
                         "current_version": 1,
-                        "description": "first skill",
+                        "description": "first workflow",
                     },
                     {
                         "id": "skl_02",
                         "name": "two",
                         "visibility": "private",
                         "current_version": 3,
-                        "description": "second skill",
+                        "description": "second workflow",
                     },
                 ],
                 "next_cursor": None,
@@ -51,14 +51,14 @@ def test_skills_list_renders_table(tmp_config_paths: ConfigPaths, monkeypatch) -
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["skills", "list", "--filter", "all"])
+    result = runner.invoke(app, ["workflows", "list", "--filter", "all"])
     assert result.exit_code == 0, result.output
     assert "skl_01" in result.output
     assert "skl_02" in result.output
 
 
 @respx.mock
-def test_skills_list_follows_cursor(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+def test_workflows_list_follows_cursor(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
     responses = [
         httpx.Response(
@@ -80,31 +80,31 @@ def test_skills_list_follows_cursor(tmp_config_paths: ConfigPaths, monkeypatch) 
             },
         ),
     ]
-    route = respx.get(f"{SERVER}/v1/skills").mock(side_effect=responses)
+    route = respx.get(f"{SERVER}/v1/workflows").mock(side_effect=responses)
 
     runner = CliRunner()
-    result = runner.invoke(app, ["skills", "list", "--filter", "public"])
+    result = runner.invoke(app, ["workflows", "list", "--filter", "public"])
     assert result.exit_code == 0, result.output
     assert route.call_count == 2
     assert "skl_01" in result.output and "skl_02" in result.output
 
 
 @respx.mock
-def test_skills_get_markdown_default(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+def test_workflows_get_markdown_default(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.get(f"{SERVER}/v1/skills/example").mock(
+    respx.get(f"{SERVER}/v1/workflows/example").mock(
         return_value=httpx.Response(200, text="# hi\nbody")
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["skills", "get", "example"])
+    result = runner.invoke(app, ["workflows", "get", "example"])
     assert result.exit_code == 0, result.output
     assert "# hi" in result.output
 
 
 @respx.mock
-def test_skills_get_json_flag(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+def test_workflows_get_json_flag(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.get(f"{SERVER}/v1/skills/example").mock(
+    respx.get(f"{SERVER}/v1/workflows/example").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -113,14 +113,14 @@ def test_skills_get_json_flag(tmp_config_paths: ConfigPaths, monkeypatch) -> Non
                 "visibility": "public",
                 "version": 1,
                 "body": "hi",
-                "description": "example skill",
+                "description": "example workflow",
                 "outcome": "ship more reliable refunds",
                 "tags": ["demo"],
             },
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["skills", "get", "example", "--json"])
+    result = runner.invoke(app, ["workflows", "get", "example", "--json"])
     assert result.exit_code == 0, result.output
     assert '"name": "example"' in result.output
     assert '"outcome": "ship more reliable refunds"' in result.output
@@ -130,21 +130,21 @@ def test_skills_get_json_flag(tmp_config_paths: ConfigPaths, monkeypatch) -> Non
 def test_publish_minimal_front_matter(
     tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
-    """Claude-Code-style minimal skill: just name + description + body."""
+    """Claude-Code-style minimal workflow: just name + description + body."""
     _setup_creds(monkeypatch, tmp_config_paths)
-    skill_file = tmp_path / "hello.md"
-    skill_file.write_text(
+    workflow_file = tmp_path / "hello.md"
+    workflow_file.write_text(
         "---\n"
         "name: hello\n"
         "description: Say hi to the world. Use when onboarding.\n"
         "---\n"
         "# Hello\n\nGreet the user.\n"
     )
-    route = respx.post(f"{SERVER}/v1/skills").mock(
+    route = respx.post(f"{SERVER}/v1/workflows").mock(
         return_value=httpx.Response(
             201,
             json={
-                "skill_id": "skl_01",
+                "workflow_id": "skl_01",
                 "version": 1,
                 "name": "hello",
                 "visibility": "private",
@@ -152,7 +152,7 @@ def test_publish_minimal_front_matter(
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["skills", "publish", str(skill_file)])
+    result = runner.invoke(app, ["workflows", "publish", str(workflow_file)])
     assert result.exit_code == 0, result.output
 
     sent = _json.loads(route.calls.last.request.content.decode())
@@ -176,26 +176,26 @@ def test_publish_accepts_slug_alias_in_front_matter(
 ) -> None:
     """Transitional: older authored files may still use `slug:` instead of `name:`."""
     _setup_creds(monkeypatch, tmp_config_paths)
-    skill_file = tmp_path / "legacy.md"
-    skill_file.write_text(
-        "---\nslug: my-skill\ndescription: test desc\n---\nBody\n",
+    workflow_file = tmp_path / "legacy.md"
+    workflow_file.write_text(
+        "---\nslug: my-workflow\ndescription: test desc\n---\nBody\n",
     )
-    route = respx.post(f"{SERVER}/v1/skills").mock(
+    route = respx.post(f"{SERVER}/v1/workflows").mock(
         return_value=httpx.Response(
             201,
             json={
-                "skill_id": "skl_01",
+                "workflow_id": "skl_01",
                 "version": 1,
-                "name": "my-skill",
+                "name": "my-workflow",
                 "visibility": "private",
             },
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["skills", "publish", str(skill_file)])
+    result = runner.invoke(app, ["workflows", "publish", str(workflow_file)])
     assert result.exit_code == 0, result.output
     sent = _json.loads(route.calls.last.request.content.decode())
-    assert sent["name"] == "my-skill"
+    assert sent["name"] == "my-workflow"
 
 
 @respx.mock
@@ -203,10 +203,10 @@ def test_publish_missing_description_errors(
     tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    skill_file = tmp_path / "no-desc.md"
-    skill_file.write_text("---\nname: no-desc\n---\nBody\n")
+    workflow_file = tmp_path / "no-desc.md"
+    workflow_file.write_text("---\nname: no-desc\n---\nBody\n")
     runner = CliRunner()
-    result = runner.invoke(app, ["skills", "publish", str(skill_file)])
+    result = runner.invoke(app, ["workflows", "publish", str(workflow_file)])
     assert result.exit_code != 0
     # ValidationFailed bubbles up as an exception under CliRunner; inspect
     # the exception message rather than captured output.
@@ -219,29 +219,29 @@ def test_publish_tags_and_outcome(
     tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    skill_file = tmp_path / "rich.md"
-    skill_file.write_text(
+    workflow_file = tmp_path / "rich.md"
+    workflow_file.write_text(
         "---\n"
-        "name: rich-skill\n"
-        "description: A skill with discovery facets.\n"
+        "name: rich-workflow\n"
+        "description: A workflow with discovery facets.\n"
         "tags: [csv, stripe]\n"
         "outcome: Reduce refund-row errors\n"
         "---\n"
         "# Body\n",
     )
-    route = respx.post(f"{SERVER}/v1/skills").mock(
+    route = respx.post(f"{SERVER}/v1/workflows").mock(
         return_value=httpx.Response(
             201,
             json={
-                "skill_id": "skl_01",
+                "workflow_id": "skl_01",
                 "version": 1,
-                "name": "rich-skill",
+                "name": "rich-workflow",
                 "visibility": "private",
             },
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["skills", "publish", str(skill_file)])
+    result = runner.invoke(app, ["workflows", "publish", str(workflow_file)])
     assert result.exit_code == 0, result.output
 
     sent = _json.loads(route.calls.last.request.content.decode())
@@ -256,11 +256,11 @@ def test_publish_legacy_manifest_promotes_outcome_and_tags(
 ) -> None:
     """Pre-cleanup files nest outcome/tags under manifest:; promote them and warn."""
     _setup_creds(monkeypatch, tmp_config_paths)
-    skill_file = tmp_path / "legacy.md"
-    skill_file.write_text(
+    workflow_file = tmp_path / "legacy.md"
+    workflow_file.write_text(
         "---\n"
-        "name: legacy-skill\n"
-        "description: An old-style skill with a manifest block.\n"
+        "name: legacy-workflow\n"
+        "description: An old-style workflow with a manifest block.\n"
         "manifest:\n"
         "  outcome: Reduce refund-row errors\n"
         "  tags: [csv, stripe]\n"
@@ -271,19 +271,19 @@ def test_publish_legacy_manifest_promotes_outcome_and_tags(
         "---\n"
         "# Body\n",
     )
-    route = respx.post(f"{SERVER}/v1/skills").mock(
+    route = respx.post(f"{SERVER}/v1/workflows").mock(
         return_value=httpx.Response(
             201,
             json={
-                "skill_id": "skl_01",
+                "workflow_id": "skl_01",
                 "version": 1,
-                "name": "legacy-skill",
+                "name": "legacy-workflow",
                 "visibility": "private",
             },
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["skills", "publish", str(skill_file)])
+    result = runner.invoke(app, ["workflows", "publish", str(workflow_file)])
     assert result.exit_code == 0, result.output
 
     sent = _json.loads(route.calls.last.request.content.decode())
@@ -301,10 +301,10 @@ def test_publish_top_level_outcome_wins_over_manifest(
 ) -> None:
     """When both top-level outcome and manifest.outcome exist, top-level wins."""
     _setup_creds(monkeypatch, tmp_config_paths)
-    skill_file = tmp_path / "mixed.md"
-    skill_file.write_text(
+    workflow_file = tmp_path / "mixed.md"
+    workflow_file.write_text(
         "---\n"
-        "name: mixed-skill\n"
+        "name: mixed-workflow\n"
         "description: Has both shapes.\n"
         "outcome: Top-level wins\n"
         "manifest:\n"
@@ -312,19 +312,19 @@ def test_publish_top_level_outcome_wins_over_manifest(
         "---\n"
         "# Body\n",
     )
-    route = respx.post(f"{SERVER}/v1/skills").mock(
+    route = respx.post(f"{SERVER}/v1/workflows").mock(
         return_value=httpx.Response(
             201,
             json={
-                "skill_id": "skl_01",
+                "workflow_id": "skl_01",
                 "version": 1,
-                "name": "mixed-skill",
+                "name": "mixed-workflow",
                 "visibility": "private",
             },
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["skills", "publish", str(skill_file)])
+    result = runner.invoke(app, ["workflows", "publish", str(workflow_file)])
     assert result.exit_code == 0, result.output
     sent = _json.loads(route.calls.last.request.content.decode())
     assert sent["outcome"] == "Top-level wins"
@@ -335,23 +335,23 @@ def test_publish_public_flag_overrides_front_matter(
     tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    skill_file = tmp_path / "skill.md"
-    skill_file.write_text(
-        "---\nname: my-skill\ndescription: test\nvisibility: private\n---\nBody\n",
+    workflow_file = tmp_path / "workflow.md"
+    workflow_file.write_text(
+        "---\nname: my-workflow\ndescription: test\nvisibility: private\n---\nBody\n",
     )
-    route = respx.post(f"{SERVER}/v1/skills").mock(
+    route = respx.post(f"{SERVER}/v1/workflows").mock(
         return_value=httpx.Response(
             201,
             json={
-                "skill_id": "skl_01",
+                "workflow_id": "skl_01",
                 "version": 1,
-                "name": "my-skill",
+                "name": "my-workflow",
                 "visibility": "public",
             },
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["skills", "publish", str(skill_file), "--public"])
+    result = runner.invoke(app, ["workflows", "publish", str(workflow_file), "--public"])
     assert result.exit_code == 0, result.output
 
     sent = _json.loads(route.calls.last.request.content.decode())
@@ -359,28 +359,28 @@ def test_publish_public_flag_overrides_front_matter(
 
 
 @respx.mock
-def test_skills_set_visibility(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+def test_workflows_set_visibility(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.put(f"{SERVER}/v1/skills/skl_01/visibility").mock(
+    respx.put(f"{SERVER}/v1/workflows/skl_01/visibility").mock(
         return_value=httpx.Response(
-            200, json={"skill_id": "skl_01", "name": "skl_01", "visibility": "public"}
+            200, json={"workflow_id": "skl_01", "name": "skl_01", "visibility": "public"}
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["skills", "set-visibility", "skl_01", "public"])
+    result = runner.invoke(app, ["workflows", "set-visibility", "skl_01", "public"])
     assert result.exit_code == 0, result.output
 
 
 @respx.mock
-def test_skills_delete_with_yes_flag(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+def test_workflows_delete_with_yes_flag(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.delete(f"{SERVER}/v1/skills/skl_01").mock(
+    respx.delete(f"{SERVER}/v1/workflows/skl_01").mock(
         return_value=httpx.Response(
-            200, json={"skill_id": "skl_01", "name": "skl_01", "deleted": True}
+            200, json={"workflow_id": "skl_01", "name": "skl_01", "deleted": True}
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["skills", "delete", "skl_01", "--yes"])
+    result = runner.invoke(app, ["workflows", "delete", "skl_01", "--yes"])
     assert result.exit_code == 0, result.output
     assert "Deleted" in result.output
 

@@ -40,7 +40,7 @@ def design(
 ) -> None:
     """Print the workflow-designer prompt to stdout.
 
-    Pipe it into your AI assistant to start designing a skill + verifier:
+    Pipe it into your AI assistant to start designing a workflow + verifier:
 
     \b
         goodeye design > prompt.md

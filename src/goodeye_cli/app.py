@@ -13,13 +13,13 @@ from goodeye_cli.commands import design as design_cmd
 from goodeye_cli.commands import login as login_cmd
 from goodeye_cli.commands import logout as logout_cmd
 from goodeye_cli.commands import signup as signup_cmd
-from goodeye_cli.commands import skills as skills_cmds
 from goodeye_cli.commands import whoami as whoami_cmd
+from goodeye_cli.commands import workflows as workflows_cmds
 from goodeye_cli.errors import GoodeyeError
 
 app = typer.Typer(
     name="goodeye",
-    help="Goodeye CLI - manage AI workflow skills from the terminal.",
+    help="Goodeye CLI - manage AI workflows from the terminal.",
     no_args_is_help=True,
     add_completion=False,
 )
@@ -33,7 +33,7 @@ app.command("design")(design_cmd.design)
 
 # Command groups.
 app.add_typer(auth_cmds.app, name="auth", help="Manage API keys.")
-app.add_typer(skills_cmds.app, name="skills", help="Browse and manage skills.")
+app.add_typer(workflows_cmds.app, name="workflows", help="Browse and manage workflows.")
 
 
 def _version_callback(value: bool) -> None:
