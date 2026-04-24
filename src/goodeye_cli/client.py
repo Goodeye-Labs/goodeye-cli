@@ -30,11 +30,16 @@ from goodeye_cli.wire import (
     TeamDeleteResult,
     TeamList,
     TeamMember,
+    TemplateDetail,
+    TemplateForkResult,
+    TemplateList,
+    TemplatePublishResult,
+    TemplateUnpublishResult,
     WorkflowDeleteResult,
     WorkflowDetail,
+    WorkflowLineage,
     WorkflowList,
     WorkflowSaveResult,
-    WorkflowVisibilityResult,
 )
 
 
@@ -217,21 +222,18 @@ class GoodeyeClient:
         body: str,
         outcome: str | None = None,
         tags: list[str] | None = None,
-        visibility: str = "private",
     ) -> WorkflowSaveResult:
         """POST /v1/workflows with the flat ``save_workflow`` payload.
 
-        ``outcome`` and ``tags`` are top-level discovery facets surfaced by
-        ``list_workflows``. The legacy ``manifest`` JSONB shape (with nested
-        ``kpi`` / ``programmatic_verifiers`` / ``semantic_verifiers`` / etc)
-        was removed server-side on Apr 22, 2026; verifier scripts and
-        Truesight cURLs now live as fenced blocks inside ``body``.
+        Workflows are always private to the caller. Public sharing is a
+        separate explicit step (``publish_template_version``). ``outcome``
+        and ``tags`` are top-level discovery facets surfaced by
+        ``list_workflows``.
         """
         payload: dict[str, Any] = {
             "name": name,
             "description": description,
             "body": body,
-            "visibility": visibility,
         }
         if outcome:
             payload["outcome"] = outcome
@@ -240,19 +242,76 @@ class GoodeyeClient:
         response = self._request("POST", "/v1/workflows", json_body=payload)
         return WorkflowSaveResult.model_validate(response.json())
 
-    def set_workflow_visibility(
-        self, workflow_id: str, visibility: str
-    ) -> WorkflowVisibilityResult:
-        response = self._request(
-            "PUT",
-            f"/v1/workflows/{workflow_id}/visibility",
-            json_body={"visibility": visibility},
-        )
-        return WorkflowVisibilityResult.model_validate(response.json())
-
     def delete_workflow(self, workflow_id: str) -> WorkflowDeleteResult:
         response = self._request("DELETE", f"/v1/workflows/{workflow_id}")
         return WorkflowDeleteResult.model_validate(response.json())
+
+    def lookup_workflow_lineage(self, id_or_slug: str) -> WorkflowLineage:
+        response = self._request("GET", f"/v1/workflows/{id_or_slug}/lineage")
+        return WorkflowLineage.model_validate(response.json())
+
+    # ----- templates -----
+    def list_templates(
+        self,
+        *,
+        filter_: str | None = None,
+        search: str | None = None,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> TemplateList:
+        params: dict[str, Any] = {"limit": limit}
+        if filter_:
+            params["filter"] = filter_
+        if search:
+            params["search"] = search
+        if cursor:
+            params["cursor"] = cursor
+        response = self._request("GET", "/v1/templates", params=params)
+        return TemplateList.model_validate(response.json())
+
+    def get_template(
+        self,
+        identifier: str,
+        *,
+        version: int | None = None,
+        accept_markdown: bool = False,
+    ) -> TemplateDetail | str:
+        params: dict[str, Any] = {}
+        if version is not None:
+            params["version"] = version
+        accept = "text/markdown" if accept_markdown else "application/json"
+        response = self._request("GET", f"/v1/templates/{identifier}", params=params, accept=accept)
+        if accept_markdown:
+            return response.text
+        return TemplateDetail.model_validate(response.json())
+
+    def publish_template_version(
+        self, workflow_id: str, *, release_notes: str | None = None
+    ) -> TemplatePublishResult:
+        body: dict[str, Any] = {"workflow_id": workflow_id}
+        if release_notes is not None:
+            body["release_notes"] = release_notes
+        response = self._request("POST", "/v1/templates", json_body=body)
+        return TemplatePublishResult.model_validate(response.json())
+
+    def unpublish_template_version(self, template_id: str, version: int) -> TemplateUnpublishResult:
+        response = self._request("DELETE", f"/v1/templates/{template_id}/versions/{version}")
+        return TemplateUnpublishResult.model_validate(response.json())
+
+    def fork_template(
+        self,
+        identifier: str,
+        *,
+        version: int | None = None,
+        name: str | None = None,
+    ) -> TemplateForkResult:
+        body: dict[str, Any] = {"identifier": identifier}
+        if version is not None:
+            body["version"] = version
+        if name is not None:
+            body["name"] = name
+        response = self._request("POST", "/v1/templates/fork", json_body=body)
+        return TemplateForkResult.model_validate(response.json())
 
     # ----- teams -----
     def create_team(self, handle: str) -> TeamCreated:

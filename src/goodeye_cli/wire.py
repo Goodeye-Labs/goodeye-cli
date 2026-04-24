@@ -57,13 +57,15 @@ class ApiKeyList(_WireBase):
 class WorkflowSummary(_WireBase):
     id: str
     name: str
-    visibility: str
     current_version: int
     description: str = ""
     outcome: str = ""
     tags: list[str] = Field(default_factory=list)
     updated_at: datetime | None = None
     owner_user_id: str | None = None
+    parent_template_id: str | None = None
+    parent_template_version: int | None = None
+    is_ephemeral: bool = False
 
 
 class WorkflowList(_WireBase):
@@ -74,7 +76,6 @@ class WorkflowList(_WireBase):
 class WorkflowDetail(_WireBase):
     id: str
     name: str
-    visibility: str
     version: int
     body: str
     description: str = ""
@@ -82,25 +83,87 @@ class WorkflowDetail(_WireBase):
     tags: list[str] = Field(default_factory=list)
     owner_user_id: str | None = None
     updated_at: datetime | None = None
+    parent_template_id: str | None = None
+    parent_template_version: int | None = None
+    is_ephemeral: bool = False
 
 
 class WorkflowSaveResult(_WireBase):
     workflow_id: str
     version: int
     name: str
-    visibility: str
-
-
-class WorkflowVisibilityResult(_WireBase):
-    workflow_id: str
-    name: str
-    visibility: str
 
 
 class WorkflowDeleteResult(_WireBase):
     workflow_id: str
     name: str
     deleted: bool
+
+
+class WorkflowLineage(_WireBase):
+    workflow_id: str
+    parent_template_id: str | None = None
+    parent_template_version: int | None = None
+    upstream_latest_version: int | None = None
+    is_upstream_unpublished: bool | None = None
+
+
+class TemplateSummary(_WireBase):
+    id: str
+    slug: str
+    name: str
+    handle: str
+    owner_user_id: str
+    latest_version: int
+    description: str = ""
+    outcome: str = ""
+    tags: list[str] = Field(default_factory=list)
+    publishing_handle: str
+    published_at: datetime | None = None
+
+
+class TemplateList(_WireBase):
+    items: list[TemplateSummary]
+    next_cursor: str | None = None
+
+
+class TemplateDetail(_WireBase):
+    id: str
+    slug: str
+    name: str
+    handle: str
+    owner_user_id: str
+    version: int
+    body: str
+    description: str = ""
+    outcome: str = ""
+    tags: list[str] = Field(default_factory=list)
+    release_notes: str | None = None
+    publishing_handle: str
+    safety_verification_status: str = "unverified"
+    published_at: datetime | None = None
+    unpublished_at: datetime | None = None
+
+
+class TemplatePublishResult(_WireBase):
+    template_id: str
+    version: int
+    publishing_handle: str
+
+
+class TemplateUnpublishResult(_WireBase):
+    template_id: str
+    version: int
+    unpublished: bool
+
+
+class TemplateForkResult(_WireBase):
+    workflow_id: str
+    slug: str
+    name: str
+    parent_template_id: str
+    parent_template_version: int
+    is_ephemeral: bool = False
 
 
 class SignupVerifyResult(_WireBase):

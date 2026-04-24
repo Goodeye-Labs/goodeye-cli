@@ -41,9 +41,7 @@ def test_teams_create_success(tmp_config_paths: ConfigPaths, monkeypatch) -> Non
 
 
 @respx.mock
-def test_teams_create_handle_not_claimed(
-    tmp_config_paths: ConfigPaths, monkeypatch
-) -> None:
+def test_teams_create_handle_not_claimed(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE")
     respx.post(f"{SERVER}/v1/teams").mock(
         return_value=httpx.Response(

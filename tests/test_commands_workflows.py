@@ -158,7 +158,8 @@ def test_publish_minimal_front_matter(
     sent = _json.loads(route.calls.last.request.content.decode())
     assert sent["name"] == "hello"
     assert sent["description"].startswith("Say hi")
-    assert sent["visibility"] == "private"
+    # visibility is no longer a workflow field (dropped with templates).
+    assert "visibility" not in sent
     # No discovery facets in the payload when front-matter omits them.
     assert "outcome" not in sent
     assert "tags" not in sent
@@ -328,47 +329,6 @@ def test_publish_top_level_outcome_wins_over_manifest(
     assert result.exit_code == 0, result.output
     sent = _json.loads(route.calls.last.request.content.decode())
     assert sent["outcome"] == "Top-level wins"
-
-
-@respx.mock
-def test_publish_public_flag_overrides_front_matter(
-    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
-) -> None:
-    _setup_creds(monkeypatch, tmp_config_paths)
-    workflow_file = tmp_path / "workflow.md"
-    workflow_file.write_text(
-        "---\nname: my-workflow\ndescription: test\nvisibility: private\n---\nBody\n",
-    )
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
-        return_value=httpx.Response(
-            201,
-            json={
-                "workflow_id": "skl_01",
-                "version": 1,
-                "name": "my-workflow",
-                "visibility": "public",
-            },
-        )
-    )
-    runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "publish", str(workflow_file), "--public"])
-    assert result.exit_code == 0, result.output
-
-    sent = _json.loads(route.calls.last.request.content.decode())
-    assert sent["visibility"] == "public"
-
-
-@respx.mock
-def test_workflows_set_visibility(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
-    _setup_creds(monkeypatch, tmp_config_paths)
-    respx.put(f"{SERVER}/v1/workflows/skl_01/visibility").mock(
-        return_value=httpx.Response(
-            200, json={"workflow_id": "skl_01", "name": "skl_01", "visibility": "public"}
-        )
-    )
-    runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "set-visibility", "skl_01", "public"])
-    assert result.exit_code == 0, result.output
 
 
 @respx.mock

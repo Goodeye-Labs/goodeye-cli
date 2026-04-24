@@ -15,6 +15,7 @@ from goodeye_cli.commands import logout as logout_cmd
 from goodeye_cli.commands import me as me_cmds
 from goodeye_cli.commands import signup as signup_cmd
 from goodeye_cli.commands import teams as teams_cmds
+from goodeye_cli.commands import templates as templates_cmds
 from goodeye_cli.commands import whoami as whoami_cmd
 from goodeye_cli.commands import workflows as workflows_cmds
 from goodeye_cli.errors import GoodeyeError
@@ -37,6 +38,7 @@ app.command("design")(design_cmd.design)
 app.add_typer(auth_cmds.app, name="auth", help="Manage API keys.")
 app.add_typer(me_cmds.app, name="me", help="View and update your profile.")
 app.add_typer(workflows_cmds.app, name="workflows", help="Browse and manage workflows.")
+app.add_typer(templates_cmds.app, name="templates", help="Browse, publish, and fork templates.")
 app.add_typer(teams_cmds.app, name="teams", help="Manage teams.")
 
 

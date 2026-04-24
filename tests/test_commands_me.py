@@ -36,9 +36,7 @@ def test_claim_handle_success(tmp_config_paths: ConfigPaths, monkeypatch) -> Non
 
 
 @respx.mock
-def test_claim_handle_reserved_errors_out(
-    tmp_config_paths: ConfigPaths, monkeypatch
-) -> None:
+def test_claim_handle_reserved_errors_out(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE")
     respx.patch(f"{SERVER}/v1/me").mock(
         return_value=httpx.Response(

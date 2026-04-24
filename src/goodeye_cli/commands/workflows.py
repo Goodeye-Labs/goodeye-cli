@@ -33,20 +33,20 @@ def _client(*, require_auth: bool) -> GoodeyeClient:
 @app.command("list")
 def list_cmd(
     filter_: str = typer.Option(
-        "all",
+        "mine",
         "--filter",
         "-f",
-        help="Scope filter: all, public, or mine.",
+        help="Scope filter: mine or all (workflows are always private; these are equivalent).",
         case_sensitive=False,
     ),
     tag: str | None = typer.Option(None, "--tag", "-t", help="Filter by tag."),
     search: str | None = typer.Option(None, "--search", "-s", help="Search query."),
     json_output: bool = typer.Option(False, "--json", help="Print results as JSON."),
 ) -> None:
-    """List workflows you can access."""
+    """List workflows you own."""
     console = Console()
     items: list[Any] = []
-    with _client(require_auth=False) as client:
+    with _client(require_auth=True) as client:
         cursor: str | None = None
         while True:
             page = client.list_workflows(
@@ -67,13 +67,14 @@ def list_cmd(
     table = Table(title=f"Workflows ({filter_})")
     table.add_column("ID", no_wrap=True)
     table.add_column("Name")
-    table.add_column("Visibility")
     table.add_column("Version", justify="right")
+    table.add_column("Fork of", no_wrap=True)
     table.add_column("Description")
     for item in items:
-        table.add_row(
-            item.id, item.name, item.visibility, str(item.current_version), item.description
-        )
+        fork_cell = ""
+        if item.parent_template_id:
+            fork_cell = f"tpl {item.parent_template_id[:8]}...@v{item.parent_template_version}"
+        table.add_row(item.id, item.name, str(item.current_version), fork_cell, item.description)
     if not items:
         console.print("[dim]No workflows matched.[/dim]")
     else:
@@ -93,7 +94,7 @@ def get_cmd(
 ) -> None:
     """Download a workflow. Prints the workflow's markdown to stdout."""
     console = Console(stderr=True)
-    with _client(require_auth=False) as client:
+    with _client(require_auth=True) as client:
         result = client.get_workflow(id_or_name, version=version, accept_markdown=not json_output)
 
     if json_output:
@@ -195,19 +196,9 @@ def _extract_discovery_facets(
     return outcome, tags
 
 
-def _resolve_visibility(*, public: bool, front_matter: dict[str, Any]) -> str:
-    if public:
-        return "public"
-    fm_visibility = front_matter.get("visibility")
-    if fm_visibility in ("public", "private"):
-        return str(fm_visibility)
-    return "private"
-
-
 @app.command("publish")
 def publish(
     file: Path = typer.Argument(..., exists=True, readable=True, help="Markdown file to upload."),
-    public: bool = typer.Option(False, "--public", help="Mark as public. Default is private."),
     name_override: str | None = typer.Option(
         None, "--name", help="Override the `name` from front-matter."
     ),
@@ -221,20 +212,18 @@ def publish(
     name: incident-postmortem
     description: Draft a postmortem from an incident transcript. Use when ...
     # Optional discovery facets:
-    # visibility: public
     # tags: [sre, postmortem]
     # outcome: Reduce mean-time-to-postmortem from days to hours.
     ---
 
     Only ``name`` and ``description`` are required. Everything else is optional.
-    ``--public`` overrides the front-matter ``visibility`` when provided.
+
+    Workflows are always private to the caller. To share a workflow as a
+    public template, run ``goodeye templates publish <workflow-id>`` as a
+    separate, explicit step.
 
     Verifier scripts and Truesight cURLs belong in the body as fenced code
-    blocks; the registry treats the body as opaque markdown. Pre-cleanup
-    files that nest ``outcome`` / ``tags`` under a ``manifest:`` block are
-    still accepted for back-compat: those two keys are promoted to the
-    top level and the rest of the manifest is dropped (the server no
-    longer stores ``kpi`` / ``programmatic_verifiers`` / etc.).
+    blocks; the registry treats the body as opaque markdown.
     """
     console = Console()
     source = file.read_text(encoding="utf-8")
@@ -260,7 +249,6 @@ def publish(
         )
 
     outcome, tags = _extract_discovery_facets(front_matter, console=console)
-    visibility = _resolve_visibility(public=public, front_matter=front_matter)
 
     with _client(require_auth=True) as client:
         result = client.save_workflow(
@@ -269,31 +257,35 @@ def publish(
             body=body,
             outcome=outcome,
             tags=tags,
-            visibility=visibility,
         )
 
     console.print(
         f"[green]Saved[/green] {result.name} v{result.version} "
-        f"(workflow_id={result.workflow_id}, visibility={result.visibility})"
+        f"(workflow_id={result.workflow_id})"
     )
 
 
-@app.command("set-visibility")
-def set_visibility(
+@app.command("lineage")
+def lineage(
     workflow_id: str = typer.Argument(..., help="Workflow ID or name."),
-    visibility: str = typer.Argument(..., help="`private` or `public`."),
+    json_output: bool = typer.Option(False, "--json", help="Print lineage as JSON."),
 ) -> None:
-    """Change a workflow's visibility."""
+    """Show a workflow's fork lineage."""
     console = Console()
-    visibility_norm = visibility.lower()
-    if visibility_norm not in ("public", "private"):
-        raise ValidationFailed(
-            slug="validation_error",
-            message="visibility must be 'public' or 'private'.",
-        )
     with _client(require_auth=True) as client:
-        result = client.set_workflow_visibility(workflow_id, visibility_norm)
-    console.print(f"[green]Updated[/green] {result.name} -> visibility={result.visibility}")
+        result = client.lookup_workflow_lineage(workflow_id)
+    if json_output:
+        typer.echo(result.model_dump_json(indent=2))
+        return
+    if result.parent_template_id is None:
+        console.print("[dim]Not a fork (no parent template).[/dim]")
+        return
+    console.print(
+        f"Forked from template {result.parent_template_id} "
+        f"pinned to v{result.parent_template_version}; "
+        f"upstream latest: v{result.upstream_latest_version}; "
+        f"upstream unpublished at pinned version: {result.is_upstream_unpublished}."
+    )
 
 
 @app.command("delete")
@@ -321,7 +313,7 @@ __all__ = [
     "app",
     "delete",
     "get_cmd",
+    "lineage",
     "list_cmd",
     "publish",
-    "set_visibility",
 ]

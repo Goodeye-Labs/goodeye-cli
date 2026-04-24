@@ -137,6 +137,4 @@ def transfer_ownership(
     console = Console()
     with _require_client() as client:
         client.transfer_team_ownership(team_id, new_owner_user_id)
-    console.print(
-        f"[green]Transferred[/green] team {team_id} ownership to {new_owner_user_id}"
-    )
+    console.print(f"[green]Transferred[/green] team {team_id} ownership to {new_owner_user_id}")
