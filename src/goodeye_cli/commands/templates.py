@@ -87,9 +87,7 @@ def list_cmd(
 
 @app.command("get")
 def get_cmd(
-    identifier: str = typer.Argument(
-        ..., help="Template UUID, @handle/slug, or @handle/slug@vN."
-    ),
+    identifier: str = typer.Argument(..., help="Template UUID, @handle/slug, or @handle/slug@vN."),
     version: int | None = typer.Option(None, "--version", "-v", help="Pinned version."),
     output: Path | None = typer.Option(
         None, "--output", "-o", help="Write body to this path instead of stdout."
@@ -101,9 +99,7 @@ def get_cmd(
     """Download a template. Prints the template's markdown to stdout."""
     console = Console(stderr=True)
     with _client(require_auth=False) as client:
-        result = client.get_template(
-            identifier, version=version, accept_markdown=not json_output
-        )
+        result = client.get_template(identifier, version=version, accept_markdown=not json_output)
 
     if json_output:
         assert isinstance(result, TemplateDetail)
@@ -136,9 +132,7 @@ def publish(
     """
     console = Console()
     with _client(require_auth=True) as client:
-        result = client.publish_template_version(
-            workflow_id, release_notes=release_notes
-        )
+        result = client.publish_template_version(workflow_id, release_notes=release_notes)
     console.print(
         f"[green]Published[/green] template {result.template_id} v{result.version} "
         f"as @{result.publishing_handle}"
@@ -158,16 +152,12 @@ def unpublish(
     console = Console()
     with _client(require_auth=True) as client:
         result = client.unpublish_template_version(template_id, version)
-    console.print(
-        f"[green]Unpublished[/green] template {result.template_id} v{result.version}"
-    )
+    console.print(f"[green]Unpublished[/green] template {result.template_id} v{result.version}")
 
 
 @app.command("fork")
 def fork(
-    identifier: str = typer.Argument(
-        ..., help="Template UUID, @handle/slug, or @handle/slug@vN."
-    ),
+    identifier: str = typer.Argument(..., help="Template UUID, @handle/slug, or @handle/slug@vN."),
     version: int | None = typer.Option(
         None, "--version", "-v", help="Pin to a specific template version."
     ),
