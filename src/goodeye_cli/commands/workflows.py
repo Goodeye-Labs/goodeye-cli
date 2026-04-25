@@ -37,7 +37,10 @@ def list_cmd(
         "mine",
         "--filter",
         "-f",
-        help="Scope filter: mine or all (workflows are always private; these are equivalent).",
+        help=(
+            "Scope filter: mine (workflows you own), shared-with-me "
+            "(workflows shared with you via grants), or all (mine + shared)."
+        ),
         case_sensitive=False,
     ),
     tag: str | None = typer.Option(None, "--tag", "-t", help="Filter by tag."),

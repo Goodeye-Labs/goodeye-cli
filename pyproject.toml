@@ -8,7 +8,7 @@ requires-python = ">=3.12"
 authors = [
   { name = "Goodeye Labs" },
 ]
-keywords = ["goodeye", "cli", "ai", "agents", "llm", "mcp", "skills", "workflows"]
+keywords = ["goodeye", "cli", "ai", "agents", "llm", "mcp", "workflows"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",
