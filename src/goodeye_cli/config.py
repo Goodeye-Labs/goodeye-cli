@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-DEFAULT_SERVER = "https://mcp.goodeyelabs.com"
+DEFAULT_SERVER = "https://api.goodeyelabs.com"
 
 
 @dataclass(frozen=True)

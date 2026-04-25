@@ -69,7 +69,7 @@ class GoodeyeClient:
 
     Use as a context manager to ensure the underlying connection pool is closed::
 
-        with GoodeyeClient(server="https://mcp.goodeyelabs.com") as client:
+        with GoodeyeClient(server="https://api.goodeyelabs.com") as client:
             me = client.get_me()
     """
 
