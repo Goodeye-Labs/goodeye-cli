@@ -44,6 +44,7 @@ from goodeye_cli.wire import (
     WorkflowLineage,
     WorkflowList,
     WorkflowSaveResult,
+    WorkflowTeachResult,
 )
 
 
@@ -296,6 +297,25 @@ class GoodeyeClient:
     def lookup_workflow_lineage(self, id_or_slug: str) -> WorkflowLineage:
         response = self._request("GET", f"/v1/workflows/{id_or_slug}/lineage")
         return WorkflowLineage.model_validate(response.json())
+
+    def teach_workflow(
+        self,
+        id_or_slug: str,
+        *,
+        scenario: dict[str, Any] | None = None,
+        trigger_context: dict[str, Any] | None = None,
+        max_rounds: int = 3,
+    ) -> WorkflowTeachResult:
+        response = self._request(
+            "POST",
+            f"/v1/workflows/{id_or_slug}/teach",
+            json_body={
+                "scenario": scenario,
+                "trigger_context": trigger_context,
+                "max_rounds": max_rounds,
+            },
+        )
+        return WorkflowTeachResult.model_validate(response.json())
 
     # ----- templates -----
     def list_templates(

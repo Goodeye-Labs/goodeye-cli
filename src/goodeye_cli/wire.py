@@ -8,6 +8,7 @@ do not break old CLI releases.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -139,6 +140,20 @@ class WorkflowLineage(_WireBase):
     parent_template_version: int | None = None
     upstream_latest_version: int | None = None
     is_upstream_unpublished: bool | None = None
+
+
+class WorkflowTeachResult(_WireBase):
+    workflow_id: str
+    new_version: int | None = None
+    rounds_run: int
+    rubric_edits: list[dict[str, Any]] = Field(default_factory=list)
+    verifiers_added: list[dict[str, Any]] = Field(default_factory=list)
+    verifiers_removed: list[dict[str, Any]] = Field(default_factory=list)
+    scenarios_used: list[dict[str, Any]] = Field(default_factory=list)
+    unresolved: list[dict[str, Any]] = Field(default_factory=list)
+    post_teach_expectation: str
+    trigger_context_echo: dict[str, Any] | None = None
+    human_report: str
 
 
 class TemplateSummary(_WireBase):

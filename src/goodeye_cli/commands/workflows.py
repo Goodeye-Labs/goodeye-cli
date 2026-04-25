@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -294,6 +295,66 @@ def lineage(
     )
 
 
+def _parse_optional_json_object(raw: str | None, *, label: str) -> dict[str, Any] | None:
+    if raw is None:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValidationFailed(
+            slug="validation_error",
+            message=f"{label} must be valid JSON.",
+        ) from exc
+    if parsed is None:
+        return None
+    if not isinstance(parsed, dict):
+        raise ValidationFailed(
+            slug="validation_error",
+            message=f"{label} must be a JSON object or null.",
+        )
+    return parsed
+
+
+@app.command("teach")
+def teach(
+    workflow_id: str = typer.Argument(..., help="Workflow ID or name."),
+    scenario_json: str | None = typer.Option(
+        None,
+        "--scenario-json",
+        help="Optional JSON object teaching scenario. Omit to let the server choose.",
+    ),
+    trigger_context_json: str | None = typer.Option(
+        None,
+        "--trigger-context-json",
+        help="Optional opaque JSON object echoed in the teach result.",
+    ),
+    max_rounds: int = typer.Option(3, "--max-rounds", min=1, max=3, help="Teaching rounds, 1-3."),
+    json_output: bool = typer.Option(False, "--json", help="Print the structured result as JSON."),
+) -> None:
+    """Run teaching mode against an existing workflow."""
+    console = Console()
+    scenario = _parse_optional_json_object(scenario_json, label="--scenario-json")
+    trigger_context = _parse_optional_json_object(
+        trigger_context_json, label="--trigger-context-json"
+    )
+    with _client(require_auth=True) as client:
+        result = client.teach_workflow(
+            workflow_id,
+            scenario=scenario,
+            trigger_context=trigger_context,
+            max_rounds=max_rounds,
+        )
+    if json_output:
+        typer.echo(result.model_dump_json(indent=2))
+        return
+    version = str(result.new_version) if result.new_version is not None else "none"
+    console.print(result.human_report)
+    console.print(f"workflow_id: {result.workflow_id}")
+    console.print(f"new_version: {version}")
+    console.print(f"rounds_run: {result.rounds_run}")
+    console.print(result.post_teach_expectation)
+
+
 @app.command("delete")
 def delete(
     workflow_id: str = typer.Argument(..., help="Workflow ID or name."),
@@ -420,5 +481,6 @@ __all__ = [
     "list_cmd",
     "publish",
     "revoke_grant",
+    "teach",
     "transfer_ownership",
 ]
