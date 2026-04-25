@@ -233,9 +233,7 @@ def test_workflow_grant_client_methods() -> None:
         return_value=httpx.Response(200, json={"workflow_id": "wf_1", "revoked": True})
     )
     leave_route = respx.post(f"{SERVER}/v1/workflows/wf_1/leave").mock(
-        return_value=httpx.Response(
-            200, json={"workflow_id": "wf_1", "removed_direct_grants": 1}
-        )
+        return_value=httpx.Response(200, json={"workflow_id": "wf_1", "removed_direct_grants": 1})
     )
 
     with GoodeyeClient(SERVER, api_key="k") as client:
@@ -250,6 +248,31 @@ def test_workflow_grant_client_methods() -> None:
     assert revoke_body["grantee_email_or_at_team_handle"] == "user@example.com"
     assert leave_route.called
     assert leave.removed_direct_grants == 1
+
+
+@respx.mock
+def test_transfer_workflow_ownership_client_method() -> None:
+    route = respx.post(f"{SERVER}/v1/workflows/wf_1/transfer-ownership").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "workflow_id": "wf_1",
+                "owner_user_id": "user_2",
+                "transferred": True,
+            },
+        )
+    )
+
+    with GoodeyeClient(SERVER, api_key="k") as client:
+        result = client.transfer_workflow_ownership("wf_1", "new@example.com")
+
+    body = _json.loads(route.calls.last.request.content.decode())
+    assert body["new_owner_user_id_or_email"] == "new@example.com"
+    assert result == {
+        "workflow_id": "wf_1",
+        "owner_user_id": "user_2",
+        "transferred": True,
+    }
 
 
 @respx.mock

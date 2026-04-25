@@ -392,6 +392,22 @@ def leave(
     )
 
 
+@app.command("transfer-ownership")
+def transfer_ownership(
+    workflow_id: str = typer.Argument(..., help="Workflow ID or name."),
+    new_owner: str = typer.Argument(..., help="New owner user ID or email."),
+) -> None:
+    """Transfer a workflow to another user. Owner only."""
+    console = Console()
+    with _client(require_auth=True) as client:
+        result = client.transfer_workflow_ownership(workflow_id, new_owner)
+    owner_user_id = result.get("owner_user_id", new_owner)
+    if result.get("transferred") is False:
+        console.print(f"[dim]Ownership already belongs to[/dim] {owner_user_id}.")
+        return
+    console.print(f"[green]Transferred[/green] {workflow_id} to {owner_user_id}.")
+
+
 __all__ = [
     "_parse_front_matter",
     "app",
@@ -404,4 +420,5 @@ __all__ = [
     "list_cmd",
     "publish",
     "revoke_grant",
+    "transfer_ownership",
 ]

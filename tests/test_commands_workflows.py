@@ -415,9 +415,7 @@ def test_workflow_grant_commands(tmp_config_paths: ConfigPaths, monkeypatch) -> 
         return_value=httpx.Response(200, json={"workflow_id": "wf_1", "revoked": True})
     )
     respx.post(f"{SERVER}/v1/workflows/wf_1/leave").mock(
-        return_value=httpx.Response(
-            200, json={"workflow_id": "wf_1", "removed_direct_grants": 1}
-        )
+        return_value=httpx.Response(200, json={"workflow_id": "wf_1", "removed_direct_grants": 1})
     )
 
     runner = CliRunner()
@@ -434,6 +432,30 @@ def test_workflow_grant_commands(tmp_config_paths: ConfigPaths, monkeypatch) -> 
     revoke_body = _json.loads(revoke_route.calls.last.request.content.decode())
     assert revoke_body["grantee_email_or_at_team_handle"] == "@analytics"
     assert leave.exit_code == 0, leave.output
+
+
+@respx.mock
+def test_workflows_transfer_ownership_command(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    route = respx.post(f"{SERVER}/v1/workflows/wf_1/transfer-ownership").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "workflow_id": "wf_1",
+                "owner_user_id": "user_2",
+                "transferred": True,
+            },
+        )
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "transfer-ownership", "wf_1", "new@example.com"])
+
+    assert result.exit_code == 0, result.output
+    body = _json.loads(route.calls.last.request.content.decode())
+    assert body["new_owner_user_id_or_email"] == "new@example.com"
+    assert "Transferred" in result.output
+    assert "user_2" in result.output
 
 
 def test_parse_front_matter_extracts_manifest() -> None:
