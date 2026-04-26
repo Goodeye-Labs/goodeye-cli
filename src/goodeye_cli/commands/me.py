@@ -36,3 +36,24 @@ def claim_handle(
     with _require_client() as client:
         result = client.claim_handle(handle)
     console.print(f"[green]Claimed[/green] @{result.handle}")
+
+
+@app.command("rename-handle")
+def rename_handle(
+    handle: str = typer.Argument(..., help="The new handle you want to use."),
+) -> None:
+    """Change a previously claimed handle to a new one.
+
+    Subject to a cooldown and a yearly cap. Templates published under the
+    old handle are reachable via redirects for a 90-day reservation
+    window.
+    """
+    console = Console()
+    with _require_client() as client:
+        result = client.rename_handle(handle)
+    if result.self_reclaim:
+        console.print(f"[green]Reclaimed[/green] @{result.handle}")
+    else:
+        console.print(f"[green]Renamed[/green] handle to @{result.handle}")
+    if result.claimed_at is not None:
+        console.print(f"[dim]claimed_at: {result.claimed_at.isoformat()}[/dim]")

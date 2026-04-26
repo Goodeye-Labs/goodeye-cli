@@ -36,6 +36,13 @@ class ClaimHandleResult(_WireBase):
     claimed_at: datetime | None = None
 
 
+class RenameHandleResult(_WireBase):
+    handle: str
+    claimed_at: datetime | None = None
+    renamed: bool = True
+    self_reclaim: bool = False
+
+
 class ApiKey(_WireBase):
     id: str
     name: str
@@ -210,6 +217,34 @@ class TemplateForkResult(_WireBase):
     parent_template_id: str
     parent_template_version: int
     version_token: str | None = None
+    redirected: bool = False
+    requested_handle: str | None = None
+    resolved_handle: str | None = None
+
+
+class TemplateDeleteResult(_WireBase):
+    template_id: str
+    deleted: bool
+    idempotent: bool = False
+
+
+class TemplateUndeleteResult(_WireBase):
+    template_id: str
+    deleted: bool
+    idempotent: bool = False
+
+
+class TemplateDeprecateVersionResult(_WireBase):
+    template_id: str
+    version: int
+    deprecated_at: datetime | None = None
+    deprecation_message: str | None = None
+
+
+class TemplateTransferOwnershipResult(_WireBase):
+    template_id: str
+    owner_user_id: str
+    transferred: bool
 
 
 class SignupVerifyResult(_WireBase):
