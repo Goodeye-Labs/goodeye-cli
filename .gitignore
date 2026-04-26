@@ -46,3 +46,7 @@ coverage.xml
 
 # uv
 .python-version
+
+# Worktrees
+.worktrees/
+.claude/worktrees/
