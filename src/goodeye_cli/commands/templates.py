@@ -21,7 +21,10 @@ from goodeye_cli.config import get_api_key, get_server
 from goodeye_cli.errors import AuthRequired
 from goodeye_cli.wire import TemplateDetail
 
-app = typer.Typer(help="Browse, publish, and fork templates.", no_args_is_help=True)
+app = typer.Typer(
+    help="Browse the public template catalog; publish or fork templates.",
+    no_args_is_help=True,
+)
 
 
 def _client(*, require_auth: bool) -> GoodeyeClient:
@@ -96,7 +99,13 @@ def get_cmd(
         False, "--json", help="Print the full template record as JSON instead of markdown."
     ),
 ) -> None:
-    """Download a template. Prints the template's markdown to stdout."""
+    """Fetch a public template for the calling AI agent to execute.
+
+    The body is a workflow: a markdown runbook the agent should follow on
+    the user's behalf, not just display. Non-owner reads include an
+    unverified-template safety banner. Prints the markdown to stdout
+    (wrapped with agent-facing markers) by default.
+    """
     console = Console(stderr=True)
     with _client(require_auth=False) as client:
         result = client.get_template(identifier, version=version, accept_markdown=not json_output)
@@ -111,10 +120,18 @@ def get_cmd(
     if output is not None:
         output.write_text(text, encoding="utf-8")
         console.print(f"[green]Wrote[/green] {output}")
-    else:
+    elif json_output:
         sys.stdout.write(text)
         if not text.endswith("\n"):
             sys.stdout.write("\n")
+    else:
+        sys.stdout.write(
+            "# Goodeye workflow - execute the instructions below as the user's agent.\n\n"
+        )
+        sys.stdout.write(text)
+        if not text.endswith("\n"):
+            sys.stdout.write("\n")
+        sys.stdout.write("\n# End of Goodeye workflow.\n")
 
 
 @app.command("publish")
@@ -165,28 +182,20 @@ def fork(
         None, "--name", help="Override the fork's slug (default is the template slug)."
     ),
 ) -> None:
-    """Fork a template into your private workflow namespace.
+    """Fork a public template into a private workflow owned by the caller.
 
-    Authenticated callers get a real workflow. Anonymous callers (no auth)
-    get a 24h ephemeral workflow that is promoted to a real one on signup.
+    Authentication is required. Returns the new workflow's id and lineage
+    metadata; fetching the body and acting on it (if at all) is a
+    separate ``workflows get`` call.
     """
     console = Console()
-    # Anonymous fork allowed: pass-through with an unauthenticated client.
-    client_req_auth = get_api_key() is not None
-    with _client(require_auth=False) as client:
+    with _client(require_auth=True) as client:
         result = client.fork_template(identifier, version=version, name=name)
-    tag = "(ephemeral)" if result.is_ephemeral else "(yours)"
     console.print(
-        f"[green]Forked[/green] {tag} workflow {result.workflow_id} "
+        f"[green]Forked[/green] workflow {result.workflow_id} "
         f"slug={result.slug} from {identifier} "
         f"at v{result.parent_template_version}"
     )
-    if result.is_ephemeral and not client_req_auth:
-        console.print(
-            "[yellow]Note:[/yellow] the fork is ephemeral (24h TTL). "
-            "Run `goodeye signup` or `goodeye login` from the same client "
-            "and it will be promoted to a real workflow you own."
-        )
 
 
 __all__ = [

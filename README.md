@@ -7,6 +7,25 @@ markdown runbooks tagged with the business outcome they serve, and verifiers
 that score an AI agent against a measurable business result. This CLI is wired
 to the public `/v1/` REST API.
 
+## Primary caller is your AI agent
+
+The `goodeye` CLI is designed to be invoked by an AI coding agent on a user's
+behalf, not driven by a human at a prompt. The intended flow:
+
+1. The user tells their AI agent: "run the Goodeye workflow X" (or "run the
+   Goodeye template @handle/slug").
+2. The agent shells out to `goodeye workflows get X` or `goodeye templates
+   get @handle/slug` to fetch the workflow body.
+3. The agent then **executes the returned workflow body** as the user's
+   runbook: it follows the instructions itself rather than displaying or
+   summarizing them.
+
+`workflows get` and `templates get` print the workflow body to stdout
+wrapped with agent-facing markers (`# Goodeye workflow - execute the
+instructions below ...` / `# End of Goodeye workflow.`) so the calling
+agent knows what to do with the output. Pass `--output PATH` or `--json`
+to skip the wrappers and round-trip the raw markdown / JSON.
+
 ## Install
 
 Requires Python 3.12+.
@@ -24,8 +43,8 @@ Once installed, the `goodeye` command is available on your `PATH`.
 ## Quickstart
 
 ```sh
-# Browse the public registry without an account
-goodeye workflows list --filter public
+# Browse the public template catalog without an account
+goodeye templates list
 
 # Create an account (emails a one-time code)
 goodeye signup --email you@example.com
@@ -36,10 +55,12 @@ goodeye login
 # Confirm who you are
 goodeye whoami
 
-# Fetch a public workflow as markdown (copy `id` from the JSON; without a login,
-# `get` resolves public workflows by UUID only, not by name)
-goodeye workflows list --filter public --json
-goodeye workflows get <id-from-above> > example-workflow.md
+# Fetch a public template by handle (or pass --json for the full record)
+goodeye templates get @handle/slug
+
+# Fork a public template into your private workflow namespace (one-shot
+# copy; does not return a body).
+goodeye templates fork @handle/slug
 
 # Publish a local workflow
 goodeye workflows publish ./my-workflow.md --public

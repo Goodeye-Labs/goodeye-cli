@@ -99,6 +99,10 @@ def test_workflows_get_markdown_default(tmp_config_paths: ConfigPaths, monkeypat
     result = runner.invoke(app, ["workflows", "get", "example"])
     assert result.exit_code == 0, result.output
     assert "# hi" in result.output
+    # Wrap with agent-execution markers so the calling agent knows to run it.
+    assert "# Goodeye workflow" in result.output
+    assert "execute the instructions below" in result.output
+    assert "# End of Goodeye workflow." in result.output
 
 
 @respx.mock
@@ -124,6 +128,9 @@ def test_workflows_get_json_flag(tmp_config_paths: ConfigPaths, monkeypatch) -> 
     assert result.exit_code == 0, result.output
     assert '"name": "example"' in result.output
     assert '"outcome": "ship more reliable refunds"' in result.output
+    # JSON output skips the agent-execution wrappers so consumers can parse cleanly.
+    assert "# Goodeye workflow" not in result.output
+    assert "# End of Goodeye workflow." not in result.output
 
 
 @respx.mock

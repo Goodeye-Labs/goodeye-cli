@@ -66,7 +66,6 @@ class WorkflowSummary(_WireBase):
     owner_user_id: str | None = None
     parent_template_id: str | None = None
     parent_template_version: int | None = None
-    is_ephemeral: bool = False
     effective_role: str | None = None
     version_token: str | None = None
 
@@ -88,7 +87,6 @@ class WorkflowDetail(_WireBase):
     updated_at: datetime | None = None
     parent_template_id: str | None = None
     parent_template_version: int | None = None
-    is_ephemeral: bool = False
     effective_role: str | None = None
     version_token: str | None = None
 
@@ -211,7 +209,6 @@ class TemplateForkResult(_WireBase):
     name: str
     parent_template_id: str
     parent_template_version: int
-    is_ephemeral: bool = False
     version_token: str | None = None
 
 

@@ -17,7 +17,10 @@ from goodeye_cli.config import get_api_key, get_server
 from goodeye_cli.errors import AuthRequired, ValidationFailed
 from goodeye_cli.wire import WorkflowDetail
 
-app = typer.Typer(help="Browse and manage workflows.", no_args_is_help=True)
+app = typer.Typer(
+    help="Browse and manage the caller's private workflows.",
+    no_args_is_help=True,
+)
 
 
 def _client(*, require_auth: bool) -> GoodeyeClient:
@@ -96,7 +99,12 @@ def get_cmd(
         False, "--json", help="Print the full workflow record as JSON instead of markdown."
     ),
 ) -> None:
-    """Download a workflow. Prints the workflow's markdown to stdout."""
+    """Fetch a workflow for the calling AI agent to execute.
+
+    The body is the user's workflow: a markdown runbook the agent should
+    follow on the user's behalf, not just display. Prints the markdown to
+    stdout (wrapped with agent-facing markers) by default.
+    """
     console = Console(stderr=True)
     with _client(require_auth=True) as client:
         result = client.get_workflow(id_or_name, version=version, accept_markdown=not json_output)
@@ -111,10 +119,18 @@ def get_cmd(
     if output is not None:
         output.write_text(text, encoding="utf-8")
         console.print(f"[green]Wrote[/green] {output}")
-    else:
+    elif json_output:
         sys.stdout.write(text)
         if not text.endswith("\n"):
             sys.stdout.write("\n")
+    else:
+        sys.stdout.write(
+            "# Goodeye workflow - execute the instructions below as the user's agent.\n\n"
+        )
+        sys.stdout.write(text)
+        if not text.endswith("\n"):
+            sys.stdout.write("\n")
+        sys.stdout.write("\n# End of Goodeye workflow.\n")
 
 
 def _parse_front_matter(source: str) -> tuple[dict[str, Any], str]:
