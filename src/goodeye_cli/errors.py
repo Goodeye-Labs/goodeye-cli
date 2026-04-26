@@ -70,6 +70,7 @@ _SLUG_MAP: dict[str, type[GoodeyeError]] = {
     "validation_error": ValidationFailed,
     "rate_limited": RateLimited,
     "conflict": Conflict,
+    "handle_already_claimed": Conflict,
     "internal_error": ServerError,
 }
 
