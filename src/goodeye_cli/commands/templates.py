@@ -108,7 +108,14 @@ def get_cmd(
     """
     console = Console(stderr=True)
     with _client(require_auth=False) as client:
-        result = client.get_template(identifier, version=version, accept_markdown=not json_output)
+        result, final_identifier = client.get_template_with_redirect(
+            identifier, version=version, accept_markdown=not json_output
+        )
+
+    if final_identifier is not None and final_identifier != identifier:
+        # Server told us this handle URL has been moved; surface it on stderr
+        # so a user piping stdout into a file or another process still sees it.
+        console.print(f"note: {identifier} redirected to {final_identifier}")
 
     if json_output:
         assert isinstance(result, TemplateDetail)
@@ -189,8 +196,13 @@ def fork(
     separate ``workflows get`` call.
     """
     console = Console()
+    stderr_console = Console(stderr=True)
     with _client(require_auth=True) as client:
         result = client.fork_template(identifier, version=version, name=name)
+    if result.redirected:
+        requested = result.requested_handle or identifier
+        resolved = result.resolved_handle or "(see workflow_id)"
+        stderr_console.print(f"note: {requested} redirected to {resolved}")
     console.print(
         f"[green]Forked[/green] workflow {result.workflow_id} "
         f"slug={result.slug} from {identifier} "
@@ -198,11 +210,89 @@ def fork(
     )
 
 
+@app.command("delete")
+def delete_cmd(
+    template_id: str = typer.Argument(..., help="Template ID."),
+    reason: str | None = typer.Option(
+        None, "--reason", help="Optional reason recorded in the audit log."
+    ),
+) -> None:
+    """Soft-delete a template you own.
+
+    Existing forks pinned to any version keep working. The catalog hides
+    deleted templates. Pair with ``goodeye templates undelete`` to
+    restore.
+    """
+    console = Console()
+    with _client(require_auth=True) as client:
+        result = client.delete_template(template_id, reason=reason)
+    suffix = " (idempotent)" if result.idempotent else ""
+    console.print(f"[green]Deleted[/green] template {result.template_id}.{suffix}")
+
+
+@app.command("undelete")
+def undelete_cmd(
+    template_id: str = typer.Argument(..., help="Template ID."),
+) -> None:
+    """Restore a previously deleted template you own."""
+    console = Console()
+    with _client(require_auth=True) as client:
+        result = client.undelete_template(template_id)
+    suffix = " (idempotent)" if result.idempotent else ""
+    console.print(f"[green]Undeleted[/green] template {result.template_id}.{suffix}")
+
+
+@app.command("deprecate-version")
+def deprecate_version_cmd(
+    template_id: str = typer.Argument(..., help="Template ID."),
+    version: int = typer.Argument(..., help="Version to deprecate."),
+    message: str = typer.Option(
+        ...,
+        "--message",
+        "-m",
+        help="Required deprecation message shown to users who fork this version.",
+    ),
+) -> None:
+    """Flag a single template version as deprecated.
+
+    The message is shown to anyone who forks this version. The version
+    stays reachable so existing pins continue to work.
+    """
+    console = Console()
+    with _client(require_auth=True) as client:
+        result = client.deprecate_template_version(template_id, version, message=message)
+    console.print(
+        f"[green]Deprecated[/green] template {result.template_id} v{result.version}: "
+        f"{result.deprecation_message}"
+    )
+
+
+@app.command("transfer-ownership")
+def transfer_ownership_cmd(
+    template_id: str = typer.Argument(..., help="Template ID."),
+    new_owner: str = typer.Argument(..., help="New owner user ID or email."),
+) -> None:
+    """Transfer a template to another Goodeye user. Owner only."""
+    console = Console()
+    with _client(require_auth=True) as client:
+        result = client.transfer_template_ownership(template_id, new_owner)
+    if not result.transferred:
+        console.print(f"[dim]Ownership already belongs to[/dim] {result.owner_user_id}.")
+        return
+    console.print(
+        f"[green]Transferred[/green] template {result.template_id} to {result.owner_user_id}."
+    )
+
+
 __all__ = [
     "app",
+    "delete_cmd",
+    "deprecate_version_cmd",
     "fork",
     "get_cmd",
     "list_cmd",
     "publish",
+    "transfer_ownership_cmd",
+    "undelete_cmd",
     "unpublish",
 ]

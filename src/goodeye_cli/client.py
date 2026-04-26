@@ -12,6 +12,7 @@ poll endpoints because those aren't proxied by the Goodeye server.
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import unquote
 
 import httpx
 
@@ -25,15 +26,20 @@ from goodeye_cli.wire import (
     DeviceAuthResponse,
     ExchangeResult,
     MeResponse,
+    RenameHandleResult,
     SignupVerifyResult,
     TeamCreated,
     TeamDeleteResult,
     TeamList,
     TeamMember,
+    TemplateDeleteResult,
+    TemplateDeprecateVersionResult,
     TemplateDetail,
     TemplateForkResult,
     TemplateList,
     TemplatePublishResult,
+    TemplateTransferOwnershipResult,
+    TemplateUndeleteResult,
     TemplateUnpublishResult,
     WorkflowDeleteResult,
     WorkflowDetail,
@@ -112,6 +118,7 @@ class GoodeyeClient:
         json_body: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
         accept: str | None = None,
+        follow_redirects: bool = False,
     ) -> httpx.Response:
         headers: dict[str, str] = {}
         if accept is not None:
@@ -122,6 +129,7 @@ class GoodeyeClient:
             json=json_body,
             params=params,
             headers=headers or None,
+            follow_redirects=follow_redirects,
         )
         _raise_for_status(response)
         return response
@@ -164,6 +172,10 @@ class GoodeyeClient:
     def claim_handle(self, handle: str) -> ClaimHandleResult:
         response = self._request("PATCH", "/v1/me", json_body={"handle": handle})
         return ClaimHandleResult.model_validate(response.json())
+
+    def rename_handle(self, handle: str) -> RenameHandleResult:
+        response = self._request("POST", "/v1/me/rename-handle", json_body={"handle": handle})
+        return RenameHandleResult.model_validate(response.json())
 
     def create_api_key(self, name: str) -> ApiKeyCreated:
         response = self._request("POST", "/v1/api-keys", json_body={"name": name})
@@ -343,14 +355,50 @@ class GoodeyeClient:
         version: int | None = None,
         accept_markdown: bool = False,
     ) -> TemplateDetail | str:
+        result, _redirect = self.get_template_with_redirect(
+            identifier, version=version, accept_markdown=accept_markdown
+        )
+        return result
+
+    def get_template_with_redirect(
+        self,
+        identifier: str,
+        *,
+        version: int | None = None,
+        accept_markdown: bool = False,
+    ) -> tuple[TemplateDetail | str, str | None]:
+        """Like ``get_template`` but also returns the final identifier when the
+        server issued a redirect (e.g. the publishing handle was renamed).
+
+        Returns ``(result, final_identifier)``. ``final_identifier`` is ``None``
+        when no redirect occurred. The CLI uses this to print a one-line
+        stderr note when a handle URL has moved.
+        """
         params: dict[str, Any] = {}
         if version is not None:
             params["version"] = version
         accept = "text/markdown" if accept_markdown else "application/json"
-        response = self._request("GET", f"/v1/templates/{identifier}", params=params, accept=accept)
+        response = self._request(
+            "GET",
+            f"/v1/templates/{identifier}",
+            params=params,
+            accept=accept,
+            follow_redirects=True,
+        )
+        final_identifier: str | None = None
+        if response.history:
+            # The final URL path looks like /v1/templates/<identifier>; pull the
+            # last segment back out so we can show it to the user.
+            final_path = response.url.path
+            prefix = "/v1/templates/"
+            if final_path.startswith(prefix):
+                final_identifier = unquote(final_path[len(prefix) :])
+        result: TemplateDetail | str
         if accept_markdown:
-            return response.text
-        return TemplateDetail.model_validate(response.json())
+            result = response.text
+        else:
+            result = TemplateDetail.model_validate(response.json())
+        return result, final_identifier
 
     def publish_template_version(
         self, workflow_id: str, *, release_notes: str | None = None
@@ -379,6 +427,43 @@ class GoodeyeClient:
             body["name"] = name
         response = self._request("POST", "/v1/templates/fork", json_body=body)
         return TemplateForkResult.model_validate(response.json())
+
+    def delete_template(
+        self, template_id: str, *, reason: str | None = None
+    ) -> TemplateDeleteResult:
+        body: dict[str, Any] = {}
+        if reason is not None:
+            body["reason"] = reason
+        response = self._request(
+            "DELETE",
+            f"/v1/templates/{template_id}",
+            json_body=body if body else None,
+        )
+        return TemplateDeleteResult.model_validate(response.json())
+
+    def undelete_template(self, template_id: str) -> TemplateUndeleteResult:
+        response = self._request("POST", f"/v1/templates/{template_id}/undelete")
+        return TemplateUndeleteResult.model_validate(response.json())
+
+    def deprecate_template_version(
+        self, template_id: str, version: int, *, message: str
+    ) -> TemplateDeprecateVersionResult:
+        response = self._request(
+            "POST",
+            f"/v1/templates/{template_id}/versions/{version}/deprecate",
+            json_body={"message": message},
+        )
+        return TemplateDeprecateVersionResult.model_validate(response.json())
+
+    def transfer_template_ownership(
+        self, template_id: str, new_owner_user_id_or_email: str
+    ) -> TemplateTransferOwnershipResult:
+        response = self._request(
+            "POST",
+            f"/v1/templates/{template_id}/transfer-ownership",
+            json_body={"new_owner_user_id_or_email": new_owner_user_id_or_email},
+        )
+        return TemplateTransferOwnershipResult.model_validate(response.json())
 
     # ----- teams -----
     def create_team(self, handle: str) -> TeamCreated:

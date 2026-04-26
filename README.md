@@ -152,6 +152,23 @@ goodeye design
     Print the workflow-designer prompt to stdout. Pipe it into your AI
     assistant to start designing a workflow + verifier:
         goodeye design > prompt.md
+
+goodeye me rename-handle <new-handle>
+    Change a previously claimed handle. Subject to a cooldown and yearly
+    cap; old-handle template URLs redirect for a 90-day window.
+
+goodeye templates delete <template-id> [--reason TEXT]
+    Soft-delete a template you own. Existing forks keep working.
+
+goodeye templates undelete <template-id>
+    Restore a previously deleted template you own.
+
+goodeye templates deprecate-version <template-id> <version> --message TEXT
+    Flag a single template version as deprecated, with a message shown
+    to anyone who forks that version.
+
+goodeye templates transfer-ownership <template-id> <user-id-or-email>
+    Hand a template off to another Goodeye user. Owner only.
 ```
 
 ## Configuration
