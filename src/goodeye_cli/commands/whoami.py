@@ -17,8 +17,8 @@ def whoami(
 ) -> None:
     """Show who you're signed in as.
 
-    Prints your email. If you're signed in to a non-default server, the
-    server URL is shown too so you can see which environment you're hitting.
+    Prints your email and handle. If you're signed in to a non-default server,
+    the server URL is shown too so you can see which environment you're hitting.
     """
     console = Console()
     server = get_server()
@@ -35,7 +35,13 @@ def whoami(
     non_default_server = server.rstrip("/") != DEFAULT_SERVER.rstrip("/")
 
     if json_output:
-        payload: dict[str, str] = {"email": me.email}
+        payload: dict[str, object] = {
+            "email": me.email,
+            "handle": me.handle,
+            "handle_claimed_at": (
+                me.handle_claimed_at.isoformat() if me.handle_claimed_at else None
+            ),
+        }
         if non_default_server:
             payload["server"] = server
         typer.echo(json.dumps(payload))
@@ -44,3 +50,5 @@ def whoami(
     if non_default_server:
         console.print(f"Server: {server}")
     console.print(f"Email:  {me.email}")
+    if me.handle is not None:
+        console.print(f"Handle: @{me.handle}")

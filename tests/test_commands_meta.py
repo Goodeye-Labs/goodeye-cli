@@ -41,6 +41,26 @@ def test_whoami_shows_server_when_overridden(tmp_config_paths: ConfigPaths, monk
 
 
 @respx.mock
+def test_whoami_shows_handle_when_present(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE")
+    respx.get(f"{SERVER}/v1/me").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "email": "e@x.com",
+                "handle": "alice",
+                "handle_claimed_at": "2026-01-01T00:00:00+00:00",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["whoami"])
+    assert result.exit_code == 0, result.output
+    assert "Handle: @alice" in result.output
+    assert "e@x.com" in result.output
+
+
+@respx.mock
 def test_whoami_hides_server_when_default(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     """On the built-in default server, omit the noisy server line."""
     from goodeye_cli.config import DEFAULT_SERVER
@@ -68,7 +88,32 @@ def test_whoami_json_includes_server_only_when_overridden(
     result = runner.invoke(app, ["whoami", "--json"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output.strip())
-    assert payload == {"email": "e@x.com", "server": SERVER}
+    assert payload == {
+        "email": "e@x.com",
+        "handle": None,
+        "handle_claimed_at": None,
+        "server": SERVER,
+    }
+
+
+@respx.mock
+def test_whoami_json_omits_server_when_default(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    from goodeye_cli.config import DEFAULT_SERVER
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_config_paths.config_dir.parent))
+    monkeypatch.delenv("GOODEYE_SERVER", raising=False)
+    monkeypatch.setenv("GOODEYE_API_KEY", "good_live_EXAMPLE")
+    respx.get(f"{DEFAULT_SERVER}/v1/me").mock(
+        return_value=httpx.Response(200, json={"email": "e@x.com", "handle": "bob"})
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["whoami", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output.strip())
+    assert payload == {"email": "e@x.com", "handle": "bob", "handle_claimed_at": None}
+    assert "server" not in payload
 
 
 def test_whoami_without_credentials_errors(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
