@@ -200,9 +200,11 @@ def fork(
     with _client(require_auth=True) as client:
         result = client.fork_template(identifier, version=version, name=name)
     if result.redirected:
-        requested = result.requested_handle or identifier
-        resolved = result.resolved_handle or "(see workflow_id)"
+        requested = result.redirected_from_handle or identifier
+        resolved = result.redirected_to_handle or "(see workflow_id)"
         stderr_console.print(f"note: {requested} redirected to {resolved}")
+    if result.deprecation_warning:
+        stderr_console.print(f"warning: {result.deprecation_warning}")
     console.print(
         f"[green]Forked[/green] workflow {result.workflow_id} "
         f"slug={result.slug} from {identifier} "

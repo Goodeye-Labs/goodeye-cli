@@ -155,8 +155,8 @@ def test_templates_fork_redirect_metadata_emits_stderr_note(
                 "parent_template_version": 1,
                 "version_token": "vt_01",
                 "redirected": True,
-                "requested_handle": "@old/example",
-                "resolved_handle": "@new/example",
+                "redirected_from_handle": "@old/example",
+                "redirected_to_handle": "@new/example",
             },
         )
     )
@@ -165,6 +165,38 @@ def test_templates_fork_redirect_metadata_emits_stderr_note(
     assert result.exit_code == 0, result.output
     assert "Forked" in result.output
     assert "redirected to @new/example" in result.output
+
+
+@respx.mock
+def test_templates_fork_deprecation_warning_emits_stderr_note(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """A fork against a deprecated template version surfaces the warning on stderr."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.post(f"{SERVER}/v1/templates/fork").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "workflow_id": "wf_01",
+                "slug": "example",
+                "name": "example",
+                "parent_template_id": "tpl_01",
+                "parent_template_version": 1,
+                "version_token": "vt_01",
+                "deprecation": {
+                    "deprecated_at": "2026-04-25T12:00:00+00:00",
+                    "message": "known broken",
+                },
+                "deprecation_warning": "Forking a deprecated version: known broken",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "fork", "@h/example"])
+    assert result.exit_code == 0, result.output
+    assert "Forked" in result.stdout
+    assert "wf_01" in result.stdout
+    assert "Forking a deprecated version: known broken" in result.stderr
 
 
 @respx.mock

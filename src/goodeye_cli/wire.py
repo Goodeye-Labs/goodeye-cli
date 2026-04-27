@@ -218,8 +218,9 @@ class TemplateForkResult(_WireBase):
     parent_template_version: int
     version_token: str | None = None
     redirected: bool = False
-    requested_handle: str | None = None
-    resolved_handle: str | None = None
+    redirected_from_handle: str | None = None
+    redirected_to_handle: str | None = None
+    deprecation_warning: str | None = None
 
 
 class TemplateDeleteResult(_WireBase):

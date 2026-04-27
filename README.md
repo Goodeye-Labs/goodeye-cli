@@ -1,6 +1,6 @@
 # goodeye-cli
 
-Command-line client for Goodeye - manage AI workflow workflows from the terminal.
+Command-line client for Goodeye - manage AI workflows from the terminal.
 
 Goodeye is an outcome-aligned AI workflow registry: you author workflows as
 markdown runbooks tagged with the business outcome they serve, and verifiers
@@ -62,8 +62,8 @@ goodeye templates get @handle/slug
 # copy; does not return a body).
 goodeye templates fork @handle/slug
 
-# Publish a local workflow
-goodeye workflows publish ./my-workflow.md --public
+# Publish a local workflow (always private; share via `templates publish`)
+goodeye workflows publish ./my-workflow.md
 ```
 
 ### Workflow files
@@ -77,7 +77,6 @@ required:
 name: my-workflow
 description: One sentence on what this workflow does and when to use it.
 # Optional discovery facets:
-# visibility: public        # overridden by --public
 # tags: [data, cleanup]
 # outcome: Reduce refund-row mislabels.
 ---
@@ -89,9 +88,11 @@ Verifier scripts and Truesight cURLs belong here as fenced code blocks; the
 registry stores the body verbatim.
 ```
 
-`--public` on the command line overrides `visibility`. `--name` on the command
-line overrides the front-matter `name`. The full file (front-matter included)
-is stored on the server, so `goodeye workflows get` round-trips a drop-in
+Workflows are always private to the caller. To share a workflow as a public
+template, run `goodeye templates publish <workflow-id>` as a separate,
+explicit step. `--name` on the command line overrides the front-matter
+`name`. The full file (front-matter included) is stored on the server, so
+`goodeye workflows get` round-trips a drop-in
 `~/.claude/skills/<name>/SKILL.md`.
 
 Pre-cleanup files that nest `outcome` / `tags` under a `manifest:` block are
@@ -127,35 +128,63 @@ goodeye auth revoke-key <key-id>
     Revoke an API key. The key stops working immediately. <key-id> is the
     ID shown by `auth list-keys`.
 
-goodeye workflows list [--filter all|public|mine] [--tag TAG] [--search QUERY] [--json]
-    List workflows you can access. The ID column is accepted by `get`, `delete`,
-    and `set-visibility`. When signed in, you can also use your own workflow
-    name (slug) with those commands.
+goodeye workflows list [--filter mine|shared-with-me|all] [--tag TAG] [--search QUERY] [--json]
+    List workflows you can access (owned + shared with you via grants). The
+    ID column is accepted by `get`, `delete`, and grant commands. When signed
+    in, you can also use your own workflow name (slug).
 
 goodeye workflows get <id-or-name> [--version N] [--output PATH] [--json]
-    Download a workflow. Prints markdown to stdout; --json prints the full
-    record. When you are not signed in, use the workflow's UUID from `list`
-    (name/slug resolution is for your own workflows once authenticated).
+    Download a workflow. Prints markdown to stdout (wrapped with
+    agent-facing markers); --json prints the full record. Authentication is
+    required: workflows are private.
 
-goodeye workflows publish <file.md> [--public] [--name NAME]
-    Publish a workflow from a markdown file. If a workflow with the same name
-    already exists under your account, a new version is appended. Front-matter
-    must include `name:` and `description:`.
-
-goodeye workflows set-visibility <id-or-name> <private|public>
-    Change a workflow's visibility.
+goodeye workflows publish <file.md> [--name NAME] [--expected-version-token TOKEN]
+    Publish a workflow from a markdown file. Always private. If a workflow
+    with the same name already exists under your account, a new version is
+    appended (pass --expected-version-token to confirm the parent version).
+    Front-matter must include `name:` and `description:`. To share publicly,
+    run `goodeye templates publish <workflow-id>` as a separate step.
 
 goodeye workflows delete <id-or-name> [--yes]
     Delete a workflow you own.
 
-goodeye design
-    Print the workflow-designer prompt to stdout. Pipe it into your AI
-    assistant to start designing a workflow + verifier:
-        goodeye design > prompt.md
+goodeye workflows teach <id-or-name> [--scenario-json JSON] [--trigger-context-json JSON] [--max-rounds N] [--json]
+    Run teaching mode against an existing workflow.
 
-goodeye me rename-handle <new-handle>
-    Change a previously claimed handle. Subject to a cooldown and yearly
-    cap; old-handle template URLs redirect for a 90-day window.
+goodeye workflows lineage <id-or-name> [--json]
+    Show a workflow's fork lineage (parent template, upstream latest).
+
+goodeye workflows grant <id-or-name> <grantee> <view|edit|admin>
+    Share a workflow with a user email or @team handle.
+
+goodeye workflows revoke-grant <id-or-name> <grantee>
+    Revoke a direct grant.
+
+goodeye workflows grants <id-or-name> [--json]
+    List grants on a workflow.
+
+goodeye workflows leave <id-or-name> [--yes]
+    Remove your own direct grant on a shared workflow.
+
+goodeye workflows transfer-ownership <id-or-name> <new-owner>
+    Transfer a workflow you own to another user.
+
+goodeye templates list [--filter all|mine] [--search QUERY] [--json]
+    Browse the public template catalog. Anonymous reads allowed.
+
+goodeye templates get <identifier> [--version N] [--output PATH] [--json]
+    Fetch a public template by UUID or @handle/slug[@vN]. Anonymous reads
+    allowed; non-owner reads include an unverified-template safety banner.
+
+goodeye templates publish <workflow-id> [--release-notes TEXT]
+    Publish a private workflow as a new public template version.
+    Requires a claimed handle.
+
+goodeye templates unpublish <template-id> <version>
+    Soft-unpublish a single template version. Existing forks keep working.
+
+goodeye templates fork <identifier> [--version N] [--name NAME]
+    Fork a public template into a private workflow. Authentication required.
 
 goodeye templates delete <template-id> [--reason TEXT]
     Soft-delete a template you own. Existing forks keep working.
@@ -169,6 +198,18 @@ goodeye templates deprecate-version <template-id> <version> --message TEXT
 
 goodeye templates transfer-ownership <template-id> <user-id-or-email>
     Hand a template off to another Goodeye user. Owner only.
+
+goodeye design
+    Print the workflow-designer prompt to stdout. Pipe it into your AI
+    assistant to start designing a workflow + verifier:
+        goodeye design > prompt.md
+
+goodeye me claim-handle <handle>
+    Claim a handle (your publish identity).
+
+goodeye me rename-handle <new-handle>
+    Change a previously claimed handle. Subject to a cooldown and yearly
+    cap; old-handle template URLs redirect for a 90-day window.
 ```
 
 ## Configuration
