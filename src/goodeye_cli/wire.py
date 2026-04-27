@@ -149,16 +149,8 @@ class WorkflowLineage(_WireBase):
 
 class WorkflowTeachResult(_WireBase):
     workflow_id: str
-    new_version: int | None = None
-    rounds_run: int
-    rubric_edits: list[dict[str, Any]] = Field(default_factory=list)
-    verifiers_added: list[dict[str, Any]] = Field(default_factory=list)
-    verifiers_removed: list[dict[str, Any]] = Field(default_factory=list)
-    scenarios_used: list[dict[str, Any]] = Field(default_factory=list)
-    unresolved: list[dict[str, Any]] = Field(default_factory=list)
-    post_teach_expectation: str
+    skill_md: str
     trigger_context_echo: dict[str, Any] | None = None
-    human_report: str
 
 
 class TemplateSummary(_WireBase):
