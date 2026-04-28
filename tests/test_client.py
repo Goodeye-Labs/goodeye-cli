@@ -268,11 +268,9 @@ def test_transfer_workflow_ownership_client_method() -> None:
 
     body = _json.loads(route.calls.last.request.content.decode())
     assert body["new_owner_user_id_or_email"] == "new@example.com"
-    assert result == {
-        "workflow_id": "wf_1",
-        "owner_user_id": "user_2",
-        "transferred": True,
-    }
+    assert result.workflow_id == "wf_1"
+    assert result.owner_user_id == "user_2"
+    assert result.transferred is True
 
 
 @respx.mock

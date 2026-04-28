@@ -240,6 +240,12 @@ class TemplateTransferOwnershipResult(_WireBase):
     transferred: bool
 
 
+class WorkflowTransferOwnershipResult(_WireBase):
+    workflow_id: str
+    owner_user_id: str
+    transferred: bool
+
+
 class SignupVerifyResult(_WireBase):
     api_key: str
 

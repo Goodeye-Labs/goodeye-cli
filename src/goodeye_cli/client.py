@@ -51,6 +51,7 @@ from goodeye_cli.wire import (
     WorkflowList,
     WorkflowSaveResult,
     WorkflowTeachResult,
+    WorkflowTransferOwnershipResult,
 )
 
 
@@ -302,13 +303,13 @@ class GoodeyeClient:
 
     def transfer_workflow_ownership(
         self, workflow_id: str, new_owner_user_id_or_email: str
-    ) -> dict[str, Any]:
+    ) -> WorkflowTransferOwnershipResult:
         response = self._request(
             "POST",
             f"/v1/workflows/{workflow_id}/transfer-ownership",
             json_body={"new_owner_user_id_or_email": new_owner_user_id_or_email},
         )
-        return response.json()
+        return WorkflowTransferOwnershipResult.model_validate(response.json())
 
     def lookup_workflow_lineage(self, id_or_slug: str) -> WorkflowLineage:
         response = self._request("GET", f"/v1/workflows/{id_or_slug}/lineage")

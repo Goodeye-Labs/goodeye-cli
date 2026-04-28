@@ -356,15 +356,19 @@ def teach(
     result via 'goodeye workflows publish' with --source teach.
     """
     parsed_ctx = _parse_optional_json_object(trigger_context, label="--trigger-context")
-    console = Console()
+    stderr = Console(stderr=True)
     with _client(require_auth=True) as client:
         result = client.teach_workflow(workflow_id, trigger_context=parsed_ctx)
-    console.print(f"[bold]workflow_id:[/bold] {result.workflow_id}")
+    stderr.print(f"[bold]workflow_id:[/bold] {result.workflow_id}")
     if result.trigger_context_echo:
-        console.print("[bold]trigger_context_echo:[/bold]")
-        console.print_json(data=result.trigger_context_echo)
-    console.print("[bold]skill_md:[/bold]")
-    console.print(result.skill_md)
+        stderr.print("[bold]trigger_context_echo:[/bold]")
+        stderr.print_json(data=result.trigger_context_echo)
+    # Write skill_md raw to stdout so markdown link syntax (`[text](url)`) is not
+    # parsed as Rich markup, line wrapping is left to the caller, and piping into
+    # an agent or file produces a clean SKILL.md.
+    sys.stdout.write(result.skill_md)
+    if not result.skill_md.endswith("\n"):
+        sys.stdout.write("\n")
 
 
 @app.command("delete")
@@ -474,11 +478,10 @@ def transfer_ownership(
     console = Console()
     with _client(require_auth=True) as client:
         result = client.transfer_workflow_ownership(workflow_id, new_owner)
-    owner_user_id = result.get("owner_user_id", new_owner)
-    if result.get("transferred") is False:
-        console.print(f"[dim]Ownership already belongs to[/dim] {owner_user_id}.")
+    if not result.transferred:
+        console.print(f"[dim]Ownership already belongs to[/dim] {result.owner_user_id}.")
         return
-    console.print(f"[green]Transferred[/green] {workflow_id} to {owner_user_id}.")
+    console.print(f"[green]Transferred[/green] {workflow_id} to {result.owner_user_id}.")
 
 
 __all__ = [
