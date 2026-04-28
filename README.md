@@ -148,8 +148,10 @@ goodeye workflows publish <file.md> [--name NAME] [--expected-version-token TOKE
 goodeye workflows delete <id-or-name> [--yes]
     Delete a workflow you own.
 
-goodeye workflows teach <id-or-name> [--scenario-json JSON] [--trigger-context-json JSON] [--max-rounds N] [--json]
-    Run teaching mode against an existing workflow.
+goodeye workflows teach <id-or-name> [--trigger-context JSON]
+    Fetch the teach SKILL pack for an existing workflow. The pack is
+    printed to stdout for the calling agent to follow; persist the
+    refined workflow with `goodeye workflows publish --source teach`.
 
 goodeye workflows lineage <id-or-name> [--json]
     Show a workflow's fork lineage (parent template, upstream latest).

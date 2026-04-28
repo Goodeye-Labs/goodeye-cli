@@ -481,7 +481,9 @@ class GoodeyeClient:
 
     def list_team_members(self, team_id: str) -> list[TeamMember]:
         response = self._request("GET", f"/v1/teams/{team_id}/members")
-        return [TeamMember.model_validate(row) for row in response.json()]
+        payload = response.json()
+        rows = payload.get("items", []) if isinstance(payload, dict) else payload
+        return [TeamMember.model_validate(row) for row in rows]
 
     def add_team_member(self, team_id: str, user_id_or_email: str) -> dict[str, Any]:
         response = self._request(

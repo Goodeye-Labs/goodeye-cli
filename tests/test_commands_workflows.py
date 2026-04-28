@@ -300,6 +300,63 @@ def test_publish_tags_and_outcome(
 
 
 @respx.mock
+def test_publish_source_flag_is_forwarded(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """`--source teach` must reach the server as the literal "teach", not the file body."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    workflow_file = tmp_path / "hello.md"
+    workflow_file.write_text("---\nname: hello\ndescription: Say hi.\n---\n# Hello\n")
+    route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "workflow_id": "skl_01",
+                "version": 1,
+                "version_token": "tok-1",
+                "name": "hello",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        app, ["workflows", "publish", str(workflow_file), "--source", "teach"]
+    )
+    assert result.exit_code == 0, result.output
+
+    sent = _json.loads(route.calls.last.request.content.decode())
+    assert sent["source"] == "teach"
+
+
+@respx.mock
+def test_publish_omits_source_when_flag_absent(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """No --source flag -> source must not be populated with the markdown body."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    workflow_file = tmp_path / "hello.md"
+    workflow_file.write_text("---\nname: hello\ndescription: Say hi.\n---\n# Hello\n")
+    route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "workflow_id": "skl_01",
+                "version": 1,
+                "version_token": "tok-1",
+                "name": "hello",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "publish", str(workflow_file)])
+    assert result.exit_code == 0, result.output
+
+    sent = _json.loads(route.calls.last.request.content.decode())
+    # Either omitted entirely or explicitly null -- never the file body.
+    assert sent.get("source") in (None,)
+
+
+@respx.mock
 def test_publish_legacy_manifest_promotes_outcome_and_tags(
     tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:

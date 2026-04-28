@@ -256,11 +256,11 @@ def publish(
     blocks; the registry treats the body as opaque markdown.
     """
     console = Console()
-    source = file.read_text(encoding="utf-8")
-    front_matter, _stripped_body = _parse_front_matter(source)
+    markdown = file.read_text(encoding="utf-8")
+    front_matter, _stripped_body = _parse_front_matter(markdown)
     # Server stores the full markdown (including front-matter) so the workflow
     # round-trips as a drop-in Claude Code SKILL.md.
-    body = source
+    body = markdown
 
     effective_name: str | None = (
         name_override or front_matter.get("name") or front_matter.get("slug")

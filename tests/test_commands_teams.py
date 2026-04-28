@@ -99,3 +99,36 @@ def test_teams_create_without_credentials_errors(
     runner = CliRunner()
     result = runner.invoke(app, ["teams", "create", "acme"])
     assert result.exit_code != 0
+
+
+@respx.mock
+def test_teams_members_renders_table(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    """Server returns `{items: [...]}`; the CLI must unwrap before validating rows."""
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE")
+    respx.get(f"{SERVER}/v1/teams/{_TEAM_ID}/members").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "user_id": _USER_ID,
+                        "email": "owner@example.com",
+                        "handle": "ownerhandle",
+                        "role": "owner",
+                    },
+                    {
+                        "user_id": "33333333-3333-3333-3333-333333333333",
+                        "email": "member@example.com",
+                        "handle": None,
+                        "role": "member",
+                    },
+                ]
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["teams", "members", _TEAM_ID])
+    assert result.exit_code == 0, result.output
+    assert "ownerhandle" in result.output
+    assert "owner" in result.output
+    assert "member" in result.output
