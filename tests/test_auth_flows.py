@@ -1,4 +1,4 @@
-"""Tests for device-code and magic-auth flows."""
+"""Tests for device-code login flow."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import httpx
 import pytest
 import respx
 
-from goodeye_cli.auth_flows import device_code_login, magic_auth_flow
+from goodeye_cli.auth_flows import device_code_login
 from goodeye_cli.errors import GoodeyeError, InvalidCredentials
 
 SERVER = "https://example.test"
@@ -187,40 +187,3 @@ def test_device_code_login_timeout() -> None:
         )
     assert exc_info.value.slug == "auth_required"
 
-
-@respx.mock
-def test_magic_auth_flow_login_happy_path() -> None:
-    respx.post(f"{SERVER}/v1/login").mock(
-        return_value=httpx.Response(202, json={"status": "code_sent"})
-    )
-    respx.post(f"{SERVER}/v1/login/verify").mock(
-        return_value=httpx.Response(200, json={"api_key": "good_live_EXAMPLE"})
-    )
-    api_key = magic_auth_flow(SERVER, "e@x.com", intent="login", prompt_code=lambda: "123456")
-    assert api_key == "good_live_EXAMPLE"
-
-
-@respx.mock
-def test_magic_auth_flow_signup_happy_path() -> None:
-    respx.post(f"{SERVER}/v1/signup").mock(
-        return_value=httpx.Response(202, json={"status": "code_sent"})
-    )
-    respx.post(f"{SERVER}/v1/signup/verify").mock(
-        return_value=httpx.Response(200, json={"api_key": "good_live_EXAMPLE"})
-    )
-    api_key = magic_auth_flow(SERVER, "e@x.com", intent="signup", prompt_code=lambda: "123456")
-    assert api_key == "good_live_EXAMPLE"
-
-
-@respx.mock
-def test_magic_auth_flow_rejects_empty_code() -> None:
-    respx.post(f"{SERVER}/v1/login").mock(
-        return_value=httpx.Response(202, json={"status": "code_sent"})
-    )
-    with pytest.raises(InvalidCredentials):
-        magic_auth_flow(SERVER, "e@x.com", intent="login", prompt_code=lambda: "")
-
-
-def test_magic_auth_flow_rejects_bad_intent() -> None:
-    with pytest.raises(ValueError):
-        magic_auth_flow(SERVER, "e@x.com", intent="weird")

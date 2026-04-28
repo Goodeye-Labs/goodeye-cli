@@ -89,12 +89,40 @@ def test_error_translation_not_found() -> None:
 
 
 @respx.mock
+def test_register_calls_register_endpoint() -> None:
+    route = respx.post(f"{SERVER}/v1/register").mock(
+        return_value=httpx.Response(
+            202,
+            json={"status": "ok", "message": "Check your email for next steps."},
+        )
+    )
+
+    with GoodeyeClient(SERVER) as client:
+        client.register("e@x.com")
+
+    assert route.called
+    assert route.calls.last.request.content == b'{"email":"e@x.com"}'
+
+
+@respx.mock
+def test_register_verify_returns_api_key() -> None:
+    respx.post(f"{SERVER}/v1/register/verify").mock(
+        return_value=httpx.Response(200, json={"api_key": "good_live_EXAMPLE"})
+    )
+
+    with GoodeyeClient(SERVER) as client:
+        result = client.register_verify("e@x.com", "123456")
+
+    assert result.api_key == "good_live_EXAMPLE"
+
+
+@respx.mock
 def test_error_translation_rate_limited() -> None:
-    respx.post(f"{SERVER}/v1/signup").mock(
+    respx.post(f"{SERVER}/v1/register").mock(
         return_value=httpx.Response(429, json={"error": "rate_limited", "message": "slow down"})
     )
     with GoodeyeClient(SERVER) as client, pytest.raises(RateLimited):
-        client.signup("e@x.com")
+        client.register("e@x.com")
 
 
 @respx.mock

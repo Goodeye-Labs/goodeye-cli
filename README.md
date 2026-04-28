@@ -46,10 +46,11 @@ Once installed, the `goodeye` command is available on your `PATH`.
 # Browse the public template catalog without an account
 goodeye templates list
 
-# Create an account (emails a one-time code)
-goodeye signup --email you@example.com
+# Create an account (non-interactive: start, then verify with the emailed code)
+goodeye register --email you@example.com
+goodeye register-verify --email you@example.com --code 123456
 
-# Or log in on a machine with a browser
+# Or log in on a machine with a browser (interactive device-code flow)
 goodeye login
 
 # Confirm who you are
@@ -101,15 +102,52 @@ warning lists any other manifest keys (`kpi`, `programmatic_verifiers`, etc.)
 that the server no longer stores. Move verifier scripts and cURLs into the body
 when you next edit such a file.
 
+### Login and registration
+
+For humans, use the interactive browser login:
+
+```bash
+goodeye login
+```
+
+For AI agents, automation, or terminals where prompts are awkward, use the
+non-interactive email-code flow:
+
+```bash
+goodeye register --email you@example.com
+goodeye register-verify --email you@example.com --code 123456
+```
+
+Existing users can start and complete non-interactive login the same way:
+
+```bash
+goodeye login --email you@example.com
+goodeye login-verify --email you@example.com --code 123456
+```
+
+Successful `register-verify`, `login-verify`, and interactive `login` all save
+credentials to `~/.config/goodeye/credentials.json` so future commands stay
+authenticated.
+
 ## Command reference
 
 ```
-goodeye login [--email EMAIL]
-    Sign in on this machine. Opens the browser by default; with --email,
-    signs in via a one-time code sent to your inbox.
+goodeye login
+    Interactive sign-in for humans: browser/device-code flow; saves
+    credentials on success.
 
-goodeye signup --email EMAIL
-    Create a Goodeye account. A one-time code is sent to your email.
+goodeye login --email EMAIL
+    Non-interactive email-code login start for agents and automation. Does not
+    save credentials until you run goodeye login-verify with the emailed code.
+
+goodeye login-verify --email EMAIL --code CODE
+    Complete non-interactive email login and save credentials locally.
+
+goodeye register --email EMAIL
+    Start non-interactive account registration (emails a code when eligible).
+
+goodeye register-verify --email EMAIL --code CODE
+    Complete registration and save credentials locally.
 
 goodeye logout
     Sign out on this machine by removing saved credentials. The key stays

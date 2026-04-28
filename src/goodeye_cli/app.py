@@ -13,7 +13,7 @@ from goodeye_cli.commands import design as design_cmd
 from goodeye_cli.commands import login as login_cmd
 from goodeye_cli.commands import logout as logout_cmd
 from goodeye_cli.commands import me as me_cmds
-from goodeye_cli.commands import signup as signup_cmd
+from goodeye_cli.commands import register as register_cmd
 from goodeye_cli.commands import teams as teams_cmds
 from goodeye_cli.commands import templates as templates_cmds
 from goodeye_cli.commands import whoami as whoami_cmd
@@ -29,7 +29,9 @@ app = typer.Typer(
 
 # Top-level commands.
 app.command("login")(login_cmd.login)
-app.command("signup")(signup_cmd.signup)
+app.command("login-verify")(login_cmd.login_verify)
+app.command("register")(register_cmd.register)
+app.command("register-verify")(register_cmd.register_verify)
 app.command("logout")(logout_cmd.logout)
 app.command("whoami")(whoami_cmd.whoami)
 app.command("design")(design_cmd.design)

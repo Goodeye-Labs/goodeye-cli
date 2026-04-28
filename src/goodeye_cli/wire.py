@@ -246,7 +246,7 @@ class WorkflowTransferOwnershipResult(_WireBase):
     transferred: bool
 
 
-class SignupVerifyResult(_WireBase):
+class AuthVerifyResult(_WireBase):
     api_key: str
 
 

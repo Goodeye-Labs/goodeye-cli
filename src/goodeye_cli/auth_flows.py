@@ -1,20 +1,13 @@
-"""Browser-assisted and headless auth flows.
+"""Browser-assisted device-code auth flow.
 
-Two flows are implemented:
+**Device code flow** (``device_code_login``): used for ``goodeye login`` with no
+email. Requests a user_code from WorkOS, opens the verification URL in the
+default browser, polls until the user approves, then exchanges the resulting
+WorkOS JWT for a Goodeye API key via ``POST /v1/auth/exchange``.
 
-* **Device code flow** (``device_code_login``): used for ``goodeye login`` with no
-  email. Requests a user_code from WorkOS, opens the verification URL in the
-  default browser, polls until the user approves, then exchanges the resulting
-  WorkOS JWT for a Goodeye API key via ``POST /v1/auth/exchange``.
-
-* **Magic-auth flow** (``magic_auth_flow``): used for ``goodeye login --email``
-  and ``goodeye signup --email``. Posts the email to ``/v1/{intent}``, prompts
-  for the emailed code, and posts to ``/v1/{intent}/verify`` to retrieve the
-  initial API key.
-
-The flows are deliberately injection-friendly: every external dependency
+The flow is deliberately injection-friendly: every external dependency
 (``httpx`` transport, browser opener, code prompt, clock) can be overridden so
-the flows can be unit-tested with ``respx`` without any real I/O.
+the flow can be unit-tested with ``respx`` without any real I/O.
 """
 
 from __future__ import annotations
@@ -112,57 +105,4 @@ def device_code_login(
 
     with GoodeyeClient(server, api_key=access_token) as client:
         result = client.exchange(hostname=hostname)
-    return result.api_key
-
-
-def magic_auth_flow(
-    server: str,
-    email: str,
-    *,
-    intent: str = "login",
-    prompt_code: Callable[[], str] | None = None,
-    console: Console | None = None,
-) -> str:
-    """Run the magic-auth flow and return the newly minted API key.
-
-    Args:
-        server: Goodeye server base URL.
-        email: The user's email address.
-        intent: ``"login"`` or ``"signup"``. Both call the same underlying WorkOS
-            magic-auth endpoints but are kept separate for logging/legibility.
-        prompt_code: Callable that returns the 6-digit code the user received.
-            Defaults to a Rich input prompt.
-        console: Rich console for UX output.
-
-    Returns:
-        The newly minted Goodeye API key.
-    """
-    if intent not in ("login", "signup"):
-        raise ValueError(f"intent must be 'login' or 'signup', got {intent!r}")
-
-    out = console or Console()
-
-    def _default_prompt() -> str:
-        return out.input("Enter the 6-digit code sent to your email: ").strip()
-
-    prompt = prompt_code or _default_prompt
-
-    with GoodeyeClient(server) as client:
-        if intent == "signup":
-            client.signup(email)
-        else:
-            client.login(email)
-        out.print(f"A sign-in code was sent to [bold]{email}[/bold].")
-        code = prompt()
-        if not code:
-            raise InvalidCredentials(
-                slug="invalid_credentials",
-                message="No code provided.",
-                hint="Check your email and re-run the command.",
-            )
-        result = (
-            client.signup_verify(email, code)
-            if intent == "signup"
-            else client.login_verify(email, code)
-        )
     return result.api_key

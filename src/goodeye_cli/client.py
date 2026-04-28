@@ -21,13 +21,13 @@ from goodeye_cli.errors import GoodeyeError, error_from_body
 from goodeye_cli.wire import (
     ApiKeyCreated,
     ApiKeyList,
+    AuthVerifyResult,
     ClaimHandleResult,
     ClientConfig,
     DeviceAuthResponse,
     ExchangeResult,
     MeResponse,
     RenameHandleResult,
-    SignupVerifyResult,
     TeamCreated,
     TeamDeleteResult,
     TeamList,
@@ -140,23 +140,23 @@ class GoodeyeClient:
         response = self._request("GET", "/.well-known/goodeye-client-config")
         return ClientConfig.model_validate(response.json())
 
-    def signup(self, email: str) -> None:
-        self._request("POST", "/v1/signup", json_body={"email": email})
+    def register(self, email: str) -> None:
+        self._request("POST", "/v1/register", json_body={"email": email})
 
-    def signup_verify(self, email: str, code: str) -> SignupVerifyResult:
+    def register_verify(self, email: str, code: str) -> AuthVerifyResult:
         response = self._request(
-            "POST", "/v1/signup/verify", json_body={"email": email, "code": code}
+            "POST", "/v1/register/verify", json_body={"email": email, "code": code}
         )
-        return SignupVerifyResult.model_validate(response.json())
+        return AuthVerifyResult.model_validate(response.json())
 
     def login(self, email: str) -> None:
         self._request("POST", "/v1/login", json_body={"email": email})
 
-    def login_verify(self, email: str, code: str) -> SignupVerifyResult:
+    def login_verify(self, email: str, code: str) -> AuthVerifyResult:
         response = self._request(
             "POST", "/v1/login/verify", json_body={"email": email, "code": code}
         )
-        return SignupVerifyResult.model_validate(response.json())
+        return AuthVerifyResult.model_validate(response.json())
 
     def exchange(self, hostname: str | None = None) -> ExchangeResult:
         body: dict[str, Any] = {}

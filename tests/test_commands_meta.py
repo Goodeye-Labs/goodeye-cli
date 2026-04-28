@@ -1,4 +1,4 @@
-"""Tests for login/signup/logout/whoami/design commands."""
+"""Tests for login/register/logout/whoami/design commands."""
 
 from __future__ import annotations
 
@@ -122,41 +122,106 @@ def test_whoami_without_credentials_errors(tmp_config_paths: ConfigPaths, monkey
 
 
 @respx.mock
-def test_signup_end_to_end_writes_credentials(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+def test_register_sends_code_and_does_not_write_credentials(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
     _env(monkeypatch, tmp_config_paths, api_key=None)
-    respx.post(f"{SERVER}/v1/signup").mock(
-        return_value=httpx.Response(202, json={"status": "code_sent"})
+    route = respx.post(f"{SERVER}/v1/register").mock(
+        return_value=httpx.Response(
+            202,
+            json={"status": "ok", "message": "Check your email for next steps."},
+        )
     )
-    respx.post(f"{SERVER}/v1/signup/verify").mock(
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["register", "--email", "e@x.com"], input="")
+
+    assert result.exit_code == 0, result.output
+    assert route.called
+    assert "Check your email for next steps." in result.output
+    assert load_credentials(tmp_config_paths) is None
+
+
+@respx.mock
+def test_register_verify_writes_credentials(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key=None)
+    respx.post(f"{SERVER}/v1/register/verify").mock(
         return_value=httpx.Response(200, json={"api_key": "good_live_EXAMPLE"})
     )
 
-    # Patch the magic_auth_flow's code prompt via monkeypatching Console.input.
-    # Simpler: patch the module-level prompt_code default by using Typer CliRunner with input.
     runner = CliRunner()
-    result = runner.invoke(app, ["signup", "--email", "e@x.com"], input="123456\n")
-    assert result.exit_code == 0, result.output
+    result = runner.invoke(
+        app,
+        ["register-verify", "--email", "e@x.com", "--code", "123456"],
+    )
 
+    assert result.exit_code == 0, result.output
     creds = load_credentials(tmp_config_paths)
     assert creds is not None
     assert creds["api_key"] == "good_live_EXAMPLE"
     assert creds["server"] == SERVER
+    assert "good_live_EXAMPLE" not in result.output
 
 
 @respx.mock
-def test_login_with_email_writes_credentials(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+def test_login_with_email_sends_code_and_does_not_write_credentials(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
     _env(monkeypatch, tmp_config_paths, api_key=None)
-    respx.post(f"{SERVER}/v1/login").mock(
-        return_value=httpx.Response(202, json={"status": "code_sent"})
+    route = respx.post(f"{SERVER}/v1/login").mock(
+        return_value=httpx.Response(
+            202,
+            json={"status": "ok", "message": "Check your email for next steps."},
+        )
     )
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["login", "--email", "e@x.com"], input="")
+
+    assert result.exit_code == 0, result.output
+    assert route.called
+    assert "non-interactive" in result.output.lower()
+    assert "Check your email for next steps." in result.output
+    assert load_credentials(tmp_config_paths) is None
+
+
+@respx.mock
+def test_login_verify_writes_credentials(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key=None)
     respx.post(f"{SERVER}/v1/login/verify").mock(
         return_value=httpx.Response(200, json={"api_key": "good_live_EXAMPLE_L"})
     )
+
     runner = CliRunner()
-    result = runner.invoke(app, ["login", "--email", "e@x.com"], input="654321\n")
+    result = runner.invoke(
+        app,
+        ["login-verify", "--email", "e@x.com", "--code", "654321"],
+    )
+
     assert result.exit_code == 0, result.output
     creds = load_credentials(tmp_config_paths)
     assert creds is not None and creds["api_key"] == "good_live_EXAMPLE_L"
+    assert "good_live_EXAMPLE_L" not in result.output
+
+
+def test_signup_command_is_removed(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key=None)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["signup", "--email", "e@x.com"])
+
+    assert result.exit_code != 0
+    assert "No such command" in result.output
+
+
+def test_login_help_documents_interactive_and_non_interactive_modes() -> None:
+    runner = CliRunner()
+    result = runner.invoke(app, ["login", "--help"])
+
+    assert result.exit_code == 0, result.output
+    out = result.output.lower()
+    assert "interactive" in out
+    assert "non-interactive" in out
 
 
 def test_logout_removes_credentials(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
