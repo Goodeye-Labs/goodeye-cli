@@ -319,9 +319,7 @@ def test_publish_source_flag_is_forwarded(
         )
     )
     runner = CliRunner()
-    result = runner.invoke(
-        app, ["workflows", "publish", str(workflow_file), "--source", "teach"]
-    )
+    result = runner.invoke(app, ["workflows", "publish", str(workflow_file), "--source", "teach"])
     assert result.exit_code == 0, result.output
 
     sent = _json.loads(route.calls.last.request.content.decode())

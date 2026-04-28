@@ -186,4 +186,3 @@ def test_device_code_login_timeout() -> None:
             max_wait_s=3,
         )
     assert exc_info.value.slug == "auth_required"
-

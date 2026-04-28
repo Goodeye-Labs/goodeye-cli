@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -100,3 +101,14 @@ def test_get_api_key_none_when_no_source(tmp_config_paths: ConfigPaths) -> None:
 
 def test_get_server_strips_trailing_slash(tmp_config_paths: ConfigPaths) -> None:
     assert get_server(tmp_config_paths, {"GOODEYE_SERVER": "https://x/"}) == "https://x"
+
+
+def test_version_fallback_reads_pyproject_version() -> None:
+    """``importlib.metadata`` can be absent in some dev setups; fallback must match pyproject."""
+    from goodeye_cli import _version_from_source_tree
+
+    root = Path(__file__).resolve().parents[1]
+    with (root / "pyproject.toml").open("rb") as fh:
+        expected = tomllib.load(fh)["project"]["version"]
+    assert isinstance(expected, str)
+    assert _version_from_source_tree() == expected
