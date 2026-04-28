@@ -476,33 +476,33 @@ class GoodeyeClient:
         response = self._request("GET", "/v1/teams", params={"filter": filter_})
         return TeamList.model_validate(response.json())
 
-    def delete_team(self, team_id: str) -> TeamDeleteResult:
-        response = self._request("DELETE", f"/v1/teams/{team_id}")
+    def delete_team(self, team: str) -> TeamDeleteResult:
+        response = self._request("DELETE", f"/v1/teams/{team}")
         return TeamDeleteResult.model_validate(response.json())
 
-    def list_team_members(self, team_id: str) -> list[TeamMember]:
-        response = self._request("GET", f"/v1/teams/{team_id}/members")
+    def list_team_members(self, team: str) -> list[TeamMember]:
+        response = self._request("GET", f"/v1/teams/{team}/members")
         payload = response.json()
         rows = payload.get("items", []) if isinstance(payload, dict) else payload
         return [TeamMember.model_validate(row) for row in rows]
 
-    def add_team_member(self, team_id: str, user_id_or_email: str) -> dict[str, Any]:
+    def add_team_member(self, team: str, user: str) -> dict[str, Any]:
         response = self._request(
             "POST",
-            f"/v1/teams/{team_id}/members",
-            json_body={"user_id_or_email": user_id_or_email},
+            f"/v1/teams/{team}/members",
+            json_body={"user_identifier": user},
         )
         return response.json()
 
-    def remove_team_member(self, team_id: str, user_id: str) -> dict[str, Any]:
-        response = self._request("DELETE", f"/v1/teams/{team_id}/members/{user_id}")
+    def remove_team_member(self, team: str, user: str) -> dict[str, Any]:
+        response = self._request("DELETE", f"/v1/teams/{team}/members/{user}")
         return response.json()
 
-    def transfer_team_ownership(self, team_id: str, new_owner_user_id: str) -> dict[str, Any]:
+    def transfer_team_ownership(self, team: str, new_owner: str) -> dict[str, Any]:
         response = self._request(
             "POST",
-            f"/v1/teams/{team_id}/transfer-ownership",
-            json_body={"new_owner_user_id": new_owner_user_id},
+            f"/v1/teams/{team}/transfer-ownership",
+            json_body={"new_owner_user_identifier": new_owner},
         )
         return response.json()
 

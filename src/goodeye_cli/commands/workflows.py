@@ -394,7 +394,7 @@ def delete(
 @app.command("grant")
 def grant(
     workflow_id: str = typer.Argument(..., help="Workflow ID or name."),
-    grantee: str = typer.Argument(..., help="User email or @team handle."),
+    grantee: str = typer.Argument(..., help="User or team UUID, email, or handle."),
     role: str = typer.Argument(..., help="Role to grant: view, edit, or admin."),
 ) -> None:
     """Grant workflow access to a named user or team."""
@@ -407,7 +407,7 @@ def grant(
 @app.command("revoke-grant")
 def revoke_grant(
     workflow_id: str = typer.Argument(..., help="Workflow ID or name."),
-    grantee: str = typer.Argument(..., help="User email or @team handle."),
+    grantee: str = typer.Argument(..., help="User or team UUID, email, or handle."),
 ) -> None:
     """Revoke a direct workflow grant."""
     console = Console()
@@ -472,7 +472,7 @@ def leave(
 @app.command("transfer-ownership")
 def transfer_ownership(
     workflow_id: str = typer.Argument(..., help="Workflow ID or name."),
-    new_owner: str = typer.Argument(..., help="New owner user ID or email."),
+    new_owner: str = typer.Argument(..., help="New owner UUID, email, or handle."),
 ) -> None:
     """Transfer a workflow to another user. Owner only."""
     console = Console()

@@ -483,18 +483,18 @@ def test_workflow_grant_commands(tmp_config_paths: ConfigPaths, monkeypatch) -> 
     )
 
     runner = CliRunner()
-    grant = runner.invoke(app, ["workflows", "grant", "wf_1", "@analytics", "admin"])
+    grant = runner.invoke(app, ["workflows", "grant", "wf_1", "analytics", "admin"])
     grants = runner.invoke(app, ["workflows", "grants", "wf_1"])
-    revoke = runner.invoke(app, ["workflows", "revoke-grant", "wf_1", "@analytics"])
+    revoke = runner.invoke(app, ["workflows", "revoke-grant", "wf_1", "analytics"])
     leave = runner.invoke(app, ["workflows", "leave", "wf_1", "--yes"])
 
     assert grant.exit_code == 0, grant.output
     grant_body = _json.loads(grant_route.calls.last.request.content.decode())
-    assert grant_body["grantee_email_or_at_team_handle"] == "@analytics"
+    assert grant_body["grantee_email_or_at_team_handle"] == "analytics"
     assert "@analytics" in grants.output
     assert revoke.exit_code == 0, revoke.output
     revoke_body = _json.loads(revoke_route.calls.last.request.content.decode())
-    assert revoke_body["grantee_email_or_at_team_handle"] == "@analytics"
+    assert revoke_body["grantee_email_or_at_team_handle"] == "analytics"
     assert leave.exit_code == 0, leave.output
 
 

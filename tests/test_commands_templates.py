@@ -98,7 +98,7 @@ def test_templates_fork_authed_prints_workflow_id(
     assert result.exit_code == 0, result.output
     assert "Forked" in result.output
     assert "wf_01" in result.output
-    # The previous "ephemeral / will be promoted on signup" prose is gone.
+    # The previous "ephemeral / will be promoted on registration" prose is gone.
     assert "ephemeral" not in result.output.lower()
     assert "promoted" not in result.output.lower()
 
@@ -353,6 +353,27 @@ def test_templates_transfer_ownership_success(tmp_config_paths: ConfigPaths, mon
     assert result.exit_code == 0, result.output
     assert "Transferred" in result.output
     assert "user_2" in result.output
+
+
+@respx.mock
+def test_templates_transfer_ownership_accepts_handle(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    route = respx.post(f"{SERVER}/v1/templates/tpl_01/transfer-ownership").mock(
+        return_value=httpx.Response(
+            200,
+            json={"template_id": "tpl_01", "owner_user_id": "user_2", "transferred": True},
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "transfer-ownership", "tpl_01", "newowner"])
+
+    assert result.exit_code == 0, result.output
+    import json as _json
+
+    body = _json.loads(route.calls.last.request.content.decode())
+    assert body["new_owner_user_id_or_email"] == "newowner"
 
 
 @respx.mock

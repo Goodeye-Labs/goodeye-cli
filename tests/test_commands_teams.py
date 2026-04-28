@@ -132,3 +132,54 @@ def test_teams_members_renders_table(tmp_config_paths: ConfigPaths, monkeypatch)
     assert "ownerhandle" in result.output
     assert "owner" in result.output
     assert "member" in result.output
+
+
+@respx.mock
+def test_teams_commands_pass_handles_through(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE")
+    respx.get(f"{SERVER}/v1/teams/analytics/members").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "user_id": _USER_ID,
+                        "email": "owner@example.com",
+                        "handle": "ownerhandle",
+                        "role": "owner",
+                    }
+                ]
+            },
+        )
+    )
+    add_route = respx.post(f"{SERVER}/v1/teams/analytics/members").mock(
+        return_value=httpx.Response(201, json={"team_id": _TEAM_ID, "user_id": _USER_ID})
+    )
+    remove_route = respx.delete(f"{SERVER}/v1/teams/analytics/members/memberhandle").mock(
+        return_value=httpx.Response(
+            200,
+            json={"team_id": _TEAM_ID, "user_id": _USER_ID, "removed": True},
+        )
+    )
+    transfer_route = respx.post(f"{SERVER}/v1/teams/analytics/transfer-ownership").mock(
+        return_value=httpx.Response(200, json={"team_id": _TEAM_ID, "owner_user_id": _USER_ID})
+    )
+
+    runner = CliRunner()
+    members = runner.invoke(app, ["teams", "members", "analytics"])
+    add = runner.invoke(app, ["teams", "add-member", "analytics", "memberhandle"])
+    remove = runner.invoke(app, ["teams", "remove-member", "analytics", "memberhandle"])
+    transfer = runner.invoke(app, ["teams", "transfer-ownership", "analytics", "memberhandle"])
+
+    assert members.exit_code == 0, members.output
+    assert add.exit_code == 0, add.output
+    assert remove.exit_code == 0, remove.output
+    assert transfer.exit_code == 0, transfer.output
+
+    import json as _json
+
+    add_body = _json.loads(add_route.calls.last.request.content.decode())
+    assert add_body == {"user_identifier": "memberhandle"}
+    transfer_body = _json.loads(transfer_route.calls.last.request.content.decode())
+    assert transfer_body == {"new_owner_user_identifier": "memberhandle"}
+    assert remove_route.called

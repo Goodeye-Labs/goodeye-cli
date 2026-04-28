@@ -272,7 +272,7 @@ def deprecate_version_cmd(
 @app.command("transfer-ownership")
 def transfer_ownership_cmd(
     template_id: str = typer.Argument(..., help="Template ID."),
-    new_owner: str = typer.Argument(..., help="New owner user ID or email."),
+    new_owner: str = typer.Argument(..., help="New owner UUID, email, or handle."),
 ) -> None:
     """Transfer a template to another Goodeye user. Owner only."""
     console = Console()

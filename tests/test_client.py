@@ -279,6 +279,27 @@ def test_workflow_grant_client_methods() -> None:
 
 
 @respx.mock
+def test_team_client_methods_send_identifier_payloads() -> None:
+    add_route = respx.post(f"{SERVER}/v1/teams/analytics/members").mock(
+        return_value=httpx.Response(201, json={"team_id": "team_1", "user_id": "user_1"})
+    )
+    transfer_route = respx.post(f"{SERVER}/v1/teams/analytics/transfer-ownership").mock(
+        return_value=httpx.Response(200, json={"team_id": "team_1", "owner_user_id": "user_2"})
+    )
+
+    with GoodeyeClient(SERVER, api_key="k") as client:
+        client.add_team_member("analytics", "alice")
+        client.transfer_team_ownership("analytics", "alice")
+
+    assert _json.loads(add_route.calls.last.request.content.decode()) == {
+        "user_identifier": "alice"
+    }
+    assert _json.loads(transfer_route.calls.last.request.content.decode()) == {
+        "new_owner_user_identifier": "alice"
+    }
+
+
+@respx.mock
 def test_transfer_workflow_ownership_client_method() -> None:
     route = respx.post(f"{SERVER}/v1/workflows/wf_1/transfer-ownership").mock(
         return_value=httpx.Response(

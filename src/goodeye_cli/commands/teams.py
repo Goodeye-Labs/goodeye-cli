@@ -42,19 +42,19 @@ def create(
 
 @app.command("delete")
 def delete(
-    team_id: str = typer.Argument(..., help="Team ID."),
+    team: str = typer.Argument(..., help="Team UUID or handle."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
     """Delete a team you own. Releases the handle for reuse."""
     console = Console()
     if not yes:
-        confirm = typer.confirm(f"Delete team {team_id}?", default=False)
+        confirm = typer.confirm(f"Delete team {team}?", default=False)
         if not confirm:
             console.print("Cancelled.")
             raise typer.Exit(code=1)
     with _require_client() as client:
-        client.delete_team(team_id)
-    console.print(f"[green]Deleted[/green] team {team_id}")
+        client.delete_team(team)
+    console.print(f"[green]Deleted[/green] team {team}")
 
 
 @app.command("list")
@@ -87,14 +87,14 @@ def list_cmd(
 
 @app.command("members")
 def members(
-    team_id: str = typer.Argument(..., help="Team ID."),
+    team: str = typer.Argument(..., help="Team UUID or handle."),
 ) -> None:
     """List members of a team (owner appears via a synthetic row)."""
     console = Console()
     with _require_client() as client:
-        rows = client.list_team_members(team_id)
+        rows = client.list_team_members(team)
 
-    table = Table(title=f"Members of {team_id}")
+    table = Table(title=f"Members of {team}")
     table.add_column("User ID", no_wrap=True)
     table.add_column("Email")
     table.add_column("Handle")
@@ -106,35 +106,35 @@ def members(
 
 @app.command("add-member")
 def add_member(
-    team_id: str = typer.Argument(..., help="Team ID."),
-    user: str = typer.Argument(..., help="User ID (UUID) or email."),
+    team: str = typer.Argument(..., help="Team UUID or handle."),
+    user: str = typer.Argument(..., help="User UUID, email, or handle."),
 ) -> None:
     """Add a member to a team. Owner only."""
     console = Console()
     with _require_client() as client:
-        client.add_team_member(team_id, user)
-    console.print(f"[green]Added[/green] {user} to team {team_id}")
+        client.add_team_member(team, user)
+    console.print(f"[green]Added[/green] {user} to team {team}")
 
 
 @app.command("remove-member")
 def remove_member(
-    team_id: str = typer.Argument(..., help="Team ID."),
-    user_id: str = typer.Argument(..., help="User ID (UUID) to remove."),
+    team: str = typer.Argument(..., help="Team UUID or handle."),
+    user: str = typer.Argument(..., help="User UUID, email, or handle."),
 ) -> None:
     """Remove a member from a team. Owner can remove anyone; members can self-leave."""
     console = Console()
     with _require_client() as client:
-        client.remove_team_member(team_id, user_id)
-    console.print(f"[green]Removed[/green] {user_id} from team {team_id}")
+        client.remove_team_member(team, user)
+    console.print(f"[green]Removed[/green] {user} from team {team}")
 
 
 @app.command("transfer-ownership")
 def transfer_ownership(
-    team_id: str = typer.Argument(..., help="Team ID."),
-    new_owner_user_id: str = typer.Argument(..., help="User ID of the new owner."),
+    team: str = typer.Argument(..., help="Team UUID or handle."),
+    new_owner: str = typer.Argument(..., help="New owner UUID, email, or handle."),
 ) -> None:
     """Transfer team ownership. Old owner becomes a regular member."""
     console = Console()
     with _require_client() as client:
-        client.transfer_team_ownership(team_id, new_owner_user_id)
-    console.print(f"[green]Transferred[/green] team {team_id} ownership to {new_owner_user_id}")
+        client.transfer_team_ownership(team, new_owner)
+    console.print(f"[green]Transferred[/green] team {team} ownership to {new_owner}")
