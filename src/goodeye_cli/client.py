@@ -240,13 +240,15 @@ class GoodeyeClient:
         outcome: str | None = None,
         tags: list[str] | None = None,
         expected_version_token: str | None = None,
+        source: str | None = None,
     ) -> WorkflowSaveResult:
         """POST /v1/workflows with the flat ``save_workflow`` payload.
 
         Workflows are always private to the caller. Public sharing is a
         separate explicit step (``publish_template_version``). ``outcome``
         and ``tags`` are top-level discovery facets surfaced by
-        ``list_workflows``.
+        ``list_workflows``. ``source`` is an optional provenance marker
+        (e.g. 'manual' or 'teach').
         """
         payload: dict[str, Any] = {
             "name": name,
@@ -258,6 +260,8 @@ class GoodeyeClient:
             payload["outcome"] = outcome
         if tags:
             payload["tags"] = list(tags)
+        if source is not None:
+            payload["source"] = source
         response = self._request("POST", "/v1/workflows", json_body=payload)
         return WorkflowSaveResult.model_validate(response.json())
 
@@ -312,20 +316,17 @@ class GoodeyeClient:
 
     def teach_workflow(
         self,
-        id_or_slug: str,
+        workflow_id: str,
         *,
-        scenario: dict[str, Any] | None = None,
         trigger_context: dict[str, Any] | None = None,
-        max_rounds: int = 3,
     ) -> WorkflowTeachResult:
+        payload: dict[str, Any] = {}
+        if trigger_context is not None:
+            payload["trigger_context"] = trigger_context
         response = self._request(
             "POST",
-            f"/v1/workflows/{id_or_slug}/teach",
-            json_body={
-                "scenario": scenario,
-                "trigger_context": trigger_context,
-                "max_rounds": max_rounds,
-            },
+            f"/v1/workflows/{workflow_id}/teach",
+            json_body=payload,
         )
         return WorkflowTeachResult.model_validate(response.json())
 

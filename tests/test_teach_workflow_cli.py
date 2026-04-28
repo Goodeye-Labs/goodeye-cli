@@ -12,6 +12,8 @@ from goodeye_cli.config import ConfigPaths, save_credentials
 
 SERVER = "https://example.test"
 
+SKILL_MD_FIXTURE = "# Teach pack\n\nFollow these steps to run the teach session."
+
 
 def _setup_creds(monkeypatch, tmp_config_paths: ConfigPaths) -> None:
     save_credentials({"api_key": "good_live_EXAMPLE", "server": SERVER}, tmp_config_paths)
@@ -21,22 +23,14 @@ def _setup_creds(monkeypatch, tmp_config_paths: ConfigPaths) -> None:
 
 
 @respx.mock
-def test_teach_workflow_client_posts_structured_payload() -> None:
+def test_teach_workflow_client_posts_trigger_context() -> None:
     route = respx.post(f"{SERVER}/v1/workflows/wf_1/teach").mock(
         return_value=httpx.Response(
             200,
             json={
                 "workflow_id": "wf_1",
-                "new_version": 2,
-                "rounds_run": 1,
-                "rubric_edits": [{"verifier_ref": "clarity", "before": "a", "after": "b"}],
-                "verifiers_added": [],
-                "verifiers_removed": [],
-                "scenarios_used": [],
-                "unresolved": [],
-                "post_teach_expectation": "updated",
+                "skill_md": SKILL_MD_FIXTURE,
                 "trigger_context_echo": {"source": "cli-test"},
-                "human_report": "updated",
             },
         )
     )
@@ -44,24 +38,64 @@ def test_teach_workflow_client_posts_structured_payload() -> None:
     with GoodeyeClient(SERVER, api_key="k") as client:
         result = client.teach_workflow(
             "wf_1",
-            scenario={"sample": "edge"},
             trigger_context={"source": "cli-test"},
-            max_rounds=2,
         )
 
     body = _json.loads(route.calls.last.request.content.decode())
-    assert body == {
-        "scenario": {"sample": "edge"},
-        "trigger_context": {"source": "cli-test"},
-        "max_rounds": 2,
-    }
+    assert body == {"trigger_context": {"source": "cli-test"}}
     assert result.workflow_id == "wf_1"
-    assert result.new_version == 2
-    assert result.rubric_edits[0]["verifier_ref"] == "clarity"
+    assert result.skill_md == SKILL_MD_FIXTURE
+    assert result.trigger_context_echo == {"source": "cli-test"}
 
 
 @respx.mock
-def test_workflows_teach_command_prints_human_report(
+def test_teach_workflow_client_omits_trigger_context_when_none() -> None:
+    route = respx.post(f"{SERVER}/v1/workflows/wf_1/teach").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "workflow_id": "wf_1",
+                "skill_md": SKILL_MD_FIXTURE,
+                "trigger_context_echo": None,
+            },
+        )
+    )
+
+    with GoodeyeClient(SERVER, api_key="k") as client:
+        result = client.teach_workflow("wf_1")
+
+    body = _json.loads(route.calls.last.request.content.decode())
+    assert body == {}
+    assert result.workflow_id == "wf_1"
+    assert result.trigger_context_echo is None
+
+
+@respx.mock
+def test_workflows_teach_command_prints_skill_md(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.post(f"{SERVER}/v1/workflows/wf_1/teach").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "workflow_id": "wf_1",
+                "skill_md": SKILL_MD_FIXTURE,
+                "trigger_context_echo": None,
+            },
+        )
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "teach", "wf_1"])
+
+    assert result.exit_code == 0, result.output
+    assert "wf_1" in result.output
+    assert "Teach pack" in result.output
+
+
+@respx.mock
+def test_workflows_teach_command_with_trigger_context(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
@@ -70,50 +104,8 @@ def test_workflows_teach_command_prints_human_report(
             200,
             json={
                 "workflow_id": "wf_1",
-                "new_version": None,
-                "rounds_run": 1,
-                "rubric_edits": [],
-                "verifiers_added": [],
-                "verifiers_removed": [],
-                "scenarios_used": [{"source": "fully_synthetic"}],
-                "unresolved": [],
-                "post_teach_expectation": "unchanged",
-                "trigger_context_echo": None,
-                "human_report": "Ran 1 teaching round(s); 0 calibration change(s) recorded.",
-            },
-        )
-    )
-
-    runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "teach", "wf_1", "--max-rounds", "1"])
-
-    assert result.exit_code == 0, result.output
-    body = _json.loads(route.calls.last.request.content.decode())
-    assert body["max_rounds"] == 1
-    assert body["scenario"] is None
-    assert body["trigger_context"] is None
-    assert "Ran 1 teaching round" in result.output
-    assert "new_version: none" in result.output.lower()
-
-
-@respx.mock
-def test_workflows_teach_command_can_print_json(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
-    _setup_creds(monkeypatch, tmp_config_paths)
-    respx.post(f"{SERVER}/v1/workflows/wf_1/teach").mock(
-        return_value=httpx.Response(
-            200,
-            json={
-                "workflow_id": "wf_1",
-                "new_version": 3,
-                "rounds_run": 2,
-                "rubric_edits": [],
-                "verifiers_added": [],
-                "verifiers_removed": [],
-                "scenarios_used": [],
-                "unresolved": [],
-                "post_teach_expectation": "updated",
+                "skill_md": SKILL_MD_FIXTURE,
                 "trigger_context_echo": {"source": "cli"},
-                "human_report": "updated",
             },
         )
     )
@@ -125,15 +117,13 @@ def test_workflows_teach_command_can_print_json(tmp_config_paths: ConfigPaths, m
             "workflows",
             "teach",
             "wf_1",
-            "--scenario-json",
-            '{"sample":"edge"}',
-            "--trigger-context-json",
+            "--trigger-context",
             '{"source":"cli"}',
-            "--json",
         ],
     )
 
     assert result.exit_code == 0, result.output
-    parsed = _json.loads(result.output)
-    assert parsed["workflow_id"] == "wf_1"
-    assert parsed["new_version"] == 3
+    body = _json.loads(route.calls.last.request.content.decode())
+    assert body == {"trigger_context": {"source": "cli"}}
+    assert "wf_1" in result.output
+    assert "Teach pack" in result.output

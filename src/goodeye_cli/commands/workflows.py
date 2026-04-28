@@ -227,6 +227,11 @@ def publish(
         "--expected-version-token",
         help="Required token when updating an existing workflow. Omit only for creates.",
     ),
+    source: str | None = typer.Option(
+        None,
+        "--source",
+        help="Optional provenance marker: 'manual' or 'teach'. Defaults to NULL.",
+    ),
 ) -> None:
     """Upload a workflow from a markdown file with YAML front-matter.
 
@@ -283,6 +288,7 @@ def publish(
             outcome=outcome,
             tags=tags,
             expected_version_token=expected_version_token,
+            source=source,
         )
 
     console.print(
@@ -336,42 +342,29 @@ def _parse_optional_json_object(raw: str | None, *, label: str) -> dict[str, Any
 
 @app.command("teach")
 def teach(
-    workflow_id: str = typer.Argument(..., help="Workflow ID or name."),
-    scenario_json: str | None = typer.Option(
+    workflow_id: str = typer.Argument(..., help="Workflow ID or slug to teach"),
+    trigger_context: str | None = typer.Option(
         None,
-        "--scenario-json",
-        help="Optional JSON object teaching scenario. Omit to let the server choose.",
-    ),
-    trigger_context_json: str | None = typer.Option(
-        None,
-        "--trigger-context-json",
+        "--trigger-context",
         help="Optional opaque JSON object echoed in the teach result.",
     ),
-    max_rounds: int = typer.Option(3, "--max-rounds", min=1, max=3, help="Teaching rounds, 1-3."),
-    json_output: bool = typer.Option(False, "--json", help="Print the structured result as JSON."),
 ) -> None:
-    """Run teaching mode against an existing workflow."""
+    """Fetch the teach SKILL pack for an existing workflow.
+
+    The command returns the pack content; the agent (or you, working from
+    a script) follows the pack to run the teach session and persist the
+    result via 'goodeye workflows publish' with --source teach.
+    """
+    parsed_ctx = _parse_optional_json_object(trigger_context, label="--trigger-context")
     console = Console()
-    scenario = _parse_optional_json_object(scenario_json, label="--scenario-json")
-    trigger_context = _parse_optional_json_object(
-        trigger_context_json, label="--trigger-context-json"
-    )
     with _client(require_auth=True) as client:
-        result = client.teach_workflow(
-            workflow_id,
-            scenario=scenario,
-            trigger_context=trigger_context,
-            max_rounds=max_rounds,
-        )
-    if json_output:
-        typer.echo(result.model_dump_json(indent=2))
-        return
-    version = str(result.new_version) if result.new_version is not None else "none"
-    console.print(result.human_report)
-    console.print(f"workflow_id: {result.workflow_id}")
-    console.print(f"new_version: {version}")
-    console.print(f"rounds_run: {result.rounds_run}")
-    console.print(result.post_teach_expectation)
+        result = client.teach_workflow(workflow_id, trigger_context=parsed_ctx)
+    console.print(f"[bold]workflow_id:[/bold] {result.workflow_id}")
+    if result.trigger_context_echo:
+        console.print("[bold]trigger_context_echo:[/bold]")
+        console.print_json(data=result.trigger_context_echo)
+    console.print("[bold]skill_md:[/bold]")
+    console.print(result.skill_md)
 
 
 @app.command("delete")

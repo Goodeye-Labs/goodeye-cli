@@ -97,9 +97,7 @@ def test_whoami_json_includes_server_only_when_overridden(
 
 
 @respx.mock
-def test_whoami_json_omits_server_when_default(
-    tmp_config_paths: ConfigPaths, monkeypatch
-) -> None:
+def test_whoami_json_omits_server_when_default(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     from goodeye_cli.config import DEFAULT_SERVER
 
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_config_paths.config_dir.parent))
