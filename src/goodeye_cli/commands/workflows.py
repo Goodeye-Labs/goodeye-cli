@@ -90,7 +90,7 @@ def list_cmd(
 
 @app.command("get")
 def get_cmd(
-    id_or_name: str = typer.Argument(..., help="Workflow ID (ULID) or name."),
+    id_or_name: str = typer.Argument(..., help="Workflow UUID or name."),
     version: int | None = typer.Option(None, "--version", "-v", help="Pinned version."),
     output: Path | None = typer.Option(
         None, "--output", "-o", help="Write body to this path instead of stdout."
@@ -249,7 +249,7 @@ def publish(
     Only ``name`` and ``description`` are required. Everything else is optional.
 
     Workflows are always private to the caller. To share a workflow as a
-    public template, run ``goodeye templates publish <workflow-id>`` as a
+    public template, run ``goodeye templates publish <workflow-uuid-or-name>`` as a
     separate, explicit step.
 
     Verifier scripts and Truesight cURLs belong in the body as fenced code
@@ -299,7 +299,7 @@ def publish(
 
 @app.command("lineage")
 def lineage(
-    workflow_id: str = typer.Argument(..., help="Workflow ID or name."),
+    workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
     json_output: bool = typer.Option(False, "--json", help="Print lineage as JSON."),
 ) -> None:
     """Show a workflow's fork lineage."""
@@ -342,7 +342,7 @@ def _parse_optional_json_object(raw: str | None, *, label: str) -> dict[str, Any
 
 @app.command("teach")
 def teach(
-    workflow_id: str = typer.Argument(..., help="Workflow ID or slug to teach"),
+    workflow_id: str = typer.Argument(..., help="Workflow UUID or name to teach"),
     trigger_context: str | None = typer.Option(
         None,
         "--trigger-context",
@@ -373,7 +373,7 @@ def teach(
 
 @app.command("delete")
 def delete(
-    workflow_id: str = typer.Argument(..., help="Workflow ID or name."),
+    workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
     """Delete a workflow you own."""
@@ -393,7 +393,7 @@ def delete(
 
 @app.command("grant")
 def grant(
-    workflow_id: str = typer.Argument(..., help="Workflow ID or name."),
+    workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
     grantee: str = typer.Argument(..., help="User or team UUID, email, or handle."),
     role: str = typer.Argument(..., help="Role to grant: view, edit, or admin."),
 ) -> None:
@@ -406,7 +406,7 @@ def grant(
 
 @app.command("revoke-grant")
 def revoke_grant(
-    workflow_id: str = typer.Argument(..., help="Workflow ID or name."),
+    workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
     grantee: str = typer.Argument(..., help="User or team UUID, email, or handle."),
 ) -> None:
     """Revoke a direct workflow grant."""
@@ -421,7 +421,7 @@ def revoke_grant(
 
 @app.command("grants")
 def grants(
-    workflow_id: str = typer.Argument(..., help="Workflow ID or name."),
+    workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
     json_output: bool = typer.Option(False, "--json", help="Print grants as JSON."),
 ) -> None:
     """List workflow grants."""
@@ -451,7 +451,7 @@ def grants(
 
 @app.command("leave")
 def leave(
-    workflow_id: str = typer.Argument(..., help="Workflow ID or name."),
+    workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
     """Remove your direct grant on a shared workflow."""
@@ -471,7 +471,7 @@ def leave(
 
 @app.command("transfer-ownership")
 def transfer_ownership(
-    workflow_id: str = typer.Argument(..., help="Workflow ID or name."),
+    workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
     new_owner: str = typer.Argument(..., help="New owner UUID, email, or handle."),
 ) -> None:
     """Transfer a workflow to another user. Owner only."""

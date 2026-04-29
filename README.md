@@ -90,7 +90,7 @@ registry stores the body verbatim.
 ```
 
 Workflows are always private to the caller. To share a workflow as a public
-template, run `goodeye templates publish <workflow-id>` as a separate,
+template, run `goodeye templates publish <workflow-uuid-or-name>` as a separate,
 explicit step. `--name` on the command line overrides the front-matter
 `name`. The full file (front-matter included) is stored on the server, so
 `goodeye workflows get` round-trips a drop-in
@@ -162,9 +162,9 @@ goodeye auth create-key --name NAME [--copy]
 goodeye auth list-keys
     List your API keys. Secrets are never shown.
 
-goodeye auth revoke-key <key-id>
-    Revoke an API key. The key stops working immediately. <key-id> is the
-    ID shown by `auth list-keys`.
+goodeye auth revoke-key <key-id-or-name>
+    Revoke an API key. The key stops working immediately. The argument may
+    be the ID shown by `auth list-keys` or a unique key name.
 
 goodeye workflows list [--filter mine|shared-with-me|all] [--tag TAG] [--search QUERY] [--json]
     List workflows you can access (owned + shared with you via grants). The
@@ -181,7 +181,7 @@ goodeye workflows publish <file.md> [--name NAME] [--expected-version-token TOKE
     with the same name already exists under your account, a new version is
     appended (pass --expected-version-token to confirm the parent version).
     Front-matter must include `name:` and `description:`. To share publicly,
-    run `goodeye templates publish <workflow-id>` as a separate step.
+    run `goodeye templates publish <workflow-uuid-or-name>` as a separate step.
 
 goodeye workflows delete <id-or-name> [--yes]
     Delete a workflow you own.
@@ -216,28 +216,33 @@ goodeye templates get <identifier> [--version N] [--output PATH] [--json]
     Fetch a public template by UUID or @handle/slug[@vN]. Anonymous reads
     allowed; non-owner reads include an unverified-template safety banner.
 
-goodeye templates publish <workflow-id> [--release-notes TEXT]
+goodeye templates publish <workflow-uuid-or-name> [--release-notes TEXT]
     Publish a private workflow as a new public template version.
     Requires a claimed handle.
 
-goodeye templates unpublish <template-id> <version>
+goodeye templates unpublish <template-ref> <version>
     Soft-unpublish a single template version. Existing forks keep working.
+    <template-ref> is a template UUID or @handle/slug.
 
 goodeye templates fork <identifier> [--version N] [--name NAME]
     Fork a public template into a private workflow. Authentication required.
 
-goodeye templates delete <template-id> [--reason TEXT]
+goodeye templates delete <template-ref> [--reason TEXT]
     Soft-delete a template you own. Existing forks keep working.
+    <template-ref> is a template UUID or @handle/slug.
 
-goodeye templates undelete <template-id>
+goodeye templates undelete <template-ref>
     Restore a previously deleted template you own.
+    <template-ref> is a template UUID or @handle/slug.
 
-goodeye templates deprecate-version <template-id> <version> --message TEXT
+goodeye templates deprecate-version <template-ref> <version> --message TEXT
     Flag a single template version as deprecated, with a message shown
     to anyone who forks that version.
+    <template-ref> is a template UUID or @handle/slug.
 
-goodeye templates transfer-ownership <template-id> <user-id-or-email>
+goodeye templates transfer-ownership <template-ref> <user-id-or-email-or-handle>
     Hand a template off to another Goodeye user. Owner only.
+    <template-ref> is a template UUID or @handle/slug.
 
 goodeye design
     Print the workflow-designer prompt to stdout. Pipe it into your AI

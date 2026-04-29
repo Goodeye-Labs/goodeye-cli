@@ -143,7 +143,10 @@ def get_cmd(
 
 @app.command("publish")
 def publish(
-    workflow_id: str = typer.Argument(..., help="Workflow ID to publish."),
+    workflow_ref: str = typer.Argument(
+        ...,
+        help="Workflow UUID or slug (same as the workflow ``name`` / front-matter ``name``).",
+    ),
     release_notes: str | None = typer.Option(
         None, "--release-notes", "-n", help="Release notes for this version."
     ),
@@ -156,7 +159,7 @@ def publish(
     """
     console = Console()
     with _client(require_auth=True) as client:
-        result = client.publish_template_version(workflow_id, release_notes=release_notes)
+        result = client.publish_template_version(workflow_ref, release_notes=release_notes)
     console.print(
         f"[green]Published[/green] template {result.template_id} v{result.version} "
         f"as @{result.publishing_handle}"
@@ -165,7 +168,10 @@ def publish(
 
 @app.command("unpublish")
 def unpublish(
-    template_id: str = typer.Argument(..., help="Template ID."),
+    template_ref: str = typer.Argument(
+        ...,
+        help="Template UUID, @handle/slug, or @handle/slug@vN (version arg overrides @v).",
+    ),
     version: int = typer.Argument(..., help="Version to unpublish."),
 ) -> None:
     """Soft-unpublish a single template version.
@@ -175,7 +181,7 @@ def unpublish(
     """
     console = Console()
     with _client(require_auth=True) as client:
-        result = client.unpublish_template_version(template_id, version)
+        result = client.unpublish_template_version(template_ref, version)
     console.print(f"[green]Unpublished[/green] template {result.template_id} v{result.version}")
 
 
@@ -214,7 +220,10 @@ def fork(
 
 @app.command("delete")
 def delete_cmd(
-    template_id: str = typer.Argument(..., help="Template ID."),
+    template_ref: str = typer.Argument(
+        ...,
+        help="Template UUID or @handle/slug.",
+    ),
     reason: str | None = typer.Option(
         None, "--reason", help="Optional reason recorded in the audit log."
     ),
@@ -227,26 +236,32 @@ def delete_cmd(
     """
     console = Console()
     with _client(require_auth=True) as client:
-        result = client.delete_template(template_id, reason=reason)
+        result = client.delete_template(template_ref, reason=reason)
     suffix = " (idempotent)" if result.idempotent else ""
     console.print(f"[green]Deleted[/green] template {result.template_id}.{suffix}")
 
 
 @app.command("undelete")
 def undelete_cmd(
-    template_id: str = typer.Argument(..., help="Template ID."),
+    template_ref: str = typer.Argument(
+        ...,
+        help="Template UUID or @handle/slug.",
+    ),
 ) -> None:
     """Restore a previously deleted template you own."""
     console = Console()
     with _client(require_auth=True) as client:
-        result = client.undelete_template(template_id)
+        result = client.undelete_template(template_ref)
     suffix = " (idempotent)" if result.idempotent else ""
     console.print(f"[green]Undeleted[/green] template {result.template_id}.{suffix}")
 
 
 @app.command("deprecate-version")
 def deprecate_version_cmd(
-    template_id: str = typer.Argument(..., help="Template ID."),
+    template_ref: str = typer.Argument(
+        ...,
+        help="Template UUID, @handle/slug, or @handle/slug@vN (version arg overrides @v).",
+    ),
     version: int = typer.Argument(..., help="Version to deprecate."),
     message: str = typer.Option(
         ...,
@@ -262,7 +277,7 @@ def deprecate_version_cmd(
     """
     console = Console()
     with _client(require_auth=True) as client:
-        result = client.deprecate_template_version(template_id, version, message=message)
+        result = client.deprecate_template_version(template_ref, version, message=message)
     console.print(
         f"[green]Deprecated[/green] template {result.template_id} v{result.version}: "
         f"{result.deprecation_message}"
@@ -271,13 +286,16 @@ def deprecate_version_cmd(
 
 @app.command("transfer-ownership")
 def transfer_ownership_cmd(
-    template_id: str = typer.Argument(..., help="Template ID."),
+    template_ref: str = typer.Argument(
+        ...,
+        help="Template UUID or @handle/slug.",
+    ),
     new_owner: str = typer.Argument(..., help="New owner UUID, email, or handle."),
 ) -> None:
     """Transfer a template to another Goodeye user. Owner only."""
     console = Console()
     with _client(require_auth=True) as client:
-        result = client.transfer_template_ownership(template_id, new_owner)
+        result = client.transfer_template_ownership(template_ref, new_owner)
     if not result.transferred:
         console.print(f"[dim]Ownership already belongs to[/dim] {result.owner_user_id}.")
         return
