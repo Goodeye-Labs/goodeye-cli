@@ -103,7 +103,7 @@ def search_cmd(
 ) -> None:
     """LLM-ranked search over templates (not lexical list filtering)."""
     console = Console()
-    with _client(require_auth=False) as client:
+    with _client(require_auth=True) as client:
         result = client.search_templates(
             query=query,
             filter_=filter_.lower(),

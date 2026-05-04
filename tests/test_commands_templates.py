@@ -29,10 +29,23 @@ def _setup_no_creds(monkeypatch, tmp_config_paths: ConfigPaths) -> None:
 
 
 @respx.mock
+def test_templates_search_requires_auth(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    from goodeye_cli.errors import AuthRequired
+
+    _setup_no_creds(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "search", "chart critique"])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, AuthRequired)
+
+
+@respx.mock
 def test_templates_search_posts_to_search_endpoint(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
-    _setup_no_creds(monkeypatch, tmp_config_paths)
+    _setup_creds(monkeypatch, tmp_config_paths)
     route = respx.post(f"{SERVER}/v1/templates/search").mock(
         return_value=httpx.Response(
             200,
