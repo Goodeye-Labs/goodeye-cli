@@ -60,7 +60,7 @@ def test_verifiers_run_outputs_reasoning(tmp_config_paths: ConfigPaths, monkeypa
         body = json.loads(request.content.decode())
         assert body["inputs"] == {"message": "Thanks for reading."}
         return httpx.Response(
-            200,
+            201,
             json={
                 "verifier_run_id": "run_1",
                 "verifier_id": "ver_1",
