@@ -16,6 +16,7 @@ from goodeye_cli.commands import me as me_cmds
 from goodeye_cli.commands import register as register_cmd
 from goodeye_cli.commands import teams as teams_cmds
 from goodeye_cli.commands import templates as templates_cmds
+from goodeye_cli.commands import verifiers as verifiers_cmds
 from goodeye_cli.commands import whoami as whoami_cmd
 from goodeye_cli.commands import workflows as workflows_cmds
 from goodeye_cli.errors import GoodeyeError
@@ -42,6 +43,7 @@ app.add_typer(me_cmds.app, name="me", help="View and update your profile.")
 app.add_typer(workflows_cmds.app, name="workflows", help="Browse and manage workflows.")
 app.add_typer(templates_cmds.app, name="templates", help="Browse, publish, and fork templates.")
 app.add_typer(teams_cmds.app, name="teams", help="Manage teams.")
+app.add_typer(verifiers_cmds.app, name="verifiers", help="Deploy and run native verifiers.")
 
 
 def _version_callback(value: bool) -> None:

@@ -118,7 +118,9 @@ def search_cmd(
     table.add_column("Template")
     table.add_column("Match reason")
     for item in result.items:
-        ident = f"@{item.handle}/{item.slug}" if item.handle and item.slug else (item.name or item.id)
+        ident = (
+            f"@{item.handle}/{item.slug}" if item.handle and item.slug else (item.name or item.id)
+        )
         table.add_row(str(item.rank), ident, item.match_reason)
     if not result.items:
         console.print("[dim]No matches.[/dim]")

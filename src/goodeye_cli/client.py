@@ -42,6 +42,10 @@ from goodeye_cli.wire import (
     TemplateTransferOwnershipResult,
     TemplateUndeleteResult,
     TemplateUnpublishResult,
+    VerifierDeployResult,
+    VerifierList,
+    VerifierRevokeResult,
+    VerifierRunResult,
     WorkflowDeleteResult,
     WorkflowDetail,
     WorkflowGrantList,
@@ -539,6 +543,39 @@ class GoodeyeClient:
             json_body={"new_owner_user_identifier": new_owner},
         )
         return response.json()
+
+    # ----- verifiers -----
+    def deploy_verifier(self, payload: dict[str, Any]) -> VerifierDeployResult:
+        response = self._request("POST", "/v1/verifiers", json_body=payload)
+        return VerifierDeployResult.model_validate(response.json())
+
+    def list_verifiers(self) -> VerifierList:
+        response = self._request("GET", "/v1/verifiers")
+        return VerifierList.model_validate(response.json())
+
+    def run_verifier(
+        self,
+        verifier_id: str,
+        *,
+        inputs: dict[str, str],
+        media_url: str | None = None,
+        version: int | None = None,
+    ) -> VerifierRunResult:
+        body: dict[str, Any] = {"inputs": inputs}
+        if media_url is not None:
+            body["media_url"] = media_url
+        if version is not None:
+            body["version"] = version
+        response = self._request(
+            "POST",
+            f"/v1/verifiers/{verifier_id}/runs",
+            json_body=body,
+        )
+        return VerifierRunResult.model_validate(response.json())
+
+    def revoke_verifier(self, verifier_id: str) -> VerifierRevokeResult:
+        response = self._request("DELETE", f"/v1/verifiers/{verifier_id}")
+        return VerifierRevokeResult.model_validate(response.json())
 
     def get_design_prompt(self) -> dict[str, Any]:
         response = self._request("GET", "/v1/design/workflow-prompt")

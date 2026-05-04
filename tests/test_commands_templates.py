@@ -29,9 +29,7 @@ def _setup_no_creds(monkeypatch, tmp_config_paths: ConfigPaths) -> None:
 
 
 @respx.mock
-def test_templates_search_requires_auth(
-    tmp_config_paths: ConfigPaths, monkeypatch
-) -> None:
+def test_templates_search_requires_auth(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     from goodeye_cli.errors import AuthRequired
 
     _setup_no_creds(monkeypatch, tmp_config_paths)

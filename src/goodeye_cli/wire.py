@@ -338,3 +338,46 @@ class TeamMember(_WireBase):
 class TeamDeleteResult(_WireBase):
     team_id: str
     deleted: bool
+
+
+class VerifierSummary(_WireBase):
+    verifier_id: str
+    name: str
+    description: str
+    current_version: int
+    status: str
+    version_token: str
+    updated_at: str
+
+
+class VerifierList(_WireBase):
+    items: list[VerifierSummary]
+
+
+class VerifierDeployResult(_WireBase):
+    verifier_id: str
+    version: int
+    version_token: str
+    name: str
+    status: str
+    input_contract: str
+    config_hash: str
+
+
+class VerifierRunResult(_WireBase):
+    verifier_run_id: str
+    verifier_id: str
+    version: int
+    status: str
+    passed: bool | None = None
+    reasoning: str | None = None
+    duration_ms: int | None = None
+    created_at: str
+    error_code: str | None = None
+    error_message: str | None = None
+
+
+class VerifierRevokeResult(_WireBase):
+    verifier_id: str
+    name: str
+    revoked: bool
