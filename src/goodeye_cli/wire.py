@@ -82,6 +82,26 @@ class WorkflowList(_WireBase):
     next_cursor: str | None = None
 
 
+class WorkflowSearchItem(_WireBase):
+    """One ranked row from POST /v1/workflows/search."""
+
+    id: str
+    rank: int
+    match_reason: str
+    slug: str | None = None
+    name: str | None = None
+    description: str = ""
+    outcome: str = ""
+    tags: list[str] = Field(default_factory=list)
+
+
+class WorkflowSearchResponse(_WireBase):
+    items: list[WorkflowSearchItem]
+    query: str
+    limit: int
+    search_mode: str = "llm"
+
+
 class WorkflowDetail(_WireBase):
     id: str
     name: str
@@ -170,6 +190,27 @@ class TemplateSummary(_WireBase):
 class TemplateList(_WireBase):
     items: list[TemplateSummary]
     next_cursor: str | None = None
+
+
+class TemplateSearchItem(_WireBase):
+    """One ranked row from POST /v1/templates/search."""
+
+    id: str
+    rank: int
+    match_reason: str
+    slug: str = ""
+    name: str = ""
+    handle: str = ""
+    description: str = ""
+    outcome: str = ""
+    tags: list[str] = Field(default_factory=list)
+
+
+class TemplateSearchResponse(_WireBase):
+    items: list[TemplateSearchItem]
+    query: str
+    limit: int
+    search_mode: str = "llm"
 
 
 class TemplateDetail(_WireBase):

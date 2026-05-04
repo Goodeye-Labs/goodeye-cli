@@ -90,6 +90,42 @@ def test_workflows_list_follows_cursor(tmp_config_paths: ConfigPaths, monkeypatc
 
 
 @respx.mock
+def test_workflows_search_posts_to_search_endpoint(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    route = respx.post(f"{SERVER}/v1/workflows/search").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "id": "w1",
+                        "slug": "one",
+                        "name": "one",
+                        "rank": 1,
+                        "match_reason": "Matches chart critique.",
+                    }
+                ],
+                "query": "chart critique",
+                "limit": 5,
+                "search_mode": "llm",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "search", "chart critique"])
+    assert result.exit_code == 0, result.output
+    assert route.call_count == 1
+    req = route.calls[0].request
+    assert req.method == "POST"
+    assert req.url.path == "/v1/workflows/search"
+    body = _json.loads(req.content.decode())
+    assert body["query"] == "chart critique"
+    assert "Matches chart critique" in result.output
+
+
+@respx.mock
 def test_workflows_get_markdown_default(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
     respx.get(f"{SERVER}/v1/workflows/example").mock(

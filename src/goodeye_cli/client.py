@@ -38,6 +38,7 @@ from goodeye_cli.wire import (
     TemplateForkResult,
     TemplateList,
     TemplatePublishResult,
+    TemplateSearchResponse,
     TemplateTransferOwnershipResult,
     TemplateUndeleteResult,
     TemplateUnpublishResult,
@@ -50,6 +51,7 @@ from goodeye_cli.wire import (
     WorkflowLineage,
     WorkflowList,
     WorkflowSaveResult,
+    WorkflowSearchResponse,
     WorkflowTeachResult,
     WorkflowTransferOwnershipResult,
 )
@@ -213,6 +215,24 @@ class GoodeyeClient:
         response = self._request("GET", "/v1/workflows", params=params)
         return WorkflowList.model_validate(response.json())
 
+    def search_workflows(
+        self,
+        *,
+        query: str,
+        filter_: str = "all",
+        tag: str | None = None,
+        limit: int = 5,
+    ) -> WorkflowSearchResponse:
+        body: dict[str, Any] = {
+            "query": query,
+            "filter": filter_,
+            "limit": limit,
+        }
+        if tag is not None:
+            body["tag"] = tag
+        response = self._request("POST", "/v1/workflows/search", json_body=body)
+        return WorkflowSearchResponse.model_validate(response.json())
+
     def get_workflow(
         self,
         id_or_slug: str,
@@ -349,6 +369,20 @@ class GoodeyeClient:
             params["cursor"] = cursor
         response = self._request("GET", "/v1/templates", params=params)
         return TemplateList.model_validate(response.json())
+
+    def search_templates(
+        self,
+        *,
+        query: str,
+        filter_: str = "all",
+        limit: int = 5,
+    ) -> TemplateSearchResponse:
+        response = self._request(
+            "POST",
+            "/v1/templates/search",
+            json_body={"query": query, "filter": filter_, "limit": limit},
+        )
+        return TemplateSearchResponse.model_validate(response.json())
 
     def get_template(
         self,

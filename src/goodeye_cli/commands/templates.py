@@ -88,6 +88,44 @@ def list_cmd(
         console.print(table)
 
 
+@app.command("search")
+def search_cmd(
+    query: str = typer.Argument(..., help="Natural-language search query."),
+    filter_: str = typer.Option(
+        "all",
+        "--filter",
+        "-f",
+        help="all | mine",
+        case_sensitive=False,
+    ),
+    limit: int = typer.Option(5, "--limit", "-l", min=1, max=10, help="Max results (1-10)."),
+    json_output: bool = typer.Option(False, "--json", help="Print JSON."),
+) -> None:
+    """LLM-ranked search over templates (not lexical list filtering)."""
+    console = Console()
+    with _client(require_auth=False) as client:
+        result = client.search_templates(
+            query=query,
+            filter_=filter_.lower(),
+            limit=limit,
+        )
+    if json_output:
+        typer.echo(result.model_dump_json(indent=2))
+        return
+
+    table = Table(title="Template search")
+    table.add_column("Rank", justify="right")
+    table.add_column("Template")
+    table.add_column("Match reason")
+    for item in result.items:
+        ident = f"@{item.handle}/{item.slug}" if item.handle and item.slug else (item.name or item.id)
+        table.add_row(str(item.rank), ident, item.match_reason)
+    if not result.items:
+        console.print("[dim]No matches.[/dim]")
+    else:
+        console.print(table)
+
+
 @app.command("get")
 def get_cmd(
     identifier: str = typer.Argument(..., help="Template UUID, @handle/slug, or @handle/slug@vN."),

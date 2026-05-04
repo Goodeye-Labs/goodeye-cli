@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import respx
 from typer.testing import CliRunner
@@ -24,6 +26,42 @@ def _setup_no_creds(monkeypatch, tmp_config_paths: ConfigPaths) -> None:
     monkeypatch.delenv("GOODEYE_API_KEY", raising=False)
     monkeypatch.delenv("GOODEYE_SERVER", raising=False)
     monkeypatch.setenv("GOODEYE_SERVER", SERVER)
+
+
+@respx.mock
+def test_templates_search_posts_to_search_endpoint(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_no_creds(monkeypatch, tmp_config_paths)
+    route = respx.post(f"{SERVER}/v1/templates/search").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "id": "tpl_01",
+                        "slug": "template-search",
+                        "name": "template-search",
+                        "handle": "example",
+                        "rank": 1,
+                        "match_reason": "Matches chart critique.",
+                    }
+                ],
+                "query": "chart critique",
+                "limit": 5,
+                "search_mode": "llm",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "search", "chart critique"])
+    assert result.exit_code == 0, result.output
+    assert route.call_count == 1
+    req = route.calls[0].request
+    assert req.method == "POST"
+    assert req.url.path == "/v1/templates/search"
+    assert json.loads(req.content.decode())["query"] == "chart critique"
+    assert "Matches chart critique" in result.output
 
 
 @respx.mock

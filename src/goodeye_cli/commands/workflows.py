@@ -88,6 +88,46 @@ def list_cmd(
         console.print(table)
 
 
+@app.command("search")
+def search_cmd(
+    query: str = typer.Argument(..., help="Natural-language search query."),
+    filter_: str = typer.Option(
+        "all",
+        "--filter",
+        "-f",
+        help="mine | all | shared-with-me",
+        case_sensitive=False,
+    ),
+    tag: str | None = typer.Option(None, "--tag", "-t", help="Restrict candidates to this tag."),
+    limit: int = typer.Option(5, "--limit", "-l", min=1, max=10, help="Max results (1-10)."),
+    json_output: bool = typer.Option(False, "--json", help="Print JSON."),
+) -> None:
+    """LLM-ranked search over your workflows (not lexical list filtering)."""
+    console = Console()
+    with _client(require_auth=True) as client:
+        result = client.search_workflows(
+            query=query,
+            filter_=filter_.lower(),
+            tag=tag,
+            limit=limit,
+        )
+    if json_output:
+        typer.echo(result.model_dump_json(indent=2))
+        return
+
+    table = Table(title="Workflow search")
+    table.add_column("Rank", justify="right")
+    table.add_column("Slug")
+    table.add_column("Match reason")
+    for item in result.items:
+        slug = item.slug or item.name or item.id
+        table.add_row(str(item.rank), slug, item.match_reason)
+    if not result.items:
+        console.print("[dim]No matches.[/dim]")
+    else:
+        console.print(table)
+
+
 @app.command("get")
 def get_cmd(
     id_or_name: str = typer.Argument(..., help="Workflow UUID or name."),
