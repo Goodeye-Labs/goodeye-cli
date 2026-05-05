@@ -254,6 +254,7 @@ def test_save_workflow_sends_expected_version_token() -> None:
                 "version": 2,
                 "version_token": "tok-new",
                 "name": "example",
+                "verifiers": [{"name": "tone", "verifier_id": "ver-1", "version": 1}],
             },
         )
     )
@@ -267,6 +268,8 @@ def test_save_workflow_sends_expected_version_token() -> None:
     body = _json.loads(route.calls.last.request.content.decode())
     assert body["expected_version_token"] == "tok-old"
     assert result.version_token == "tok-new"
+    assert result.verifiers[0].name == "tone"
+    assert result.verifiers[0].version == 1
 
 
 @respx.mock

@@ -102,6 +102,16 @@ class WorkflowSearchResponse(_WireBase):
     search_mode: str = "llm"
 
 
+class WorkflowVerifierRefWire(_WireBase):
+    """Verifier binding on a workflow (publish payload or fork response)."""
+
+    name: str
+    verifier_id: str
+    version: int | None = None
+    role: str | None = None
+    source_workflow_id: str | None = None
+
+
 class WorkflowDetail(_WireBase):
     id: str
     name: str
@@ -116,6 +126,7 @@ class WorkflowDetail(_WireBase):
     parent_template_version: int | None = None
     effective_role: str | None = None
     version_token: str | None = None
+    verifiers: list[WorkflowVerifierRefWire] = Field(default_factory=list)
 
 
 class WorkflowSaveResult(_WireBase):
@@ -123,15 +134,7 @@ class WorkflowSaveResult(_WireBase):
     version: int
     name: str
     version_token: str
-
-
-class WorkflowVerifierRefWire(_WireBase):
-    """Verifier binding on a workflow (publish payload or fork response)."""
-
-    name: str
-    verifier_id: str
-    role: str | None = None
-    source_workflow_id: str | None = None
+    verifiers: list[WorkflowVerifierRefWire] = Field(default_factory=list)
 
 
 class SaveWorkflowInput(_WireBase):

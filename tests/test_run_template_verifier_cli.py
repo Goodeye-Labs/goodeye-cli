@@ -9,7 +9,9 @@ import respx
 from typer.testing import CliRunner
 
 from goodeye_cli.app import app
+from goodeye_cli.commands.templates import _parse_kv_flags
 from goodeye_cli.config import ConfigPaths, save_credentials
+from goodeye_cli.errors import RateLimited
 
 SERVER = "https://example.test"
 
@@ -180,6 +182,75 @@ def test_run_template_verifier_anonymous_limit_exit_code(
     assert result.exit_code == 2
     combined = (result.stdout or "") + (result.stderr or "")
     assert "signup" in combined.lower() or "sign up" in combined.lower()
+
+
+@respx.mock
+def test_run_template_verifier_json_http_error_outputs_json(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_no_creds(monkeypatch, tmp_config_paths)
+    respx.post(f"{SERVER}/v1/templates/sample@1/verifiers/tone/runs").mock(
+        return_value=httpx.Response(
+            429,
+            json={
+                "error": "anonymous_limit_exceeded",
+                "message": "You have used your free daily runs.",
+                "hint": "Create a free account.",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "templates",
+            "run-verifier",
+            "sample@1",
+            "tone",
+            "--input",
+            "output=hi",
+            "--anonymous",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 2
+    payload = json.loads(result.stdout)
+    assert payload["error"] == "anonymous_limit_exceeded"
+    assert payload["message"] == "You have used your free daily runs."
+
+
+@respx.mock
+def test_run_template_verifier_authenticated_rate_limit_is_not_anonymous_ux(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.post(f"{SERVER}/v1/templates/sample@1/verifiers/tone/runs").mock(
+        return_value=httpx.Response(
+            429,
+            json={"error": "rate_limited", "message": "slow down"},
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "templates",
+            "run-verifier",
+            "sample@1",
+            "tone",
+            "--input",
+            "output=hi",
+        ],
+    )
+    assert isinstance(result.exception, RateLimited)
+    assert "sign up" not in result.output.lower()
+
+
+def test_parse_kv_flags_preserves_values_for_server_validation() -> None:
+    assert _parse_kv_flags(["output=  keep whitespace  "], label="--input") == {
+        "output": "  keep whitespace  "
+    }
+    assert _parse_kv_flags(["output="], label="--input") == {"output": ""}
 
 
 @respx.mock

@@ -8,6 +8,7 @@ private workflow namespace.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Annotated, Any
@@ -61,11 +62,11 @@ def _parse_kv_flags(items: list[str], *, label: str) -> dict[str, str]:
                 message=f"Each {label} must be KEY=VALUE (got {raw!r}).",
             )
         key, value = raw.split("=", 1)
-        key, value = key.strip(), value.strip()
-        if not key or not value:
+        key = key.strip()
+        if not key:
             raise ValidationFailed(
                 slug="validation_error",
-                message=f"Each {label} must use non-empty KEY and VALUE (got {raw!r}).",
+                message=f"Each {label} must use a non-empty KEY (got {raw!r}).",
             )
         out[key] = value
     return out
@@ -433,7 +434,19 @@ def run_verifier_on_template(
                 anonymous=anonymous,
             )
     except GoodeyeError as exc:
-        if exc.status_code == 429 or exc.slug == "anonymous_limit_exceeded":
+        if json_output:
+            payload: dict[str, Any] = {
+                "error": exc.slug,
+                "message": exc.message,
+            }
+            if exc.hint:
+                payload["hint"] = exc.hint
+            if exc.status_code is not None:
+                payload["status_code"] = exc.status_code
+            typer.echo(json.dumps(payload, indent=2))
+            exit_code = 2 if exc.slug == "anonymous_limit_exceeded" else 1
+            raise typer.Exit(code=exit_code) from exc
+        if exc.slug == "anonymous_limit_exceeded" or (anonymous and exc.status_code == 429):
             console.print(
                 "[yellow]Anonymous or preview rate limit reached.[/yellow] "
                 "Sign up for a free account and run `goodeye login` (or set "
