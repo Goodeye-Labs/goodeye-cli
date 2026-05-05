@@ -12,6 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from goodeye_cli.client import GoodeyeClient
+from goodeye_cli.commands.prompts import confirm_destructive
 from goodeye_cli.config import get_api_key, get_server
 from goodeye_cli.errors import AuthRequired
 
@@ -47,11 +48,9 @@ def delete(
 ) -> None:
     """Delete a team you own. Releases the handle for reuse."""
     console = Console()
-    if not yes:
-        confirm = typer.confirm(f"Delete team {team}?", default=False)
-        if not confirm:
-            console.print("Cancelled.")
-            raise typer.Exit(code=1)
+    if not confirm_destructive(f"Delete team {team}?", yes=yes):
+        console.print("Cancelled.")
+        raise typer.Exit(code=0)
     with _require_client() as client:
         client.delete_team(team)
     console.print(f"[green]Deleted[/green] team {team}")

@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.table import Table
 
 from goodeye_cli.client import GoodeyeClient
+from goodeye_cli.commands.prompts import confirm_destructive
 from goodeye_cli.config import get_api_key, get_server
 from goodeye_cli.errors import AuthRequired, ValidationFailed
 
@@ -128,6 +129,31 @@ def run(
         console.print(result.reasoning)
 
 
+@app.command("show")
+def show(
+    verifier_id: str = typer.Argument(..., help="Verifier UUID."),
+    version: int | None = typer.Option(None, "--version", "-v", help="Pinned verifier version."),
+    json_output: bool = typer.Option(False, "--json", help="Print JSON."),
+) -> None:
+    """Show one verifier version: criterion, input contract, calibration."""
+    console = Console()
+    with _client() as client:
+        result = client.get_verifier(verifier_id, version=version)
+    if json_output:
+        typer.echo(result.model_dump_json(indent=2))
+        return
+    console.print(f"[bold]{result.name}[/bold] (v{result.version})  status={result.status}")
+    console.print(f"verifier_id: {result.verifier_id}")
+    console.print(f"description: {result.description}")
+    console.print(f"input_contract: {result.input_contract}")
+    if result.input_fields:
+        console.print(f"input_fields: {', '.join(result.input_fields)}")
+    console.print(f"config_hash: {result.config_hash}")
+    console.print()
+    console.print("[bold]criterion[/bold]")
+    console.print(result.criterion)
+
+
 @app.command("revoke")
 def revoke(
     verifier_id: str = typer.Argument(..., help="Verifier UUID."),
@@ -135,9 +161,9 @@ def revoke(
 ) -> None:
     """Revoke a semantic verifier."""
     console = Console()
-    if not yes and not typer.confirm(f"Revoke verifier {verifier_id}?", default=False):
+    if not confirm_destructive(f"Revoke verifier {verifier_id}?", yes=yes):
         console.print("Cancelled.")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=0)
     with _client() as client:
         result = client.revoke_verifier(verifier_id)
     console.print(f"[green]Revoked[/green] {result.name}")

@@ -46,6 +46,7 @@ from goodeye_cli.wire import (
     VerifierList,
     VerifierRevokeResult,
     VerifierRunResult,
+    VerifierVersionDetail,
     WorkflowDeleteResult,
     WorkflowDetail,
     WorkflowGrantList,
@@ -552,6 +553,15 @@ class GoodeyeClient:
     def list_verifiers(self) -> VerifierList:
         response = self._request("GET", "/v1/verifiers")
         return VerifierList.model_validate(response.json())
+
+    def get_verifier(
+        self, verifier_id: str, *, version: int | None = None
+    ) -> VerifierVersionDetail:
+        params: dict[str, Any] = {}
+        if version is not None:
+            params["version"] = version
+        response = self._request("GET", f"/v1/verifiers/{verifier_id}", params=params)
+        return VerifierVersionDetail.model_validate(response.json())
 
     def run_verifier(
         self,

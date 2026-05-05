@@ -126,3 +126,68 @@ def test_verifiers_deploy_posts_json_body(
     result = runner.invoke(app, ["verifiers", "deploy", str(cfg)])
     assert result.exit_code == 0, result.output
     assert "Deployed" in result.output
+
+
+@respx.mock
+def test_verifiers_show_returns_full_config(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.get(f"{SERVER}/v1/verifiers/ver_1").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "verifier_id": "ver_1",
+                "name": "cta-present",
+                "description": "Use when checking CTAs.",
+                "version": 2,
+                "criterion": "Pass if there is a CTA. Fail if there is no CTA.",
+                "input_contract": "text",
+                "input_fields": ["body"],
+                "few_shot_examples": [],
+                "judge_model_config": {"model": "openai/gpt-5.4"},
+                "reasoning_field_description": "explain",
+                "config_hash": "deadbeef",
+                "status": "active",
+            },
+        )
+    )
+    result = runner.invoke(app, ["verifiers", "show", "ver_1", "--json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["verifier_id"] == "ver_1"
+    assert data["version"] == 2
+    assert data["config_hash"] == "deadbeef"
+
+
+@respx.mock
+def test_verifiers_revoke_auto_approves_when_stdin_not_tty(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """CliRunner's stdin is not a TTY; this is the agent/CI case. The
+    confirm should auto-approve so the call proceeds without hanging.
+    """
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.delete(f"{SERVER}/v1/verifiers/ver_1").mock(
+        return_value=httpx.Response(
+            200, json={"verifier_id": "ver_1", "name": "cta-present", "revoked": True}
+        )
+    )
+    result = runner.invoke(app, ["verifiers", "revoke", "ver_1"])
+    assert result.exit_code == 0, result.output
+    assert "Revoked" in result.output
+
+
+def test_verifiers_revoke_human_decline_exits_zero(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """Human-decline path: user-cancel is exit 0 and the API call does
+    not fire. The prompt helper itself is unit-tested in
+    ``test_prompts.py``; here we just stub it returning ``False`` to
+    exercise the cancel branch wired into the revoke command.
+    """
+    from unittest import mock
+
+    _setup_creds(monkeypatch, tmp_config_paths)
+    with mock.patch("goodeye_cli.commands.verifiers.confirm_destructive", return_value=False):
+        result = runner.invoke(app, ["verifiers", "revoke", "ver_1"])
+    assert result.exit_code == 0, result.output
+    assert "Cancelled" in result.output

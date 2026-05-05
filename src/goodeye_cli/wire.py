@@ -364,6 +364,23 @@ class VerifierDeployResult(_WireBase):
     config_hash: str
 
 
+class VerifierVersionDetail(_WireBase):
+    """One version of a verifier: full deploy-time config plus head metadata."""
+
+    verifier_id: str
+    name: str
+    description: str
+    version: int
+    criterion: str
+    input_contract: str
+    input_fields: list[str] = Field(default_factory=list)
+    few_shot_examples: list[dict[str, Any]] = Field(default_factory=list)
+    judge_model_config: dict[str, Any] = Field(default_factory=dict)
+    reasoning_field_description: str
+    config_hash: str
+    status: str
+
+
 class VerifierRunResult(_WireBase):
     verifier_run_id: str
     verifier_id: str

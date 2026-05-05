@@ -13,6 +13,7 @@ from rich.console import Console
 from rich.table import Table
 
 from goodeye_cli.client import GoodeyeClient
+from goodeye_cli.commands.prompts import confirm_destructive
 from goodeye_cli.config import get_api_key, get_server
 from goodeye_cli.errors import AuthRequired, ValidationFailed
 from goodeye_cli.wire import WorkflowDetail
@@ -418,11 +419,9 @@ def delete(
 ) -> None:
     """Delete a workflow you own."""
     console = Console()
-    if not yes:
-        confirm = typer.confirm(f"Delete workflow {workflow_id}?", default=False)
-        if not confirm:
-            console.print("Cancelled.")
-            raise typer.Exit(code=1)
+    if not confirm_destructive(f"Delete workflow {workflow_id}?", yes=yes):
+        console.print("Cancelled.")
+        raise typer.Exit(code=0)
     with _client(require_auth=True) as client:
         result = client.delete_workflow(workflow_id)
     if result.deleted:
@@ -496,11 +495,9 @@ def leave(
 ) -> None:
     """Remove your direct grant on a shared workflow."""
     console = Console()
-    if not yes:
-        confirm = typer.confirm(f"Leave shared workflow {workflow_id}?", default=False)
-        if not confirm:
-            console.print("Cancelled.")
-            raise typer.Exit(code=1)
+    if not confirm_destructive(f"Leave shared workflow {workflow_id}?", yes=yes):
+        console.print("Cancelled.")
+        raise typer.Exit(code=0)
     with _client(require_auth=True) as client:
         result = client.leave_shared_workflow(workflow_id)
     console.print(
