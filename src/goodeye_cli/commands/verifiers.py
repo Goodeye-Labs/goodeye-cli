@@ -16,7 +16,15 @@ from goodeye_cli.config import get_api_key, get_server
 from goodeye_cli.errors import AuthRequired, ValidationFailed
 
 app = typer.Typer(
-    help="Manage native semantic verifiers.",
+    help=(
+        "Manage verifiers: owner-scoped, versioned LLM judges that score one "
+        "criterion ('does this output satisfy this rule?') against caller "
+        "inputs. Workflows reference verifiers by UUID (or UUID@version).\n"
+        "\n"
+        "All commands require auth (`goodeye login` or GOODEYE_API_KEY).\n"
+        "\n"
+        "Lifecycle: deploy -> show/list -> run (many times) -> revoke."
+    ),
     no_args_is_help=True,
 )
 
@@ -54,10 +62,34 @@ def deploy(
         ...,
         exists=True,
         readable=True,
-        help="Verifier config JSON file.",
+        help="Path to a verifier config JSON file (see schema below).",
     ),
 ) -> None:
-    """Deploy or version a verifier from a JSON config file."""
+    """Deploy a verifier or append a new version.
+
+    The config file is a single JSON object with these fields:
+
+    \b
+      name                    Required. Lowercase letters/digits/hyphens, max 128.
+                              Unique per owner among non-revoked verifiers.
+      description             Required. 1 to 1024 chars.
+      criterion               Required. Rubric prose the judge applies. Max 8000 chars.
+      input_contract          Required. One of "text", "text_image", "image".
+      input_fields            Required for text and text_image; must be empty for image.
+                              List of input names the judge sees at run time.
+      few_shot_examples       Optional list of labeled examples. Each entry has
+                              inputs, media_url, passed, reasoning. Must satisfy
+                              the contract (text-only, text+image, or image-only).
+      model_settings          Optional {"model": ..., "reasoning_effort": ...}.
+                              reasoning_effort: minimal | low | medium | high.
+                              Only these two fields are honored.
+      expected_version_token  Required when re-deploying an existing verifier.
+                              Get the current token from `goodeye verifiers list`
+                              or the previous deploy response. Omit for first deploy.
+
+    On success prints `verifier_id`, the new `version`, and the new
+    `version_token`. Persist the token: it's required for the next re-deploy.
+    """
     payload = _json_object(config_file.read_text(encoding="utf-8"), "config file")
     console = Console()
     with _client() as client:
@@ -70,7 +102,12 @@ def deploy(
 
 @app.command("list")
 def list_cmd(json_output: bool = typer.Option(False, "--json", help="Print JSON.")) -> None:
-    """List owned semantic verifiers."""
+    """List active (non-revoked) verifiers you own.
+
+    Shows the current version and version token for each verifier. Use
+    `goodeye verifiers show <id>` for the full deploy-time config of a
+    specific version.
+    """
     console = Console()
     with _client() as client:
         result = client.list_verifiers()
@@ -100,32 +137,60 @@ def list_cmd(json_output: bool = typer.Option(False, "--json", help="Print JSON.
 @app.command("run")
 def run(
     verifier_id: str = typer.Argument(..., help="Verifier UUID."),
-    inputs_json: str = typer.Option("{}", "--inputs-json", help="JSON object of text inputs."),
-    media_url: str | None = typer.Option(None, "--media-url", help="Image URL for image modes."),
-    version: int | None = typer.Option(None, "--version", "-v", help="Pinned verifier version."),
+    inputs_json: str = typer.Option(
+        "{}",
+        "--inputs-json",
+        help=(
+            "JSON object whose keys match the deployed `input_fields` exactly "
+            "(no missing or extra). Use `{}` for image-only verifiers. "
+            "All values must be non-empty strings."
+        ),
+    ),
+    media_url: str | None = typer.Option(
+        None,
+        "--media-url",
+        help=(
+            "Public HTTPS image URL. Required for `text_image` and `image` "
+            "contracts; rejected for `text`."
+        ),
+    ),
+    version: int | None = typer.Option(
+        None, "--version", "-v", help="Pin to a specific version; defaults to current."
+    ),
     workflow_id: str | None = typer.Option(
         None,
         "--workflow-id",
-        help="Stamp this workflow UUID onto the run for provenance.",
+        help=(
+            "Optional workflow UUID stamped onto the run for provenance. "
+            "Access-checked: a workflow you cannot see returns 404."
+        ),
     ),
     workflow_version: int | None = typer.Option(
         None,
         "--workflow-version",
-        help="Stamp the workflow version invoking this run.",
+        help="Workflow version invoking this run; pair with --workflow-id.",
     ),
     workflow_ref: str | None = typer.Option(
         None,
         "--workflow-ref",
-        help="Free-form workflow reference (e.g. slug or human label) for provenance.",
+        help="Free-form workflow label (slug or name) for human-readable provenance.",
     ),
     run_id: str | None = typer.Option(
         None,
         "--run-id",
-        help="Caller-supplied run correlation ID stamped onto the verifier run row.",
+        help="Caller-supplied correlation ID stamped onto the run row.",
     ),
     json_output: bool = typer.Option(False, "--json", help="Print JSON."),
 ) -> None:
-    """Run a semantic verifier and print pass/fail plus reasoning."""
+    """Run a verifier and print pass/fail plus reasoning.
+
+    Caller-shape errors (mismatched input keys, wrong media for the contract)
+    return 400 with no run row written. Judge runtime errors persist a row
+    with `status="error"`; the command exits 1 and prints the error code.
+
+    Exits 0 on a successful judgment regardless of pass/fail; check the
+    PASS/FAIL line or the JSON `passed` field to gate downstream actions.
+    """
     inputs = _json_object(inputs_json, "--inputs-json")
     console = Console()
     with _client() as client:
@@ -156,10 +221,18 @@ def run(
 @app.command("show")
 def show(
     verifier_id: str = typer.Argument(..., help="Verifier UUID."),
-    version: int | None = typer.Option(None, "--version", "-v", help="Pinned verifier version."),
+    version: int | None = typer.Option(
+        None, "--version", "-v", help="Pin to a specific version; defaults to current."
+    ),
     json_output: bool = typer.Option(False, "--json", help="Print JSON."),
 ) -> None:
-    """Show one verifier version: criterion, input contract, calibration."""
+    """Show one verifier version: criterion, contract, calibration.
+
+    Returns the full deploy-time payload (criterion, input_contract,
+    input_fields, few_shot_examples, judge_model_config) plus a `config_hash`
+    for drift detection across versions. Owner-only: a non-owned or revoked
+    verifier returns 404.
+    """
     console = Console()
     with _client() as client:
         result = client.get_verifier(verifier_id, version=version)
@@ -183,7 +256,12 @@ def revoke(
     verifier_id: str = typer.Argument(..., help="Verifier UUID."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
-    """Revoke a semantic verifier."""
+    """Revoke a verifier you own.
+
+    Sets the verifier to `revoked` and removes it from list/show/run
+    (subsequent calls return 404). Existing run rows are retained for audit.
+    Irreversible: replace by deploying a fresh verifier under a new name.
+    """
     console = Console()
     if not confirm_destructive(f"Revoke verifier {verifier_id}?", yes=yes):
         console.print("Cancelled.")

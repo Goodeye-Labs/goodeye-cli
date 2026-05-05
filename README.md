@@ -85,8 +85,10 @@ description: One sentence on what this workflow does and when to use it.
 # Body
 
 The rest of the file is the workflow body rendered to the agent at runtime.
-Verifier scripts and Truesight cURLs belong here as fenced code blocks; the
-registry stores the body verbatim.
+Inline checks (structural format/schema, functional tests/bounds) belong here
+as fenced code blocks. LLM-judge checks are deployed separately as verifiers
+(see "Verifiers" below) and referenced from the body by `verifier_id` or
+`verifier_id@version`. The registry stores the body verbatim.
 ```
 
 Workflows are always private to the caller. To share a workflow as a public
@@ -99,8 +101,80 @@ explicit step. `--name` on the command line overrides the front-matter
 Pre-cleanup files that nest `outcome` / `tags` under a `manifest:` block are
 still accepted: those two keys are promoted to the top level and a deprecation
 warning lists any other manifest keys (`kpi`, `programmatic_verifiers`, etc.)
-that the server no longer stores. Move verifier scripts and cURLs into the body
-when you next edit such a file.
+that the server no longer stores. Move inline checks into the body when you
+next edit such a file, and migrate LLM-judge checks to deployed verifiers.
+
+### Verifiers
+
+A verifier is a single LLM-judge criterion ("does this output satisfy this
+rule?") deployed to your account and runnable on demand. A workflow body can
+call out to one by UUID (or `UUID@version`) to gate or score an agent's
+output. Verifiers are private and owner-scoped; there is no public catalog.
+
+Three input shapes are supported:
+
+- `text`: judges text fields only.
+- `text_image`: judges text fields together with one image.
+- `image`: judges a single image with no text inputs.
+
+Deploy a verifier from a JSON config file:
+
+```json
+{
+  "name": "refund-claim-supported",
+  "description": "Flag refund replies that lack a stated reason.",
+  "criterion": "Return passed=true only when the reply text states a concrete reason for the refund (an order issue, defect, billing error, etc.). Generic apologies without a stated reason fail.",
+  "input_contract": "text",
+  "input_fields": ["reply_text"],
+  "few_shot_examples": [
+    {
+      "inputs": {"reply_text": "Refunded $42.10 for the cracked mug per your photo."},
+      "passed": true,
+      "reasoning": "Reason given: cracked mug."
+    },
+    {
+      "inputs": {"reply_text": "Sorry for the trouble! Refund issued."},
+      "passed": false,
+      "reasoning": "No reason stated."
+    }
+  ],
+  "model_settings": {"model": "openai/gpt-4o", "reasoning_effort": "medium"}
+}
+```
+
+```sh
+goodeye verifiers deploy ./refund-claim-supported.json
+# Deployed refund-claim-supported v1 (verifier_id=..., version_token=...)
+```
+
+Re-deploying the same `name` appends a new version. The second deploy must
+include `expected_version_token` from the previous response (or from
+`goodeye verifiers list`); a token mismatch returns 409.
+
+Run a verifier against one input:
+
+```sh
+goodeye verifiers run <verifier_id> \
+    --inputs-json '{"reply_text": "Refunded for the bent shipment."}' \
+    --workflow-id <workflow-uuid> --workflow-version 3
+# PASS verifier_run_id=...
+```
+
+`--inputs-json` keys must match the deployed `input_fields` exactly (no
+missing or extra). For `text_image` and `image` contracts, pass a public
+HTTPS URL via `--media-url`. The optional `--workflow-id`,
+`--workflow-version`, `--workflow-ref`, and `--run-id` flags stamp
+provenance onto the persisted run row. The command exits 0 on a successful
+judgment regardless of pass/fail; check the PASS/FAIL line or `--json`
+output to gate downstream actions.
+
+Inspect, list, or retire:
+
+```sh
+goodeye verifiers list
+goodeye verifiers show <verifier_id> [--version N]
+goodeye verifiers revoke <verifier_id>      # irreversible; deploy a fresh one to replace
+```
 
 ### Login and registration
 
@@ -243,6 +317,30 @@ goodeye templates deprecate-version <template-ref> <version> --message TEXT
 goodeye templates transfer-ownership <template-ref> <user-id-or-email-or-handle>
     Hand a template off to another Goodeye user. Owner only.
     <template-ref> is a template UUID or @handle/slug.
+
+goodeye verifiers deploy <config.json>
+    Deploy a verifier from a JSON config file (or append a new version).
+    Required fields: name, description, criterion, input_contract.
+    input_fields required for text and text_image contracts; few_shot_examples
+    and model_settings optional. expected_version_token is required when
+    re-deploying an existing verifier (get it from `verifiers list`).
+
+goodeye verifiers list [--json]
+    List active verifiers you own with their current version and version token.
+
+goodeye verifiers show <verifier_id> [--version N] [--json]
+    Show one verifier version: criterion, contract, calibration, config_hash.
+
+goodeye verifiers run <verifier_id> [--inputs-json JSON] [--media-url URL] \
+                                    [--version N] [--workflow-id UUID] \
+                                    [--workflow-version N] [--workflow-ref TEXT] \
+                                    [--run-id TEXT] [--json]
+    Run a verifier and print PASS/FAIL plus reasoning. --inputs-json keys
+    must match the version's input_fields exactly. --media-url is required
+    for text_image and image contracts.
+
+goodeye verifiers revoke <verifier_id> [--yes]
+    Revoke a verifier you own. Irreversible; existing run rows are kept.
 
 goodeye design
     Print the workflow-designer prompt to stdout. Pipe it into your AI
