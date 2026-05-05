@@ -135,18 +135,27 @@ class GoodeyeClient:
     ) -> httpx.Response:
         merged: dict[str, str] = dict(self._http.headers)
         if not authenticated:
-            merged.pop("Authorization", None)
+            for header_name in list(merged):
+                if header_name.lower() == "authorization":
+                    del merged[header_name]
         accept_value = "application/json" if accept is None else accept
         merged["accept"] = accept_value
         merged.pop("Accept", None)
-        response = self._http.request(
+        request = self._http.build_request(
             method,
             path,
             json=json_body,
             params=params,
             headers=merged,
-            follow_redirects=follow_redirects,
         )
+        if not authenticated:
+            # Client default headers are merged into the request; omitting the key
+            # from ``merged`` alone does not drop ``Authorization`` (see httpx
+            # ``Client._merge_headers``). Remove any Authorization after merge.
+            for header_name in list(request.headers.keys()):
+                if header_name.lower() == "authorization":
+                    del request.headers[header_name]
+        response = self._http.send(request, follow_redirects=follow_redirects)
         _raise_for_status(response)
         return response
 
