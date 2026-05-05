@@ -113,6 +113,43 @@ def test_run_template_verifier_authenticated_json(
 
 
 @respx.mock
+def test_run_template_verifier_json_exits_nonzero_on_runtime_error(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.post(f"{SERVER}/v1/templates/sample@1/verifiers/tone/runs").mock(
+        return_value=httpx.Response(
+            200,
+            json=_sample_run_json(remaining=None)
+            | {
+                "status": "error",
+                "passed": None,
+                "reasoning": None,
+                "error_code": "runtime_error",
+                "error_message": "judge failed",
+            },
+        ),
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "templates",
+            "run-verifier",
+            "sample@1",
+            "tone",
+            "--input",
+            "output=hi",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 1
+    out = json.loads(result.stdout)
+    assert out["status"] == "error"
+    assert out["error_code"] == "runtime_error"
+
+
+@respx.mock
 def test_run_template_verifier_anonymous_limit_exit_code(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:

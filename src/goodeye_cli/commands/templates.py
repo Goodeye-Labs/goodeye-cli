@@ -443,6 +443,8 @@ def run_verifier_on_template(
         raise
     if json_output:
         typer.echo(result.model_dump_json(indent=2))
+        if result.status == "error":
+            raise typer.Exit(code=1)
         return
     if result.status == "error":
         console.print(f"[bold red]ERROR[/bold red] {result.error_code}: {result.error_message}")
