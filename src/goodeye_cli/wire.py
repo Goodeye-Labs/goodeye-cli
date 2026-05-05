@@ -338,3 +338,63 @@ class TeamMember(_WireBase):
 class TeamDeleteResult(_WireBase):
     team_id: str
     deleted: bool
+
+
+class VerifierSummary(_WireBase):
+    verifier_id: str
+    name: str
+    description: str
+    current_version: int
+    status: str
+    version_token: str
+    updated_at: str
+
+
+class VerifierList(_WireBase):
+    items: list[VerifierSummary]
+
+
+class VerifierDeployResult(_WireBase):
+    verifier_id: str
+    version: int
+    version_token: str
+    name: str
+    status: str
+    input_contract: str
+    config_hash: str
+
+
+class VerifierVersionDetail(_WireBase):
+    """One version of a verifier: full deploy-time config plus head metadata."""
+
+    verifier_id: str
+    name: str
+    description: str
+    version: int
+    criterion: str
+    input_contract: str
+    input_fields: list[str] = Field(default_factory=list)
+    few_shot_examples: list[dict[str, Any]] = Field(default_factory=list)
+    judge_model_config: dict[str, Any] = Field(default_factory=dict)
+    reasoning_field_description: str
+    config_hash: str
+    status: str
+
+
+class VerifierRunResult(_WireBase):
+    verifier_run_id: str
+    verifier_id: str
+    version: int
+    status: str
+    passed: bool | None = None
+    reasoning: str | None = None
+    duration_ms: int | None = None
+    created_at: str
+    error_code: str | None = None
+    error_message: str | None = None
+
+
+class VerifierRevokeResult(_WireBase):
+    verifier_id: str
+    name: str
+    revoked: bool
