@@ -263,7 +263,7 @@ def test_publish_forwards_verifier_bindings(
 
 
 @respx.mock
-def test_publish_accepts_expected_version_token_option(
+def test_publish_update_without_verifier_flags_preserves_server_bindings(
     tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
@@ -296,6 +296,7 @@ def test_publish_accepts_expected_version_token_option(
     assert result.exit_code == 0, result.output
     sent = _json.loads(route.calls.last.request.content.decode())
     assert sent["expected_version_token"] == "old-token"
+    assert "verifiers" not in sent
     assert "new-token" in result.output
 
 
