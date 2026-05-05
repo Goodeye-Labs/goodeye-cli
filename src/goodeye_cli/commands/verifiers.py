@@ -103,6 +103,26 @@ def run(
     inputs_json: str = typer.Option("{}", "--inputs-json", help="JSON object of text inputs."),
     media_url: str | None = typer.Option(None, "--media-url", help="Image URL for image modes."),
     version: int | None = typer.Option(None, "--version", "-v", help="Pinned verifier version."),
+    workflow_id: str | None = typer.Option(
+        None,
+        "--workflow-id",
+        help="Stamp this workflow UUID onto the run for provenance.",
+    ),
+    workflow_version: int | None = typer.Option(
+        None,
+        "--workflow-version",
+        help="Stamp the workflow version invoking this run.",
+    ),
+    workflow_ref: str | None = typer.Option(
+        None,
+        "--workflow-ref",
+        help="Free-form workflow reference (e.g. slug or human label) for provenance.",
+    ),
+    run_id: str | None = typer.Option(
+        None,
+        "--run-id",
+        help="Caller-supplied run correlation ID stamped onto the verifier run row.",
+    ),
     json_output: bool = typer.Option(False, "--json", help="Print JSON."),
 ) -> None:
     """Run a semantic verifier and print pass/fail plus reasoning."""
@@ -114,6 +134,10 @@ def run(
             inputs={key: str(value) for key, value in inputs.items()},
             media_url=media_url,
             version=version,
+            workflow_id=workflow_id,
+            workflow_version=workflow_version,
+            workflow_ref=workflow_ref,
+            run_id=run_id,
         )
     if json_output:
         typer.echo(result.model_dump_json(indent=2))

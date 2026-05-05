@@ -570,12 +570,24 @@ class GoodeyeClient:
         inputs: dict[str, str],
         media_url: str | None = None,
         version: int | None = None,
+        workflow_id: str | None = None,
+        workflow_version: int | None = None,
+        workflow_ref: str | None = None,
+        run_id: str | None = None,
     ) -> VerifierRunResult:
         body: dict[str, Any] = {"inputs": inputs}
         if media_url is not None:
             body["media_url"] = media_url
         if version is not None:
             body["version"] = version
+        if workflow_id is not None:
+            body["workflow_id"] = workflow_id
+        if workflow_version is not None:
+            body["workflow_version"] = workflow_version
+        if workflow_ref is not None:
+            body["workflow_ref"] = workflow_ref
+        if run_id is not None:
+            body["run_id"] = run_id
         response = self._request(
             "POST",
             f"/v1/verifiers/{verifier_id}/runs",

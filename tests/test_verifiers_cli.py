@@ -90,6 +90,54 @@ def test_verifiers_run_outputs_reasoning(tmp_config_paths: ConfigPaths, monkeypa
 
 
 @respx.mock
+def test_verifiers_run_forwards_provenance_flags(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+
+    def check_request(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode())
+        assert body["workflow_id"] == "wf_123"
+        assert body["workflow_version"] == 4
+        assert body["workflow_ref"] == "lesson-quality"
+        assert body["run_id"] == "trace-abc"
+        return httpx.Response(
+            201,
+            json={
+                "verifier_run_id": "run_2",
+                "verifier_id": "ver_1",
+                "version": 1,
+                "status": "success",
+                "passed": True,
+                "reasoning": "ok",
+                "duration_ms": 1,
+                "created_at": "2026-05-04T00:00:00+00:00",
+            },
+        )
+
+    respx.post(f"{SERVER}/v1/verifiers/ver_1/runs").mock(side_effect=check_request)
+    result = runner.invoke(
+        app,
+        [
+            "verifiers",
+            "run",
+            "ver_1",
+            "--inputs-json",
+            '{"message":"hi"}',
+            "--workflow-id",
+            "wf_123",
+            "--workflow-version",
+            "4",
+            "--workflow-ref",
+            "lesson-quality",
+            "--run-id",
+            "trace-abc",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+
+
+@respx.mock
 def test_verifiers_deploy_posts_json_body(
     tmp_config_paths: ConfigPaths,
     monkeypatch,
