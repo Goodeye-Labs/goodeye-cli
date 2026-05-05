@@ -125,6 +125,28 @@ class WorkflowSaveResult(_WireBase):
     version_token: str
 
 
+class WorkflowVerifierRefWire(_WireBase):
+    """Verifier binding on a workflow (publish payload or fork response)."""
+
+    name: str
+    verifier_id: str
+    role: str | None = None
+    source_workflow_id: str | None = None
+
+
+class SaveWorkflowInput(_WireBase):
+    """Flat POST /v1/workflows body the CLI constructs (documentation + parity)."""
+
+    name: str
+    description: str
+    body: str
+    expected_version_token: str | None = None
+    outcome: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    source: str | None = None
+    verifiers: list[WorkflowVerifierRefWire] = Field(default_factory=list)
+
+
 class WorkflowGrantResult(_WireBase):
     workflow_id: str
     role: str
@@ -254,6 +276,7 @@ class TemplateForkResult(_WireBase):
     redirected_from_handle: str | None = None
     redirected_to_handle: str | None = None
     deprecation_warning: str | None = None
+    verifiers: list[WorkflowVerifierRefWire] = Field(default_factory=list)
 
 
 class TemplateDeleteResult(_WireBase):
@@ -340,6 +363,13 @@ class TeamDeleteResult(_WireBase):
     deleted: bool
 
 
+class RunTemplateVerifierRequestWire(_WireBase):
+    """JSON body for POST /v1/templates/.../verifiers/.../runs."""
+
+    inputs: dict[str, str] = Field(default_factory=dict)
+    media_url: str | None = None
+
+
 class VerifierSummary(_WireBase):
     verifier_id: str
     name: str
@@ -348,6 +378,8 @@ class VerifierSummary(_WireBase):
     status: str
     version_token: str
     updated_at: str
+    role: str | None = None
+    source_workflow_id: str | None = None
 
 
 class VerifierList(_WireBase):
@@ -389,6 +421,30 @@ class VerifierRunResult(_WireBase):
     passed: bool | None = None
     reasoning: str | None = None
     duration_ms: int | None = None
+    created_at: str
+    error_code: str | None = None
+    error_message: str | None = None
+
+
+class RunTemplateVerifierResponseWire(_WireBase):
+    """Response from POST /v1/templates/.../verifiers/.../runs.
+
+    Mirrors the server's ``run_template_verifier`` payload (snapshot run), not
+    ``POST /v1/verifiers/.../runs`` (which uses a ``version`` field instead of
+    ``verifier_version`` / template lineage ids).
+    """
+
+    verifier_run_id: str | None = None
+    anonymous_verifier_run_id: str | None = None
+    verifier_id: str
+    template_version_id: str | None = None
+    template_version: int | None = None
+    verifier_version: int | None = None
+    status: str
+    passed: bool | None = None
+    reasoning: str | None = None
+    duration_ms: int | None = None
+    remaining_anonymous_runs: int | None = None
     created_at: str
     error_code: str | None = None
     error_message: str | None = None

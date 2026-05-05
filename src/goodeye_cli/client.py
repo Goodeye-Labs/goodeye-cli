@@ -28,6 +28,8 @@ from goodeye_cli.wire import (
     ExchangeResult,
     MeResponse,
     RenameHandleResult,
+    RunTemplateVerifierRequestWire,
+    RunTemplateVerifierResponseWire,
     TeamCreated,
     TeamDeleteResult,
     TeamList,
@@ -97,7 +99,9 @@ class GoodeyeClient:
     ) -> None:
         self.server = server.rstrip("/")
         self.api_key = api_key
-        headers = {"User-Agent": _user_agent(), "Accept": "application/json"}
+        # Omit default ``Accept`` here; :meth:`_request` sets it per call so httpx
+        # does not merge ``application/json`` with ``text/markdown`` on GETs.
+        headers = {"User-Agent": _user_agent()}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
         self._http = httpx.Client(
@@ -127,16 +131,20 @@ class GoodeyeClient:
         params: dict[str, Any] | None = None,
         accept: str | None = None,
         follow_redirects: bool = False,
+        authenticated: bool = True,
     ) -> httpx.Response:
-        headers: dict[str, str] = {}
-        if accept is not None:
-            headers["Accept"] = accept
+        merged: dict[str, str] = dict(self._http.headers)
+        if not authenticated:
+            merged.pop("Authorization", None)
+        accept_value = "application/json" if accept is None else accept
+        merged["accept"] = accept_value
+        merged.pop("Accept", None)
         response = self._http.request(
             method,
             path,
             json=json_body,
             params=params,
-            headers=headers or None,
+            headers=merged,
             follow_redirects=follow_redirects,
         )
         _raise_for_status(response)
@@ -267,6 +275,7 @@ class GoodeyeClient:
         tags: list[str] | None = None,
         expected_version_token: str | None = None,
         source: str | None = None,
+        verifiers: list[dict[str, Any]] | None = None,
     ) -> WorkflowSaveResult:
         """POST /v1/workflows with the flat ``save_workflow`` payload.
 
@@ -288,6 +297,8 @@ class GoodeyeClient:
             payload["tags"] = list(tags)
         if source is not None:
             payload["source"] = source
+        if verifiers:
+            payload["verifiers"] = list(verifiers)
         response = self._request("POST", "/v1/workflows", json_body=payload)
         return WorkflowSaveResult.model_validate(response.json())
 
@@ -468,6 +479,31 @@ class GoodeyeClient:
             body["name"] = name
         response = self._request("POST", "/v1/templates/fork", json_body=body)
         return TemplateForkResult.model_validate(response.json())
+
+    def run_template_verifier(
+        self,
+        template_identifier: str,
+        verifier_name: str,
+        *,
+        inputs: dict[str, str],
+        media_url: str | None = None,
+        anonymous: bool = False,
+    ) -> RunTemplateVerifierResponseWire:
+        """POST /v1/templates/{identifier}/verifiers/{name}/runs.
+
+        ``anonymous=True`` omits ``Authorization`` even when the client was
+        constructed with an API key (public template try-before-signup).
+        """
+        wire = RunTemplateVerifierRequestWire(inputs=inputs, media_url=media_url)
+        json_body = wire.model_dump(exclude_none=True)
+        path = f"/v1/templates/{template_identifier}/verifiers/{verifier_name}/runs"
+        response = self._request(
+            "POST",
+            path,
+            json_body=json_body,
+            authenticated=not anonymous,
+        )
+        return RunTemplateVerifierResponseWire.model_validate(response.json())
 
     def delete_template(
         self, template_id: str, *, reason: str | None = None

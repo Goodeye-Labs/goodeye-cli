@@ -53,6 +53,39 @@ def test_verifiers_list_prints_json(tmp_config_paths: ConfigPaths, monkeypatch) 
 
 
 @respx.mock
+def test_verifiers_list_table_shows_role_and_source_workflow(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.get(f"{SERVER}/v1/verifiers").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "verifier_id": "ver_1",
+                        "name": "tone",
+                        "description": "Checks tone.",
+                        "current_version": 2,
+                        "status": "active",
+                        "version_token": "token",
+                        "updated_at": "2026-05-04T00:00:00+00:00",
+                        "role": "exec",
+                        "source_workflow_id": "wf_shared",
+                    },
+                ],
+            },
+        )
+    )
+    result = runner.invoke(app, ["verifiers", "list"])
+    assert result.exit_code == 0, result.output
+    assert "Role" in result.output
+    assert "Source wf" in result.output
+    assert "exec" in result.output
+    assert "wf_shared" in result.output
+
+
+@respx.mock
 def test_verifiers_run_outputs_reasoning(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
 

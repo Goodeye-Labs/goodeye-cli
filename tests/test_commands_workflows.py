@@ -217,6 +217,52 @@ def test_publish_minimal_front_matter(
 
 
 @respx.mock
+def test_publish_forwards_verifier_bindings(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    workflow_file = tmp_path / "with-v.md"
+    workflow_file.write_text(
+        "---\n"
+        "name: with-v\n"
+        "description: Workflow with verifier bindings.\n"
+        "---\n"
+        "# Body\n",
+    )
+    route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "workflow_id": "skl_v1",
+                "version": 1,
+                "version_token": "tok-v",
+                "name": "with-v",
+            },
+        )
+    )
+    runner = CliRunner()
+    vid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    result = runner.invoke(
+        app,
+        [
+            "workflows",
+            "publish",
+            str(workflow_file),
+            "--verifier",
+            f"tone={vid}",
+            "--verifier",
+            f"factual={vid}",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    sent = _json.loads(route.calls.last.request.content.decode())
+    assert sent["verifiers"] == [
+        {"name": "tone", "verifier_id": vid},
+        {"name": "factual", "verifier_id": vid},
+    ]
+
+
+@respx.mock
 def test_publish_accepts_expected_version_token_option(
     tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:

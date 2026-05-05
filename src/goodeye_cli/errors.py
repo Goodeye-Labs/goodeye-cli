@@ -68,6 +68,7 @@ _SLUG_MAP: dict[str, type[GoodeyeError]] = {
     "forbidden": Forbidden,
     "not_found": NotFound,
     "validation_error": ValidationFailed,
+    "anonymous_limit_exceeded": RateLimited,
     "rate_limited": RateLimited,
     "conflict": Conflict,
     "handle_already_claimed": Conflict,

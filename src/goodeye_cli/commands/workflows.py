@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import typer
 import yaml
@@ -257,6 +257,26 @@ def _extract_discovery_facets(
     return outcome, tags
 
 
+def _parse_workflow_verifier_flags(values: list[str]) -> list[dict[str, str]]:
+    """Parse ``--verifier logical-name=verifier_uuid`` into API wire dicts."""
+    rows: list[dict[str, str]] = []
+    for raw in values:
+        if "=" not in raw:
+            raise ValidationFailed(
+                slug="validation_error",
+                message=f"Each --verifier must be name=verifier_id (got {raw!r}).",
+            )
+        name, vid = raw.split("=", 1)
+        name, vid = name.strip(), vid.strip()
+        if not name or not vid:
+            raise ValidationFailed(
+                slug="validation_error",
+                message=f"Each --verifier needs non-empty name and id (got {raw!r}).",
+            )
+        rows.append({"name": name, "verifier_id": vid})
+    return rows
+
+
 @app.command("publish")
 def publish(
     file: Path = typer.Argument(..., exists=True, readable=True, help="Markdown file to upload."),
@@ -273,6 +293,13 @@ def publish(
         "--source",
         help="Optional provenance marker: 'manual' or 'teach'. Defaults to NULL.",
     ),
+    verifier: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--verifier",
+            help="Logical name=verifier UUID binding (repeatable). Forwarded in save payload.",
+        ),
+    ] = None,
 ) -> None:
     """Upload a workflow from a markdown file with YAML front-matter.
 
@@ -320,6 +347,7 @@ def publish(
         )
 
     outcome, tags = _extract_discovery_facets(front_matter, console=console)
+    verifiers = _parse_workflow_verifier_flags(list(verifier or []))
 
     with _client(require_auth=True) as client:
         result = client.save_workflow(
@@ -330,6 +358,7 @@ def publish(
             tags=tags,
             expected_version_token=expected_version_token,
             source=source,
+            verifiers=verifiers or None,
         )
 
     console.print(
