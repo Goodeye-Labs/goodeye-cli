@@ -19,7 +19,7 @@ from goodeye_cli.config import get_api_key, get_server
 from goodeye_cli.errors import AuthRequired, ValidationFailed
 from goodeye_cli.wire import WorkflowDetail
 
-_WORKFLOW_VERIFIER_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+_WORKFLOW_VERIFIER_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,127}$")
 
 app = typer.Typer(
     help="Browse and manage the caller's private workflows.",
@@ -280,8 +280,7 @@ def _parse_workflow_verifier_flags(values: list[str]) -> list[dict[str, str]]:
             raise ValidationFailed(
                 slug="validation_error",
                 message=(
-                    "Each --verifier name must be 1-128 path-safe characters "
-                    "(letters, digits, underscore, dot, or hyphen)."
+                    "Each --verifier name must use lowercase letters, digits, and hyphens."
                 ),
             )
         rows.append({"name": name, "verifier_id": vid})
@@ -308,7 +307,10 @@ def publish(
         list[str] | None,
         typer.Option(
             "--verifier",
-            help="Logical name=verifier UUID binding (repeatable). Forwarded in save payload.",
+            help=(
+                "Lowercase-kebab name=verifier UUID binding (repeatable). "
+                "Forwarded in save payload."
+            ),
         ),
     ] = None,
 ) -> None:

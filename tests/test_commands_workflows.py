@@ -623,3 +623,10 @@ def test_parse_workflow_verifier_flags_rejects_route_unsafe_names() -> None:
         _parse_workflow_verifier_flags(
             ["tone/check=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"]
         )
+
+
+def test_parse_workflow_verifier_flags_rejects_deploy_incompatible_names() -> None:
+    with pytest.raises(ValidationFailed, match="name"):
+        _parse_workflow_verifier_flags(
+            ["tone_check=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"]
+        )
