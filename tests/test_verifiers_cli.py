@@ -230,9 +230,6 @@ def test_verifiers_run_forwards_system_alias(tmp_config_paths: ConfigPaths, monk
     _setup_creds(monkeypatch, tmp_config_paths)
     alias = "system:workflow-design-qa"
 
-    def check_request(request: httpx.Request) -> httpx.Response:
-        body = json.loads(request.content.decode())
-        assert body["inputs"] == {"design": "x"}
     url = "https://example.test/v1/verifiers/system:workflow-design-qa/runs"
 
     def check_request(request: httpx.Request) -> httpx.Response:
