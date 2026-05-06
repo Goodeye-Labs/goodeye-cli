@@ -19,8 +19,11 @@ app = typer.Typer(
     help=(
         "Manage verifiers: owner-scoped, versioned LLM judges that score one "
         "criterion ('does this output satisfy this rule?') against caller "
-        "inputs. Workflows reference verifiers by UUID (or UUID@version).\n"
-        "\n"
+        "inputs. Workflows typically reference deployed verifiers by UUID "
+        "(or UUID@version). The **`run`** command (and REST/MCP equivalents) "
+        "also accepts the caller-owned name or **`system:<name>`** for seeded "
+        "platform judges (`show`/`revoke` accept UUID or name only)."
+        "\n\n"
         "All commands require auth (`goodeye login` or GOODEYE_API_KEY).\n"
         "\n"
         "Lifecycle: deploy -> show/list -> run (many times) -> revoke."
@@ -142,7 +145,13 @@ def list_cmd(json_output: bool = typer.Option(False, "--json", help="Print JSON.
 
 @app.command("run")
 def run(
-    verifier_id: str = typer.Argument(..., help="Verifier UUID."),
+    verifier_id: str = typer.Argument(
+        ...,
+        help=(
+            "Verifier UUID, your caller-owned name for an active verifier, "
+            "or system:<name> for a seeded platform judge."
+        ),
+    ),
     inputs_json: str = typer.Option(
         "{}",
         "--inputs-json",
@@ -226,7 +235,13 @@ def run(
 
 @app.command("show")
 def show(
-    verifier_id: str = typer.Argument(..., help="Verifier UUID."),
+    verifier_id: str = typer.Argument(
+        ...,
+        help=(
+            "Verifier UUID or your caller-owned name for an active verifier "
+            "(not system:<name>)."
+        ),
+    ),
     version: int | None = typer.Option(
         None, "--version", "-v", help="Pin to a specific version; defaults to current."
     ),
@@ -259,7 +274,13 @@ def show(
 
 @app.command("revoke")
 def revoke(
-    verifier_id: str = typer.Argument(..., help="Verifier UUID."),
+    verifier_id: str = typer.Argument(
+        ...,
+        help=(
+            "Verifier UUID or your caller-owned name for an active verifier "
+            "(not system:<name>)."
+        ),
+    ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
     """Revoke a verifier you own.
