@@ -225,11 +225,7 @@ def test_publish_forwards_verifier_bindings(
     _setup_creds(monkeypatch, tmp_config_paths)
     workflow_file = tmp_path / "with-v.md"
     workflow_file.write_text(
-        "---\n"
-        "name: with-v\n"
-        "description: Workflow with verifier bindings.\n"
-        "---\n"
-        "# Body\n",
+        "---\nname: with-v\ndescription: Workflow with verifier bindings.\n---\n# Body\n",
     )
     route = respx.post(f"{SERVER}/v1/workflows").mock(
         return_value=httpx.Response(
@@ -658,13 +654,9 @@ def test_parse_front_matter_without_front_matter_returns_source() -> None:
 
 def test_parse_workflow_verifier_flags_rejects_route_unsafe_names() -> None:
     with pytest.raises(ValidationFailed, match="name"):
-        _parse_workflow_verifier_flags(
-            ["tone/check=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"]
-        )
+        _parse_workflow_verifier_flags(["tone/check=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"])
 
 
 def test_parse_workflow_verifier_flags_rejects_deploy_incompatible_names() -> None:
     with pytest.raises(ValidationFailed, match="name"):
-        _parse_workflow_verifier_flags(
-            ["tone_check=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"]
-        )
+        _parse_workflow_verifier_flags(["tone_check=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"])

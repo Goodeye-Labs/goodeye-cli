@@ -50,9 +50,7 @@ def _sample_run_json(*, remaining: int | None) -> dict:
 
 
 @respx.mock
-def test_run_template_verifier_anonymous_json(
-    tmp_config_paths: ConfigPaths, monkeypatch
-) -> None:
+def test_run_template_verifier_anonymous_json(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_no_creds(monkeypatch, tmp_config_paths)
     route = respx.post(f"{SERVER}/v1/templates/sample@1/verifiers/tone/runs").mock(
         return_value=httpx.Response(200, json=_sample_run_json(remaining=4)),

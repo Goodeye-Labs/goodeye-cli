@@ -279,9 +279,7 @@ def _parse_workflow_verifier_flags(values: list[str]) -> list[dict[str, str]]:
         if not _WORKFLOW_VERIFIER_NAME_RE.fullmatch(name):
             raise ValidationFailed(
                 slug="validation_error",
-                message=(
-                    "Each --verifier name must use lowercase letters, digits, and hyphens."
-                ),
+                message=("Each --verifier name must use lowercase letters, digits, and hyphens."),
             )
         rows.append({"name": name, "verifier_id": vid})
     return rows
@@ -371,9 +369,7 @@ def publish(
             message="Use either --clear-verifiers or --verifier, not both.",
         )
     verifiers = _parse_workflow_verifier_flags(list(verifier or []))
-    verifier_payload: list[dict[str, str]] | None = (
-        [] if clear_verifiers else verifiers or None
-    )
+    verifier_payload: list[dict[str, str]] | None = [] if clear_verifiers else verifiers or None
 
     with _client(require_auth=True) as client:
         result = client.save_workflow(

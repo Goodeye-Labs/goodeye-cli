@@ -99,9 +99,7 @@ def error_from_body(
         raw_hint = body.get("hint")
         hint = str(raw_hint) if isinstance(raw_hint, str) else None
         extras = {
-            key: value
-            for key, value in body.items()
-            if key not in {"error", "message", "hint"}
+            key: value for key, value in body.items() if key not in {"error", "message", "hint"}
         }
 
     cls = _SLUG_MAP.get(slug, ServerError)
