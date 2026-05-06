@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -59,16 +60,45 @@ def _json_object(raw: str, label: str) -> dict[str, Any]:
     return parsed
 
 
+def _read_config_input(source: str) -> str:
+    if source == "-":
+        return sys.stdin.read()
+    path = Path(source)
+    if not path.exists():
+        raise ValidationFailed(
+            slug="validation_error",
+            message=f"Verifier config file not found: {source}",
+        )
+    if not path.is_file():
+        raise ValidationFailed(
+            slug="validation_error",
+            message=f"Verifier config path is not a file: {source}",
+        )
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeError as exc:
+        raise ValidationFailed(
+            slug="validation_error",
+            message=f"Could not decode verifier config as UTF-8: {source}",
+        ) from exc
+    except OSError as exc:
+        raise ValidationFailed(
+            slug="validation_error",
+            message=f"Could not read verifier config {source}: {exc}",
+        ) from exc
+
+
 @app.command("deploy")
 def deploy(
-    config_file: Path = typer.Argument(
+    config_file: str = typer.Argument(
         ...,
-        exists=True,
-        readable=True,
-        help="Path to a verifier config JSON file (see schema below).",
+        help=(
+            "Path to a verifier config JSON file, or '-' to read JSON from stdin "
+            "(preferred for generated agent output)."
+        ),
     ),
 ) -> None:
-    """Deploy a verifier or append a new version.
+    """Deploy a verifier or append a new version from a JSON file or stdin.
 
     The config file is a single JSON object with these fields:
 
@@ -93,7 +123,7 @@ def deploy(
     On success prints `verifier_id`, the new `version`, and the new
     `version_token`. Persist the token: it's required for the next re-deploy.
     """
-    payload = _json_object(config_file.read_text(encoding="utf-8"), "config file")
+    payload = _json_object(_read_config_input(config_file), "config input")
     console = Console()
     with _client() as client:
         result = client.deploy_verifier(payload)

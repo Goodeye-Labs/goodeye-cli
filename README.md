@@ -63,15 +63,46 @@ goodeye templates get @handle/slug
 # copy; does not return a body).
 goodeye templates fork @handle/slug
 
-# Publish a local workflow (always private; share via `templates publish`)
+# Save a generated workflow without creating a local file
+goodeye workflows publish - <<'EOF'
+---
+name: my-workflow
+description: One sentence on what this workflow does and when to use it.
+---
+
+# Body
+
+The rest of the workflow body goes here.
+EOF
+```
+
+### Workflow input
+
+For AI agents generating a workflow body, prefer stdin so no intermediate file is left in the user's working directory:
+
+```sh
+goodeye workflows publish - <<'EOF'
+---
+name: my-workflow
+description: One sentence on what this workflow does and when to use it.
+tags: [data, cleanup]
+outcome: Reduce refund-row mislabels.
+---
+
+# Body
+
+The rest of the workflow body goes here.
+EOF
+```
+
+Use a markdown file when you already have one or intentionally want a durable local copy:
+
+```sh
 goodeye workflows publish ./my-workflow.md
 ```
 
-### Workflow files
-
-`goodeye workflows publish` reads a markdown file with YAML front-matter that
-follows the Claude Code skills convention. Only `name` and `description` are
-required:
+The markdown uses YAML front matter following the Goodeye workflow body
+convention. Only `name` and `description` are required:
 
 ```markdown
 ---
@@ -94,15 +125,8 @@ as fenced code blocks. LLM-judge checks are deployed separately as verifiers
 Workflows are always private to the caller. To share a workflow as a public
 template, run `goodeye templates publish <workflow-uuid-or-name>` as a separate,
 explicit step. `--name` on the command line overrides the front-matter
-`name`. The full file (front-matter included) is stored on the server, so
-`goodeye workflows get` round-trips a drop-in
-`~/.claude/skills/<name>/SKILL.md`.
-
-Pre-cleanup files that nest `outcome` / `tags` under a `manifest:` block are
-still accepted: those two keys are promoted to the top level and a deprecation
-warning lists any other manifest keys (`kpi`, `programmatic_verifiers`, etc.)
-that the server no longer stores. Move inline checks into the body when you
-next edit such a file, and migrate LLM-judge checks to deployed verifiers.
+`name`. Goodeye stores the full markdown body, including front matter, so
+`goodeye workflows get` can round-trip the workflow body.
 
 ### Verifiers
 
@@ -117,9 +141,10 @@ Three input shapes are supported:
 - `text_image`: judges text fields together with one image.
 - `image`: judges a single image with no text inputs.
 
-Deploy a verifier from a JSON config file:
+Deploy a verifier from generated JSON with stdin:
 
-```json
+```sh
+goodeye verifiers deploy - <<'EOF'
 {
   "name": "refund-claim-supported",
   "description": "Flag refund replies that lack a stated reason.",
@@ -140,11 +165,14 @@ Deploy a verifier from a JSON config file:
   ],
   "model_settings": {"model": "openai/gpt-4o", "reasoning_effort": "medium"}
 }
+EOF
+# Deployed refund-claim-supported v1 (verifier_id=..., version_token=...)
 ```
+
+If you already have a durable config file, file input still works:
 
 ```sh
 goodeye verifiers deploy ./refund-claim-supported.json
-# Deployed refund-claim-supported v1 (verifier_id=..., version_token=...)
 ```
 
 Re-deploying the same `name` appends a new version. The second deploy must
@@ -255,12 +283,14 @@ goodeye workflows get <id-or-name> [--version N] [--output PATH] [--json]
     agent-facing markers); --json prints the full record. Authentication is
     required: workflows are private.
 
-goodeye workflows publish <file.md> [--name NAME] [--expected-version-token TOKEN]
-    Publish a workflow from a markdown file. Always private. If a workflow
-    with the same name already exists under your account, a new version is
-    appended (pass --expected-version-token to confirm the parent version).
-    Front-matter must include `name:` and `description:`. To share publicly,
-    run `goodeye templates publish <workflow-uuid-or-name>` as a separate step.
+goodeye workflows publish <file.md|-> [--name NAME] [--expected-version-token TOKEN]
+    Publish a workflow from markdown. Use `-` to read markdown from stdin,
+    which is preferred for generated agent output. File input is still useful
+    for durable local files. Always private. If a workflow with the same name
+    already exists under your account, a new version is appended (pass
+    --expected-version-token to confirm the parent version). Front-matter must
+    include `name:` and `description:`. To share publicly, run
+    `goodeye templates publish <workflow-uuid-or-name>` as a separate step.
 
 goodeye workflows delete <id-or-name> [--yes]
     Delete a workflow you own.
@@ -268,7 +298,7 @@ goodeye workflows delete <id-or-name> [--yes]
 goodeye workflows teach <id-or-name> [--trigger-context JSON]
     Fetch the teach SKILL pack for an existing workflow. The pack is
     printed to stdout for the calling agent to follow; persist the
-    refined workflow with `goodeye workflows publish --source teach`.
+    refined workflow with `goodeye workflows publish - --source teach --expected-version-token <captured token>`.
 
 goodeye workflows lineage <id-or-name> [--json]
     Show a workflow's fork lineage (parent template, upstream latest).
@@ -334,11 +364,13 @@ goodeye templates run-verifier <template-ref> <verifier-name> [--input KEY=VALUE
     and must match the verifier's input contract; --media-url is required
     for text_image and image contracts.
 
-goodeye verifiers deploy <config.json>
-    Deploy a verifier from a JSON config file (or append a new version).
-    Required fields: name, description, criterion, input_contract.
-    input_fields required for text and text_image contracts; few_shot_examples
-    and model_settings optional. expected_version_token is required when
+goodeye verifiers deploy <config.json|->
+    Deploy a verifier from JSON config (or append a new version). Use `-` to
+    read verifier config JSON from stdin, which is preferred for generated
+    agent output. File input is still useful for durable local config files.
+    Required fields: name, description, criterion, input_contract. input_fields
+    required for text and text_image contracts; few_shot_examples and
+    model_settings optional. expected_version_token is required when
     re-deploying an existing verifier (get it from `verifiers list`).
 
 goodeye verifiers list [--json]
@@ -361,7 +393,8 @@ goodeye verifiers revoke <verifier_id> [--yes]
 goodeye design
     Print the workflow-designer prompt to stdout. Pipe it into your AI
     assistant to start designing a workflow + verifier:
-        goodeye design > prompt.md
+        goodeye design
+    Only redirect to a file when you intentionally want a durable local prompt copy.
 
 goodeye me claim-handle <handle>
     Claim a handle (your publish identity).

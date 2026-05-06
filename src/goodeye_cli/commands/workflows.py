@@ -205,20 +205,8 @@ def _parse_front_matter(source: str) -> tuple[dict[str, Any], str]:
     return {}, source
 
 
-def _coerce_legacy_manifest(front_matter: dict[str, Any]) -> dict[str, Any]:
-    raw = front_matter.get("manifest")
-    if raw is None:
-        return {}
-    if not isinstance(raw, dict):
-        raise ValidationFailed(
-            slug="validation_error",
-            message="`manifest` in front-matter must be a mapping.",
-        )
-    return dict(raw)
-
-
-def _coerce_outcome(front_matter: dict[str, Any], legacy: dict[str, Any]) -> str | None:
-    raw = front_matter.get("outcome", legacy.get("outcome"))
+def _coerce_outcome(front_matter: dict[str, Any]) -> str | None:
+    raw = front_matter.get("outcome")
     if raw is None:
         return None
     if isinstance(raw, str) and raw.strip():
@@ -229,8 +217,8 @@ def _coerce_outcome(front_matter: dict[str, Any], legacy: dict[str, Any]) -> str
     )
 
 
-def _coerce_tags(front_matter: dict[str, Any], legacy: dict[str, Any]) -> list[str]:
-    raw = front_matter.get("tags", legacy.get("tags"))
+def _coerce_tags(front_matter: dict[str, Any]) -> list[str]:
+    raw = front_matter.get("tags")
     if raw is None:
         return []
     if isinstance(raw, list):
@@ -241,22 +229,10 @@ def _coerce_tags(front_matter: dict[str, Any], legacy: dict[str, Any]) -> list[s
     )
 
 
-def _extract_discovery_facets(
-    front_matter: dict[str, Any], *, console: Console
-) -> tuple[str | None, list[str]]:
-    """Pull outcome+tags from the front-matter, promoting legacy manifest keys."""
-    legacy = _coerce_legacy_manifest(front_matter)
-    outcome = _coerce_outcome(front_matter, legacy)
-    tags = _coerce_tags(front_matter, legacy)
-    if legacy:
-        dropped = sorted(set(legacy) - {"outcome", "tags"})
-        if dropped:
-            console.print(
-                "[yellow]Warning:[/yellow] front-matter `manifest:` block is "
-                "deprecated. Promoted `outcome` / `tags` to the top level; "
-                f"dropped: {', '.join(dropped)}. The server no longer stores "
-                "these fields; move verifier scripts and cURLs into the body."
-            )
+def _extract_discovery_facets(front_matter: dict[str, Any]) -> tuple[str | None, list[str]]:
+    """Pull supported discovery facets from top-level front matter."""
+    outcome = _coerce_outcome(front_matter)
+    tags = _coerce_tags(front_matter)
     return outcome, tags
 
 
@@ -285,9 +261,43 @@ def _parse_workflow_verifier_flags(values: list[str]) -> list[dict[str, str]]:
     return rows
 
 
+def _read_markdown_input(source: str) -> str:
+    if source == "-":
+        return sys.stdin.read()
+    path = Path(source)
+    if not path.exists():
+        raise ValidationFailed(
+            slug="validation_error",
+            message=f"Markdown file not found: {source}",
+        )
+    if not path.is_file():
+        raise ValidationFailed(
+            slug="validation_error",
+            message=f"Markdown path is not a file: {source}",
+        )
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeError as exc:
+        raise ValidationFailed(
+            slug="validation_error",
+            message=f"Could not decode markdown file as UTF-8: {source}",
+        ) from exc
+    except OSError as exc:
+        raise ValidationFailed(
+            slug="validation_error",
+            message=f"Could not read markdown file: {source}",
+        ) from exc
+
+
 @app.command("publish")
 def publish(
-    file: Path = typer.Argument(..., exists=True, readable=True, help="Markdown file to upload."),
+    file: str = typer.Argument(
+        ...,
+        help=(
+            "Markdown workflow file to upload, or '-' to read markdown from stdin "
+            "(preferred for generated agent output)."
+        ),
+    ),
     name_override: str | None = typer.Option(
         None, "--name", help="Override the `name` from front-matter."
     ),
@@ -317,7 +327,7 @@ def publish(
         help="Send an explicit empty verifier binding list, removing existing bindings.",
     ),
 ) -> None:
-    """Upload a workflow from a markdown file with YAML front-matter.
+    """Upload a workflow from a markdown file, or from stdin when FILE is `-`.
 
     The front-matter follows the Claude Code skills convention:
 
@@ -336,14 +346,15 @@ def publish(
     public template, run ``goodeye templates publish <workflow-uuid-or-name>`` as a
     separate, explicit step.
 
-    Verifier scripts and Truesight cURLs belong in the body as fenced code
-    blocks; the registry treats the body as opaque markdown.
+    Inline deterministic checks may live in the body as fenced code blocks.
+    Deploy LLM-judge checks separately as verifiers and reference them by
+    verifier_id or verifier_id@version.
     """
     console = Console()
-    markdown = file.read_text(encoding="utf-8")
+    markdown = _read_markdown_input(file)
     front_matter, _stripped_body = _parse_front_matter(markdown)
-    # Server stores the full markdown (including front-matter) so the workflow
-    # round-trips as a drop-in Claude Code SKILL.md.
+    # Server stores the full markdown (including front-matter) so workflow
+    # bodies round-trip through `goodeye workflows get`.
     body = markdown
 
     effective_name: str | None = (
@@ -362,7 +373,7 @@ def publish(
             message="Missing `description`. Add `description:` to the front-matter.",
         )
 
-    outcome, tags = _extract_discovery_facets(front_matter, console=console)
+    outcome, tags = _extract_discovery_facets(front_matter)
     if clear_verifiers and verifier:
         raise ValidationFailed(
             slug="validation_error",
@@ -445,7 +456,8 @@ def teach(
 
     The command returns the pack content; the agent (or you, working from
     a script) follows the pack to run the teach session and persist the
-    result via 'goodeye workflows publish' with --source teach.
+    result via `goodeye workflows publish - --source teach
+    --expected-version-token <captured at stage 2>`.
     """
     parsed_ctx = _parse_optional_json_object(trigger_context, label="--trigger-context")
     stderr = Console(stderr=True)

@@ -209,12 +209,49 @@ def test_publish_minimal_front_matter(
     # No discovery facets in the payload when front-matter omits them.
     assert "outcome" not in sent
     assert "tags" not in sent
-    # Server dropped the nested manifest field on Apr 22, 2026.
-    assert "manifest" not in sent
-    # Body round-trips with the front-matter intact so consumers can drop the
-    # downloaded file into ~/.claude/skills/hello/SKILL.md unchanged.
+    assert "unknown" not in sent
+    # Body round-trips with front matter intact so Goodeye can return the same
+    # workflow body.
     assert sent["body"].startswith("---\n")
     assert "# Hello" in sent["body"]
+    assert sent["expected_version_token"] is None
+
+
+@respx.mock
+def test_publish_reads_markdown_from_stdin(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    markdown = (
+        "---\n"
+        "name: stdin-workflow\n"
+        "description: Save a generated workflow without a local file.\n"
+        "outcome: Reduce local workflow artifacts\n"
+        "tags: [agent, stdin]\n"
+        "---\n"
+        "# Body\n\n"
+        "Use this generated workflow body.\n"
+    )
+    route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "workflow_id": "skl_stdin",
+                "version": 1,
+                "version_token": "tok-stdin",
+                "name": "stdin-workflow",
+            },
+        )
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "publish", "-"], input=markdown)
+
+    assert result.exit_code == 0, result.output
+    sent = _json.loads(route.calls.last.request.content.decode())
+    assert sent["name"] == "stdin-workflow"
+    assert sent["description"] == "Save a generated workflow without a local file."
+    assert sent["outcome"] == "Reduce local workflow artifacts"
+    assert sent["tags"] == ["agent", "stdin"]
+    assert sent["body"] == markdown
     assert sent["expected_version_token"] is None
 
 
@@ -382,6 +419,89 @@ def test_publish_missing_description_errors(
 
 
 @respx.mock
+def test_publish_stdin_missing_description_errors(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["workflows", "publish", "-"], input="---\nname: no-desc\n---\nBody\n")
+
+    assert result.exit_code != 0
+    assert result.exception is not None
+    assert "description" in str(result.exception).lower()
+
+
+def test_publish_unreadable_file_errors(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    workflow_file = tmp_path / "unreadable.md"
+    workflow_file.write_text("---\nname: unreadable\ndescription: Cannot read.\n---\nBody\n")
+    original_read_text = Path.read_text
+
+    def raise_for_workflow_file(path: Path, *args, **kwargs) -> str:
+        if path == workflow_file:
+            raise PermissionError("permission denied")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", raise_for_workflow_file)
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["workflows", "publish", str(workflow_file)])
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ValidationFailed)
+    assert "read" in str(result.exception).lower()
+    assert str(workflow_file) in str(result.exception)
+
+
+def test_publish_missing_file_errors_cleanly(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    missing_file = tmp_path / "missing.md"
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["workflows", "publish", str(missing_file)])
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ValidationFailed)
+    assert "not found" in str(result.exception).lower()
+    assert str(missing_file) in str(result.exception)
+
+
+def test_publish_directory_path_errors_cleanly(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["workflows", "publish", str(tmp_path)])
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ValidationFailed)
+    assert "not a file" in str(result.exception).lower()
+    assert str(tmp_path) in str(result.exception)
+
+
+def test_publish_invalid_utf8_file_errors_cleanly(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    workflow_file = tmp_path / "invalid.md"
+    workflow_file.write_bytes(b"\xff")
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["workflows", "publish", str(workflow_file)])
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ValidationFailed)
+    assert "utf-8" in str(result.exception).lower()
+    assert str(workflow_file) in str(result.exception)
+
+
+@respx.mock
 def test_publish_tags_and_outcome(
     tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
@@ -393,6 +513,7 @@ def test_publish_tags_and_outcome(
         "description: A workflow with discovery facets.\n"
         "tags: [csv, stripe]\n"
         "outcome: Reduce refund-row errors\n"
+        "unknown: ignored\n"
         "---\n"
         "# Body\n",
     )
@@ -415,7 +536,7 @@ def test_publish_tags_and_outcome(
     sent = _json.loads(route.calls.last.request.content.decode())
     assert sent["tags"] == ["csv", "stripe"]
     assert sent["outcome"] == "Reduce refund-row errors"
-    assert "manifest" not in sent
+    assert "unknown" not in sent
 
 
 @respx.mock
@@ -474,23 +595,22 @@ def test_publish_omits_source_when_flag_absent(
 
 
 @respx.mock
-def test_publish_legacy_manifest_promotes_outcome_and_tags(
+def test_publish_unknown_front_matter_is_not_special(
     tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
-    """Pre-cleanup files nest outcome/tags under manifest:; promote them and warn."""
     _setup_creds(monkeypatch, tmp_config_paths)
     workflow_file = tmp_path / "legacy.md"
     workflow_file.write_text(
         "---\n"
-        "name: legacy-workflow\n"
-        "description: An old-style workflow with a manifest block.\n"
-        "manifest:\n"
+        "name: unknown-front-matter-workflow\n"
+        "description: A workflow with an unknown front-matter block.\n"
+        "unknown:\n"
         "  outcome: Reduce refund-row errors\n"
         "  tags: [csv, stripe]\n"
-        "  kpi:\n"
+        "  detail:\n"
         "    name: error_rate\n"
         "    definition: rows mislabeled / total\n"
-        "  programmatic_verifiers: []\n"
+        "  checks: []\n"
         "---\n"
         "# Body\n",
     )
@@ -501,7 +621,7 @@ def test_publish_legacy_manifest_promotes_outcome_and_tags(
                 "workflow_id": "skl_01",
                 "version": 1,
                 "version_token": "tok-1",
-                "name": "legacy-workflow",
+                "name": "unknown-front-matter-workflow",
                 "visibility": "private",
             },
         )
@@ -511,28 +631,26 @@ def test_publish_legacy_manifest_promotes_outcome_and_tags(
     assert result.exit_code == 0, result.output
 
     sent = _json.loads(route.calls.last.request.content.decode())
-    assert sent["outcome"] == "Reduce refund-row errors"
-    assert sent["tags"] == ["csv", "stripe"]
-    assert "manifest" not in sent
-    assert "deprecated" in result.output.lower()
-    assert "kpi" in result.output
-    assert "programmatic_verifiers" in result.output
+    assert "outcome" not in sent
+    assert "tags" not in sent
+    assert "unknown" not in sent
+    assert "deprecated" not in result.output.lower()
+    assert "checks" not in result.output
 
 
 @respx.mock
-def test_publish_top_level_outcome_wins_over_manifest(
+def test_publish_top_level_outcome_ignores_unknown_front_matter(
     tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
-    """When both top-level outcome and manifest.outcome exist, top-level wins."""
     _setup_creds(monkeypatch, tmp_config_paths)
     workflow_file = tmp_path / "mixed.md"
     workflow_file.write_text(
         "---\n"
         "name: mixed-workflow\n"
-        "description: Has both shapes.\n"
-        "outcome: Top-level wins\n"
-        "manifest:\n"
-        "  outcome: Legacy loses\n"
+        "description: Has top-level outcome and an unknown block.\n"
+        "outcome: Top-level value\n"
+        "unknown:\n"
+        "  outcome: Ignored value\n"
         "---\n"
         "# Body\n",
     )
@@ -552,7 +670,8 @@ def test_publish_top_level_outcome_wins_over_manifest(
     result = runner.invoke(app, ["workflows", "publish", str(workflow_file)])
     assert result.exit_code == 0, result.output
     sent = _json.loads(route.calls.last.request.content.decode())
-    assert sent["outcome"] == "Top-level wins"
+    assert sent["outcome"] == "Top-level value"
+    assert "unknown" not in sent
 
 
 @respx.mock
@@ -639,10 +758,10 @@ def test_workflows_transfer_ownership_command(tmp_config_paths: ConfigPaths, mon
     assert "user_2" in result.output
 
 
-def test_parse_front_matter_extracts_manifest() -> None:
-    source = "---\nname: foo\ndescription: bar\nmanifest:\n  outcome: x\n---\nBody text\n"
+def test_parse_front_matter_extracts_unknown_nested_fields() -> None:
+    source = "---\nname: foo\ndescription: bar\nunknown:\n  outcome: x\n---\nBody text\n"
     fm, body = _parse_front_matter(source)
-    assert fm == {"name": "foo", "description": "bar", "manifest": {"outcome": "x"}}
+    assert fm == {"name": "foo", "description": "bar", "unknown": {"outcome": "x"}}
     assert body == "Body text\n"
 
 
