@@ -273,6 +273,32 @@ def test_save_workflow_sends_expected_version_token() -> None:
 
 
 @respx.mock
+def test_save_workflow_sends_explicit_empty_verifiers() -> None:
+    route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "workflow_id": "skl_01",
+                "version": 3,
+                "version_token": "tok-newer",
+                "name": "example",
+                "verifiers": [],
+            },
+        )
+    )
+    with GoodeyeClient(SERVER, api_key="k") as client:
+        client.save_workflow(
+            name="example",
+            description="desc",
+            body="body",
+            expected_version_token="tok-old",
+            verifiers=[],
+        )
+    body = _json.loads(route.calls.last.request.content.decode())
+    assert body["verifiers"] == []
+
+
+@respx.mock
 def test_workflow_grant_client_methods() -> None:
     grant_route = respx.post(f"{SERVER}/v1/workflows/wf_1/grants").mock(
         return_value=httpx.Response(201, json={"workflow_id": "wf_1", "role": "edit"})

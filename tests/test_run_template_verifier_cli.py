@@ -219,6 +219,61 @@ def test_run_template_verifier_json_http_error_outputs_json(
     assert payload["message"] == "You have used your free daily runs."
 
 
+def test_run_template_verifier_json_validation_error_outputs_json(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_no_creds(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "templates",
+            "run-verifier",
+            "sample@1",
+            "tone",
+            "--input",
+            "output",
+            "--anonymous",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error"] == "validation_error"
+    assert "KEY=VALUE" in payload["message"]
+
+
+@respx.mock
+def test_run_template_verifier_json_anonymous_generic_429_exits_quota_code(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_no_creds(monkeypatch, tmp_config_paths)
+    respx.post(f"{SERVER}/v1/templates/sample@1/verifiers/tone/runs").mock(
+        return_value=httpx.Response(
+            429,
+            json={"error": "rate_limited", "message": "slow down"},
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "templates",
+            "run-verifier",
+            "sample@1",
+            "tone",
+            "--input",
+            "output=hi",
+            "--anonymous",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 2
+    payload = json.loads(result.stdout)
+    assert payload["error"] == "rate_limited"
+    assert payload["status_code"] == 429
+
+
 @respx.mock
 def test_run_template_verifier_authenticated_rate_limit_is_not_anonymous_ux(
     tmp_config_paths: ConfigPaths, monkeypatch

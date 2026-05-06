@@ -306,7 +306,7 @@ class GoodeyeClient:
             payload["tags"] = list(tags)
         if source is not None:
             payload["source"] = source
-        if verifiers:
+        if verifiers is not None:
             payload["verifiers"] = list(verifiers)
         response = self._request("POST", "/v1/workflows", json_body=payload)
         return WorkflowSaveResult.model_validate(response.json())

@@ -423,8 +423,8 @@ def run_verifier_on_template(
     Anonymous calls omit your API key entirely; repeated use is rate limited.
     """
     console = Console()
-    inputs = _parse_kv_flags(list(input_items or []), label="--input")
     try:
+        inputs = _parse_kv_flags(list(input_items or []), label="--input")
         with _client_for_template_verifier_run(anonymous=anonymous) as client:
             result = client.run_template_verifier(
                 template_ref,
@@ -444,7 +444,10 @@ def run_verifier_on_template(
             if exc.status_code is not None:
                 payload["status_code"] = exc.status_code
             typer.echo(json.dumps(payload, indent=2))
-            exit_code = 2 if exc.slug == "anonymous_limit_exceeded" else 1
+            anonymous_quota = exc.slug == "anonymous_limit_exceeded" or (
+                anonymous and exc.status_code == 429
+            )
+            exit_code = 2 if anonymous_quota else 1
             raise typer.Exit(code=exit_code) from exc
         if exc.slug == "anonymous_limit_exceeded" or (anonymous and exc.status_code == 429):
             console.print(
