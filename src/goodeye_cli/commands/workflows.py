@@ -313,6 +313,11 @@ def publish(
             ),
         ),
     ] = None,
+    clear_verifiers: bool = typer.Option(
+        False,
+        "--clear-verifiers",
+        help="Send an explicit empty verifier binding list, removing existing bindings.",
+    ),
 ) -> None:
     """Upload a workflow from a markdown file with YAML front-matter.
 
@@ -360,7 +365,15 @@ def publish(
         )
 
     outcome, tags = _extract_discovery_facets(front_matter, console=console)
+    if clear_verifiers and verifier:
+        raise ValidationFailed(
+            slug="validation_error",
+            message="Use either --clear-verifiers or --verifier, not both.",
+        )
     verifiers = _parse_workflow_verifier_flags(list(verifier or []))
+    verifier_payload: list[dict[str, str]] | None = (
+        [] if clear_verifiers else verifiers or None
+    )
 
     with _client(require_auth=True) as client:
         result = client.save_workflow(
@@ -371,7 +384,7 @@ def publish(
             tags=tags,
             expected_version_token=expected_version_token,
             source=source,
-            verifiers=verifiers or None,
+            verifiers=verifier_payload,
         )
 
     console.print(

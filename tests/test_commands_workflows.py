@@ -303,6 +303,44 @@ def test_publish_update_without_verifier_flags_preserves_server_bindings(
 
 
 @respx.mock
+def test_publish_clear_verifiers_sends_explicit_empty_list(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    workflow_file = tmp_path / "hello.md"
+    workflow_file.write_text("---\nname: hello\ndescription: Say hi.\n---\n# Hello\n")
+    route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "workflow_id": "skl_01",
+                "version": 2,
+                "version_token": "new-token",
+                "name": "hello",
+                "verifiers": [],
+            },
+        )
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "workflows",
+            "publish",
+            str(workflow_file),
+            "--expected-version-token",
+            "old-token",
+            "--clear-verifiers",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    sent = _json.loads(route.calls.last.request.content.decode())
+    assert sent["verifiers"] == []
+
+
+@respx.mock
 def test_publish_accepts_slug_alias_in_front_matter(
     tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
