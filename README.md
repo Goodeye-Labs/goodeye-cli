@@ -245,6 +245,11 @@ goodeye workflows list [--filter mine|shared-with-me|all] [--tag TAG] [--search 
     ID column is accepted by `get`, `delete`, and grant commands. When signed
     in, you can also use your own workflow name (slug).
 
+goodeye workflows search <query> [--filter mine|shared-with-me|all] [--tag TAG] [--limit N] [--json]
+    LLM-ranked natural-language search over workflows you can access.
+    Use this when you remember roughly what a workflow does but not its
+    name; use `list` for plain enumeration or tag filtering.
+
 goodeye workflows get <id-or-name> [--version N] [--output PATH] [--json]
     Download a workflow. Prints markdown to stdout (wrapped with
     agent-facing markers); --json prints the full record. Authentication is
@@ -286,6 +291,9 @@ goodeye workflows transfer-ownership <id-or-name> <new-owner>
 goodeye templates list [--filter all|mine] [--search QUERY] [--json]
     Browse the public template catalog. Anonymous reads allowed.
 
+goodeye templates search <query> [--filter all|mine] [--limit N] [--json]
+    LLM-ranked natural-language search over public templates.
+
 goodeye templates get <identifier> [--version N] [--output PATH] [--json]
     Fetch a public template by UUID or @handle/slug[@vN]. Anonymous reads
     allowed; non-owner reads include an unverified-template safety banner.
@@ -317,6 +325,14 @@ goodeye templates deprecate-version <template-ref> <version> --message TEXT
 goodeye templates transfer-ownership <template-ref> <user-id-or-email-or-handle>
     Hand a template off to another Goodeye user. Owner only.
     <template-ref> is a template UUID or @handle/slug.
+
+goodeye templates run-verifier <template-ref> <verifier-name> [--input KEY=VALUE]... \
+                               [--media-url URL] [--anonymous] [--json]
+    Run a verifier published with a template version against ad-hoc input.
+    Anonymous calls (`--anonymous`) skip credentials and are rate limited;
+    authenticated calls use your saved credentials. --input is repeatable
+    and must match the verifier's input contract; --media-url is required
+    for text_image and image contracts.
 
 goodeye verifiers deploy <config.json>
     Deploy a verifier from a JSON config file (or append a new version).
