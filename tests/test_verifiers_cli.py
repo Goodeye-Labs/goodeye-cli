@@ -224,6 +224,80 @@ def test_verifiers_revoke_auto_approves_when_stdin_not_tty(
     assert "Revoked" in result.output
 
 
+@respx.mock
+def test_verifiers_run_forwards_system_alias(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    """POST path forwards system:<name> unchanged (server resolves seeded judges)."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    alias = "system:workflow-design-qa"
+
+    url = "https://example.test/v1/verifiers/system:workflow-design-qa/runs"
+
+    def check_request(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode())
+        assert body["inputs"] == {"design": "x"}
+        assert str(request.url) == url
+        return httpx.Response(
+            201,
+            json={
+                "verifier_run_id": "run_sys",
+                "verifier_id": "00000000-0000-0000-0000-000000000001",
+                "version": 1,
+                "status": "success",
+                "passed": True,
+                "reasoning": "ok",
+                "duration_ms": 1,
+                "created_at": "2026-05-04T00:00:00+00:00",
+            },
+        )
+
+    respx.post(url).mock(side_effect=check_request)
+    result = runner.invoke(
+        app,
+        [
+            "verifiers",
+            "run",
+            alias,
+            "--inputs-json",
+            '{"design":"x"}',
+        ],
+    )
+    assert result.exit_code == 0, result.output
+
+
+@respx.mock
+def test_verifiers_show_forwards_owned_name(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    """GET path forwards caller-owned verifier name unchanged."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    name = "cta-present"
+
+    def check_request(request: httpx.Request) -> httpx.Response:
+        expected = f"https://example.test/v1/verifiers/{name}"
+        assert str(request.url) == expected
+        return httpx.Response(
+            200,
+            json={
+                "verifier_id": "ver_1",
+                "name": "cta-present",
+                "description": "Use when checking CTAs.",
+                "version": 2,
+                "criterion": "Pass if there is a CTA. Fail if there is no CTA.",
+                "input_contract": "text",
+                "input_fields": ["body"],
+                "few_shot_examples": [],
+                "judge_model_config": {"model": "openai/gpt-5.4"},
+                "reasoning_field_description": "explain",
+                "config_hash": "deadbeef",
+                "status": "active",
+            },
+        )
+
+    respx.get(f"{SERVER}/v1/verifiers/{name}").mock(side_effect=check_request)
+    result = runner.invoke(app, ["verifiers", "show", name, "--json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["name"] == "cta-present"
+
+
 def test_verifiers_revoke_human_decline_exits_zero(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
