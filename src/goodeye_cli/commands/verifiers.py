@@ -122,13 +122,19 @@ def list_cmd(json_output: bool = typer.Option(False, "--json", help="Print JSON.
     table.add_column("Name")
     table.add_column("Version", justify="right")
     table.add_column("Status")
+    table.add_column("Role")
+    table.add_column("Source wf")
     table.add_column("Description")
     for item in result.items:
+        role = item.role or "—"
+        src = item.source_workflow_id or "—"
         table.add_row(
             item.verifier_id,
             item.name,
             str(item.current_version),
             item.status,
+            role,
+            src,
             item.description,
         )
     if not result.items:

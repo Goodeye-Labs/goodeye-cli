@@ -8,9 +8,10 @@ private workflow namespace.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import typer
 from rich.console import Console
@@ -18,7 +19,7 @@ from rich.table import Table
 
 from goodeye_cli.client import GoodeyeClient
 from goodeye_cli.config import get_api_key, get_server
-from goodeye_cli.errors import AuthRequired
+from goodeye_cli.errors import AuthRequired, GoodeyeError, ValidationFailed
 from goodeye_cli.wire import TemplateDetail
 
 app = typer.Typer(
@@ -36,6 +37,39 @@ def _client(*, require_auth: bool) -> GoodeyeClient:
             hint="Run `goodeye login` or set GOODEYE_API_KEY.",
         )
     return GoodeyeClient(get_server(), api_key=api_key)
+
+
+def _client_for_template_verifier_run(*, anonymous: bool) -> GoodeyeClient:
+    """Anonymous runs never attach stored credentials, even if configured."""
+    if anonymous:
+        return GoodeyeClient(get_server(), api_key=None)
+    api_key = get_api_key()
+    if not api_key:
+        raise AuthRequired(
+            slug="auth_required",
+            message="Authentication required (or pass --anonymous for a public preview).",
+            hint="Run `goodeye login`, set GOODEYE_API_KEY, or use --anonymous.",
+        )
+    return GoodeyeClient(get_server(), api_key=api_key)
+
+
+def _parse_kv_flags(items: list[str], *, label: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for raw in items:
+        if "=" not in raw:
+            raise ValidationFailed(
+                slug="validation_error",
+                message=f"Each {label} must be KEY=VALUE (got {raw!r}).",
+            )
+        key, value = raw.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ValidationFailed(
+                slug="validation_error",
+                message=f"Each {label} must use a non-empty KEY (got {raw!r}).",
+            )
+        out[key] = value
+    return out
 
 
 @app.command("list")
@@ -256,6 +290,16 @@ def fork(
         f"slug={result.slug} from {identifier} "
         f"at v{result.parent_template_version}"
     )
+    if result.verifiers:
+        console.print()
+        console.print("[bold]Semantic verifiers pinned on this fork[/bold]")
+        for ref in result.verifiers:
+            role = ref.role or "—"
+            src = ref.source_workflow_id or "—"
+            console.print(
+                f"  • [cyan]{ref.name}[/cyan] → {ref.verifier_id}  "
+                f"[dim](role={role}, source_workflow_id={src})[/dim]"
+            )
 
 
 @app.command("delete")
@@ -344,6 +388,93 @@ def transfer_ownership_cmd(
     )
 
 
+@app.command("run-verifier")
+def run_verifier_on_template(
+    template_ref: str = typer.Argument(
+        ...,
+        help="Template UUID, @handle/slug, or @handle/slug@vN.",
+    ),
+    verifier_name: str = typer.Argument(
+        ...,
+        help="Verifier logical name published with this template version.",
+    ),
+    anonymous: bool = typer.Option(
+        False,
+        "--anonymous",
+        help="Do not send credentials (anonymous public preview; strict rate limits).",
+    ),
+    input_items: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--input",
+            "-i",
+            help="Named input KEY=VALUE (repeatable). Must match the verifier contract.",
+        ),
+    ] = None,
+    media_url: str | None = typer.Option(
+        None,
+        "--media-url",
+        help="Public HTTPS image URL (text_image / image contracts).",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Print the API response as JSON."),
+) -> None:
+    """Run a template-attached verifier (authenticated or anonymous preview).
+
+    Anonymous calls omit your API key entirely; repeated use is rate limited.
+    """
+    console = Console()
+    try:
+        inputs = _parse_kv_flags(list(input_items or []), label="--input")
+        with _client_for_template_verifier_run(anonymous=anonymous) as client:
+            result = client.run_template_verifier(
+                template_ref,
+                verifier_name,
+                inputs=inputs,
+                media_url=media_url,
+                anonymous=anonymous,
+            )
+    except GoodeyeError as exc:
+        if json_output:
+            payload: dict[str, Any] = {
+                "error": exc.slug,
+                "message": exc.message,
+            }
+            if exc.hint:
+                payload["hint"] = exc.hint
+            if exc.status_code is not None:
+                payload["status_code"] = exc.status_code
+            payload.update(exc.extras)
+            typer.echo(json.dumps(payload, indent=2))
+            anonymous_quota = exc.slug == "anonymous_limit_exceeded" or (
+                anonymous and exc.status_code == 429
+            )
+            exit_code = 2 if anonymous_quota else 1
+            raise typer.Exit(code=exit_code) from exc
+        if exc.slug == "anonymous_limit_exceeded" or (anonymous and exc.status_code == 429):
+            console.print(
+                "[yellow]Anonymous or preview rate limit reached.[/yellow] "
+                "Sign up for a free account and run `goodeye login` (or set "
+                "GOODEYE_API_KEY) for higher limits."
+            )
+            raise typer.Exit(code=2) from exc
+        raise
+    if json_output:
+        typer.echo(result.model_dump_json(indent=2))
+        if result.status == "error":
+            raise typer.Exit(code=1)
+        return
+    if result.status == "error":
+        console.print(f"[bold red]ERROR[/bold red] {result.error_code}: {result.error_message}")
+        raise typer.Exit(code=1)
+    passed = result.passed is True
+    label = "PASS" if passed else "FAIL"
+    color = "green" if passed else "red"
+    run_id = result.verifier_run_id or result.anonymous_verifier_run_id
+    console.print(f"[bold {color}]{label}[/bold {color}] run_id={run_id}")
+    if result.reasoning:
+        console.print(result.reasoning)
+
+
 __all__ = [
     "app",
     "delete_cmd",
@@ -352,6 +483,7 @@ __all__ = [
     "get_cmd",
     "list_cmd",
     "publish",
+    "run_verifier_on_template",
     "transfer_ownership_cmd",
     "undelete_cmd",
     "unpublish",

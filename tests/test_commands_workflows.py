@@ -6,12 +6,14 @@ import json as _json
 from pathlib import Path
 
 import httpx
+import pytest
 import respx
 from typer.testing import CliRunner
 
 from goodeye_cli.app import app
-from goodeye_cli.commands.workflows import _parse_front_matter
+from goodeye_cli.commands.workflows import _parse_front_matter, _parse_workflow_verifier_flags
 from goodeye_cli.config import ConfigPaths, save_credentials
+from goodeye_cli.errors import ValidationFailed
 
 SERVER = "https://example.test"
 
@@ -217,7 +219,49 @@ def test_publish_minimal_front_matter(
 
 
 @respx.mock
-def test_publish_accepts_expected_version_token_option(
+def test_publish_forwards_verifier_bindings(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    workflow_file = tmp_path / "with-v.md"
+    workflow_file.write_text(
+        "---\nname: with-v\ndescription: Workflow with verifier bindings.\n---\n# Body\n",
+    )
+    route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "workflow_id": "skl_v1",
+                "version": 1,
+                "version_token": "tok-v",
+                "name": "with-v",
+            },
+        )
+    )
+    runner = CliRunner()
+    vid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    result = runner.invoke(
+        app,
+        [
+            "workflows",
+            "publish",
+            str(workflow_file),
+            "--verifier",
+            f"tone={vid}",
+            "--verifier",
+            f"factual={vid}",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    sent = _json.loads(route.calls.last.request.content.decode())
+    assert sent["verifiers"] == [
+        {"name": "tone", "verifier_id": vid},
+        {"name": "factual", "verifier_id": vid},
+    ]
+
+
+@respx.mock
+def test_publish_update_without_verifier_flags_preserves_server_bindings(
     tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
@@ -250,7 +294,46 @@ def test_publish_accepts_expected_version_token_option(
     assert result.exit_code == 0, result.output
     sent = _json.loads(route.calls.last.request.content.decode())
     assert sent["expected_version_token"] == "old-token"
+    assert "verifiers" not in sent
     assert "new-token" in result.output
+
+
+@respx.mock
+def test_publish_clear_verifiers_sends_explicit_empty_list(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    workflow_file = tmp_path / "hello.md"
+    workflow_file.write_text("---\nname: hello\ndescription: Say hi.\n---\n# Hello\n")
+    route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "workflow_id": "skl_01",
+                "version": 2,
+                "version_token": "new-token",
+                "name": "hello",
+                "verifiers": [],
+            },
+        )
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "workflows",
+            "publish",
+            str(workflow_file),
+            "--expected-version-token",
+            "old-token",
+            "--clear-verifiers",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    sent = _json.loads(route.calls.last.request.content.decode())
+    assert sent["verifiers"] == []
 
 
 @respx.mock
@@ -567,3 +650,13 @@ def test_parse_front_matter_without_front_matter_returns_source() -> None:
     fm, body = _parse_front_matter("just body\n")
     assert fm == {}
     assert body == "just body\n"
+
+
+def test_parse_workflow_verifier_flags_rejects_route_unsafe_names() -> None:
+    with pytest.raises(ValidationFailed, match="name"):
+        _parse_workflow_verifier_flags(["tone/check=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"])
+
+
+def test_parse_workflow_verifier_flags_rejects_deploy_incompatible_names() -> None:
+    with pytest.raises(ValidationFailed, match="name"):
+        _parse_workflow_verifier_flags(["tone_check=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"])

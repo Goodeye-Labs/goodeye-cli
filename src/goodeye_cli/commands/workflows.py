@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import typer
 import yaml
@@ -17,6 +18,8 @@ from goodeye_cli.commands.prompts import confirm_destructive
 from goodeye_cli.config import get_api_key, get_server
 from goodeye_cli.errors import AuthRequired, ValidationFailed
 from goodeye_cli.wire import WorkflowDetail
+
+_WORKFLOW_VERIFIER_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,127}$")
 
 app = typer.Typer(
     help="Browse and manage the caller's private workflows.",
@@ -257,6 +260,31 @@ def _extract_discovery_facets(
     return outcome, tags
 
 
+def _parse_workflow_verifier_flags(values: list[str]) -> list[dict[str, str]]:
+    """Parse ``--verifier logical-name=verifier_uuid`` into API wire dicts."""
+    rows: list[dict[str, str]] = []
+    for raw in values:
+        if "=" not in raw:
+            raise ValidationFailed(
+                slug="validation_error",
+                message=f"Each --verifier must be name=verifier_id (got {raw!r}).",
+            )
+        name, vid = raw.split("=", 1)
+        name, vid = name.strip(), vid.strip()
+        if not name or not vid:
+            raise ValidationFailed(
+                slug="validation_error",
+                message=f"Each --verifier needs non-empty name and id (got {raw!r}).",
+            )
+        if not _WORKFLOW_VERIFIER_NAME_RE.fullmatch(name):
+            raise ValidationFailed(
+                slug="validation_error",
+                message=("Each --verifier name must use lowercase letters, digits, and hyphens."),
+            )
+        rows.append({"name": name, "verifier_id": vid})
+    return rows
+
+
 @app.command("publish")
 def publish(
     file: Path = typer.Argument(..., exists=True, readable=True, help="Markdown file to upload."),
@@ -272,6 +300,21 @@ def publish(
         None,
         "--source",
         help="Optional provenance marker: 'manual' or 'teach'. Defaults to NULL.",
+    ),
+    verifier: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--verifier",
+            help=(
+                "Lowercase-kebab name=verifier UUID binding (repeatable). "
+                "Forwarded in save payload."
+            ),
+        ),
+    ] = None,
+    clear_verifiers: bool = typer.Option(
+        False,
+        "--clear-verifiers",
+        help="Send an explicit empty verifier binding list, removing existing bindings.",
     ),
 ) -> None:
     """Upload a workflow from a markdown file with YAML front-matter.
@@ -320,6 +363,13 @@ def publish(
         )
 
     outcome, tags = _extract_discovery_facets(front_matter, console=console)
+    if clear_verifiers and verifier:
+        raise ValidationFailed(
+            slug="validation_error",
+            message="Use either --clear-verifiers or --verifier, not both.",
+        )
+    verifiers = _parse_workflow_verifier_flags(list(verifier or []))
+    verifier_payload: list[dict[str, str]] | None = [] if clear_verifiers else verifiers or None
 
     with _client(require_auth=True) as client:
         result = client.save_workflow(
@@ -330,6 +380,7 @@ def publish(
             tags=tags,
             expected_version_token=expected_version_token,
             source=source,
+            verifiers=verifier_payload,
         )
 
     console.print(

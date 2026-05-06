@@ -38,6 +38,74 @@ def test_authorization_header_is_sent() -> None:
 
 
 @respx.mock
+def test_run_template_verifier_anonymous_omits_authorization_with_api_key_client() -> None:
+    """Anonymous template verifier runs must not send Bearer auth (httpx header merge)."""
+    payload = {
+        "verifier_run_id": None,
+        "anonymous_verifier_run_id": "anon-1",
+        "verifier_name": "tone",
+        "template_version_id": "tv-uuid",
+        "template_version": 1,
+        "verifier_version": 1,
+        "status": "success",
+        "passed": True,
+        "reasoning": "ok",
+        "duration_ms": 12,
+        "remaining_anonymous_runs": 4,
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "error_code": None,
+        "error_message": None,
+    }
+    route = respx.post(f"{SERVER}/v1/templates/sample@1/verifiers/tone/runs").mock(
+        return_value=httpx.Response(200, json=payload),
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_X") as client:
+        result = client.run_template_verifier(
+            "sample@1",
+            "tone",
+            inputs={"output": "hi"},
+            anonymous=True,
+        )
+    assert result.passed is True
+    assert route.call_count == 1
+    assert route.calls.last.request.headers.get("Authorization") is None
+
+
+@respx.mock
+def test_get_template_json_preserves_verifier_snapshots() -> None:
+    respx.get(f"{SERVER}/v1/templates/sample").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "tpl_1",
+                "slug": "sample",
+                "name": "sample",
+                "handle": "randy",
+                "owner_user_id": "user_1",
+                "version": 1,
+                "body": "runbook",
+                "description": "sample template",
+                "publishing_handle": "randy",
+                "verifier_snapshots": [
+                    {
+                        "name": "tone",
+                        "input_contract": "text",
+                        "input_fields": ["output"],
+                        "verifier_version": 2,
+                        "config_hash": "abc123",
+                    }
+                ],
+            },
+        )
+    )
+    with GoodeyeClient(SERVER) as client:
+        result = client.get_template("sample")
+    assert not isinstance(result, str)
+    assert result.verifier_snapshots[0].name == "tone"
+    assert result.verifier_snapshots[0].input_fields == ["output"]
+
+
+@respx.mock
 def test_no_auth_header_when_missing_key() -> None:
     route = respx.get(f"{SERVER}/v1/workflows").mock(
         return_value=httpx.Response(200, json={"items": [], "next_cursor": None})
@@ -220,6 +288,7 @@ def test_save_workflow_sends_expected_version_token() -> None:
                 "version": 2,
                 "version_token": "tok-new",
                 "name": "example",
+                "verifiers": [{"name": "tone", "verifier_id": "ver-1", "version": 1}],
             },
         )
     )
@@ -233,6 +302,34 @@ def test_save_workflow_sends_expected_version_token() -> None:
     body = _json.loads(route.calls.last.request.content.decode())
     assert body["expected_version_token"] == "tok-old"
     assert result.version_token == "tok-new"
+    assert result.verifiers[0].name == "tone"
+    assert result.verifiers[0].version == 1
+
+
+@respx.mock
+def test_save_workflow_sends_explicit_empty_verifiers() -> None:
+    route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "workflow_id": "skl_01",
+                "version": 3,
+                "version_token": "tok-newer",
+                "name": "example",
+                "verifiers": [],
+            },
+        )
+    )
+    with GoodeyeClient(SERVER, api_key="k") as client:
+        client.save_workflow(
+            name="example",
+            description="desc",
+            body="body",
+            expected_version_token="tok-old",
+            verifiers=[],
+        )
+    body = _json.loads(route.calls.last.request.content.decode())
+    assert body["verifiers"] == []
 
 
 @respx.mock

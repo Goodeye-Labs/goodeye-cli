@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -22,6 +23,7 @@ class GoodeyeError(Exception):
     message: str
     hint: str | None = None
     status_code: int | None = None
+    extras: dict[str, Any] = field(default_factory=dict)
 
     def __str__(self) -> str:  # pragma: no cover - trivial
         base = self.message
@@ -68,6 +70,7 @@ _SLUG_MAP: dict[str, type[GoodeyeError]] = {
     "forbidden": Forbidden,
     "not_found": NotFound,
     "validation_error": ValidationFailed,
+    "anonymous_limit_exceeded": RateLimited,
     "rate_limited": RateLimited,
     "conflict": Conflict,
     "handle_already_claimed": Conflict,
@@ -88,12 +91,16 @@ def error_from_body(
         slug = "internal_error" if status_code >= 500 else "validation_error"
         message = f"Server returned HTTP {status_code}."
         hint = None
+        extras: dict[str, Any] = {}
     else:
         slug = str(body["error"])
         raw_message = body.get("message")
         message = str(raw_message) if isinstance(raw_message, str) else f"HTTP {status_code}"
         raw_hint = body.get("hint")
         hint = str(raw_hint) if isinstance(raw_hint, str) else None
+        extras = {
+            key: value for key, value in body.items() if key not in {"error", "message", "hint"}
+        }
 
     cls = _SLUG_MAP.get(slug, ServerError)
-    return cls(slug=slug, message=message, hint=hint, status_code=status_code)
+    return cls(slug=slug, message=message, hint=hint, status_code=status_code, extras=extras)
