@@ -43,7 +43,7 @@ def test_run_template_verifier_anonymous_omits_authorization_with_api_key_client
     payload = {
         "verifier_run_id": None,
         "anonymous_verifier_run_id": "anon-1",
-        "verifier_id": "ver-uuid",
+        "verifier_name": "tone",
         "template_version_id": "tv-uuid",
         "template_version": 1,
         "verifier_version": 1,
@@ -69,6 +69,40 @@ def test_run_template_verifier_anonymous_omits_authorization_with_api_key_client
     assert result.passed is True
     assert route.call_count == 1
     assert route.calls.last.request.headers.get("Authorization") is None
+
+
+@respx.mock
+def test_get_template_json_preserves_verifier_snapshots() -> None:
+    respx.get(f"{SERVER}/v1/templates/sample").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "tpl_1",
+                "slug": "sample",
+                "name": "sample",
+                "handle": "randy",
+                "owner_user_id": "user_1",
+                "version": 1,
+                "body": "runbook",
+                "description": "sample template",
+                "publishing_handle": "randy",
+                "verifier_snapshots": [
+                    {
+                        "name": "tone",
+                        "input_contract": "text",
+                        "input_fields": ["output"],
+                        "verifier_version": 2,
+                        "config_hash": "abc123",
+                    }
+                ],
+            },
+        )
+    )
+    with GoodeyeClient(SERVER) as client:
+        result = client.get_template("sample")
+    assert not isinstance(result, str)
+    assert result.verifier_snapshots[0].name == "tone"
+    assert result.verifier_snapshots[0].input_fields == ["output"]
 
 
 @respx.mock

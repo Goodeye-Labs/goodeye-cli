@@ -34,7 +34,7 @@ def _sample_run_json(*, remaining: int | None) -> dict:
     return {
         "verifier_run_id": "run-uuid",
         "anonymous_verifier_run_id": None,
-        "verifier_id": "ver-uuid",
+        "verifier_name": "tone",
         "template_version_id": "tv-uuid",
         "template_version": 1,
         "verifier_version": 1,
@@ -196,6 +196,7 @@ def test_run_template_verifier_json_http_error_outputs_json(
                 "error": "anonymous_limit_exceeded",
                 "message": "You have used your free daily runs.",
                 "hint": "Create a free account.",
+                "signup_url": "https://goodeyelabs.com/signup",
             },
         )
     )
@@ -217,6 +218,7 @@ def test_run_template_verifier_json_http_error_outputs_json(
     payload = json.loads(result.stdout)
     assert payload["error"] == "anonymous_limit_exceeded"
     assert payload["message"] == "You have used your free daily runs."
+    assert payload["signup_url"] == "https://goodeyelabs.com/signup"
 
 
 def test_run_template_verifier_json_validation_error_outputs_json(

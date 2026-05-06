@@ -443,6 +443,7 @@ def run_verifier_on_template(
                 payload["hint"] = exc.hint
             if exc.status_code is not None:
                 payload["status_code"] = exc.status_code
+            payload.update(exc.extras)
             typer.echo(json.dumps(payload, indent=2))
             anonymous_quota = exc.slug == "anonymous_limit_exceeded" or (
                 anonymous and exc.status_code == 429

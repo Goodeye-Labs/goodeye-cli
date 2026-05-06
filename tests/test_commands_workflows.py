@@ -6,12 +6,14 @@ import json as _json
 from pathlib import Path
 
 import httpx
+import pytest
 import respx
 from typer.testing import CliRunner
 
 from goodeye_cli.app import app
-from goodeye_cli.commands.workflows import _parse_front_matter
+from goodeye_cli.commands.workflows import _parse_front_matter, _parse_workflow_verifier_flags
 from goodeye_cli.config import ConfigPaths, save_credentials
+from goodeye_cli.errors import ValidationFailed
 
 SERVER = "https://example.test"
 
@@ -614,3 +616,10 @@ def test_parse_front_matter_without_front_matter_returns_source() -> None:
     fm, body = _parse_front_matter("just body\n")
     assert fm == {}
     assert body == "just body\n"
+
+
+def test_parse_workflow_verifier_flags_rejects_route_unsafe_names() -> None:
+    with pytest.raises(ValidationFailed, match="name"):
+        _parse_workflow_verifier_flags(
+            ["tone/check=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"]
+        )

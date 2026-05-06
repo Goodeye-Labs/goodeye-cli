@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Annotated, Any
@@ -17,6 +18,8 @@ from goodeye_cli.commands.prompts import confirm_destructive
 from goodeye_cli.config import get_api_key, get_server
 from goodeye_cli.errors import AuthRequired, ValidationFailed
 from goodeye_cli.wire import WorkflowDetail
+
+_WORKFLOW_VERIFIER_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 app = typer.Typer(
     help="Browse and manage the caller's private workflows.",
@@ -272,6 +275,14 @@ def _parse_workflow_verifier_flags(values: list[str]) -> list[dict[str, str]]:
             raise ValidationFailed(
                 slug="validation_error",
                 message=f"Each --verifier needs non-empty name and id (got {raw!r}).",
+            )
+        if not _WORKFLOW_VERIFIER_NAME_RE.fullmatch(name):
+            raise ValidationFailed(
+                slug="validation_error",
+                message=(
+                    "Each --verifier name must be 1-128 path-safe characters "
+                    "(letters, digits, underscore, dot, or hyphen)."
+                ),
             )
         rows.append({"name": name, "verifier_id": vid})
     return rows

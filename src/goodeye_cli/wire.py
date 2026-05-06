@@ -238,6 +238,16 @@ class TemplateSearchResponse(_WireBase):
     search_mode: str = "llm"
 
 
+class TemplateVerifierSnapshotWire(_WireBase):
+    """Public metadata for a verifier attached to a template version."""
+
+    name: str
+    input_contract: str
+    input_fields: list[str] = Field(default_factory=list)
+    verifier_version: int | None = None
+    config_hash: str | None = None
+
+
 class TemplateDetail(_WireBase):
     id: str
     slug: str
@@ -254,6 +264,7 @@ class TemplateDetail(_WireBase):
     safety_verification_status: str = "unverified"
     published_at: datetime | None = None
     unpublished_at: datetime | None = None
+    verifier_snapshots: list[TemplateVerifierSnapshotWire] = Field(default_factory=list)
 
 
 class TemplatePublishResult(_WireBase):
@@ -439,7 +450,7 @@ class RunTemplateVerifierResponseWire(_WireBase):
 
     verifier_run_id: str | None = None
     anonymous_verifier_run_id: str | None = None
-    verifier_id: str
+    verifier_name: str
     template_version_id: str | None = None
     template_version: int | None = None
     verifier_version: int | None = None
