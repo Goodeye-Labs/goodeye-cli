@@ -232,8 +232,7 @@ def show(
     verifier_id: str = typer.Argument(
         ...,
         help=(
-            "Verifier UUID or your caller-owned name for an active verifier "
-            "(not system:<name>)."
+            "Verifier UUID or your caller-owned name for an active verifier (not system:<name>)."
         ),
     ),
     version: int | None = typer.Option(
@@ -271,8 +270,7 @@ def revoke(
     verifier_id: str = typer.Argument(
         ...,
         help=(
-            "Verifier UUID or your caller-owned name for an active verifier "
-            "(not system:<name>)."
+            "Verifier UUID or your caller-owned name for an active verifier (not system:<name>)."
         ),
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
