@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json as _json
+import re
 
 import httpx
 import respx
@@ -27,7 +28,8 @@ def test_workflows_teach_help_documents_required_publish_metadata() -> None:
     result = runner.invoke(app, ["workflows", "teach", "--help"])
 
     assert result.exit_code == 0, result.output
-    normalized = " ".join(result.output.split())
+    plain_output = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+    normalized = " ".join(plain_output.split())
     assert (
         "goodeye workflows publish - --name <name> --description <description> "
         "--outcome <outcome> --source teach --expected-version-token "
