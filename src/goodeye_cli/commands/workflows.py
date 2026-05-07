@@ -509,7 +509,8 @@ def teach(
 
     The command returns the pack content; the agent (or you, working from
     a script) follows the pack to run the teach session and persist the
-    result via `goodeye workflows publish - --source teach
+    result via `goodeye workflows publish - --name <name>
+    --description <description> --outcome <outcome> --source teach
     --expected-version-token <captured at stage 2>`.
     """
     parsed_ctx = _parse_optional_json_object(trigger_context, label="--trigger-context")

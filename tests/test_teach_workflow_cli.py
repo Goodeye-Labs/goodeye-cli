@@ -22,6 +22,20 @@ def _setup_creds(monkeypatch, tmp_config_paths: ConfigPaths) -> None:
     monkeypatch.delenv("GOODEYE_SERVER", raising=False)
 
 
+def test_workflows_teach_help_documents_required_publish_metadata() -> None:
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "teach", "--help"])
+
+    assert result.exit_code == 0, result.output
+    normalized = " ".join(result.output.split())
+    assert (
+        "goodeye workflows publish - --name <name> --description <description> "
+        "--outcome <outcome> --source teach --expected-version-token "
+        "<captured at stage 2>"
+    ) in normalized
+    assert "goodeye workflows publish - --source teach --expected-version-token" not in normalized
+
+
 @respx.mock
 def test_teach_workflow_client_posts_trigger_context() -> None:
     route = respx.post(f"{SERVER}/v1/workflows/wf_1/teach").mock(
