@@ -350,8 +350,7 @@ def publish(
         typer.Option(
             "--tag",
             help=(
-                "Workflow discovery tag. Repeat to set multiple tags; "
-                "overrides front-matter tags."
+                "Workflow discovery tag. Repeat to set multiple tags; overrides front-matter tags."
             ),
         ),
     ] = None,
@@ -436,8 +435,7 @@ def publish(
         else front_matter.get("description"),
         field_name="description",
         missing_message=(
-            "Missing `description`. Add `description:` to the front-matter "
-            "or pass --description."
+            "Missing `description`. Add `description:` to the front-matter or pass --description."
         ),
     )
 

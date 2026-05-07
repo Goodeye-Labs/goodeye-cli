@@ -76,9 +76,7 @@ def test_auth_list_keys_defaults_to_one_compact_json_page(
         return_value=httpx.Response(
             200,
             json={
-                "items": [
-                    {"id": "key_01", "name": "laptop", "created_at": "2026-04-21T00:00:00Z"}
-                ],
+                "items": [{"id": "key_01", "name": "laptop", "created_at": "2026-04-21T00:00:00Z"}],
                 "next_cursor": "more",
             },
         )
@@ -114,9 +112,7 @@ def test_auth_list_keys_all_follows_cursor(tmp_config_paths: ConfigPaths, monkey
             httpx.Response(
                 200,
                 json={
-                    "items": [
-                        {"id": "key_02", "name": "ci", "created_at": "2026-04-21T01:00:00Z"}
-                    ],
+                    "items": [{"id": "key_02", "name": "ci", "created_at": "2026-04-21T01:00:00Z"}],
                     "next_cursor": None,
                 },
             ),
