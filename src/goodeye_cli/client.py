@@ -17,6 +17,7 @@ from urllib.parse import unquote
 import httpx
 
 from goodeye_cli import __version__
+from goodeye_cli.config import get_request_timeout_seconds
 from goodeye_cli.errors import GoodeyeError, error_from_body
 from goodeye_cli.wire import (
     ApiKeyCreated,
@@ -94,7 +95,7 @@ class GoodeyeClient:
         server: str,
         *,
         api_key: str | None = None,
-        timeout: float = 30.0,
+        timeout: float | None = None,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self.server = server.rstrip("/")
@@ -107,7 +108,7 @@ class GoodeyeClient:
         self._http = httpx.Client(
             base_url=self.server,
             headers=headers,
-            timeout=timeout,
+            timeout=get_request_timeout_seconds() if timeout is None else timeout,
             transport=transport,
         )
 

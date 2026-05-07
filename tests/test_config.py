@@ -11,11 +11,13 @@ from pathlib import Path
 import pytest
 
 from goodeye_cli.config import (
+    DEFAULT_REQUEST_TIMEOUT_SECONDS,
     DEFAULT_SERVER,
     ConfigPaths,
     delete_credentials,
     get_api_key,
     get_config_paths,
+    get_request_timeout_seconds,
     get_server,
     load_client_config,
     load_credentials,
@@ -101,6 +103,17 @@ def test_get_api_key_none_when_no_source(tmp_config_paths: ConfigPaths) -> None:
 
 def test_get_server_strips_trailing_slash(tmp_config_paths: ConfigPaths) -> None:
     assert get_server(tmp_config_paths, {"GOODEYE_SERVER": "https://x/"}) == "https://x"
+
+
+def test_get_request_timeout_seconds_uses_default() -> None:
+    assert get_request_timeout_seconds({}) == DEFAULT_REQUEST_TIMEOUT_SECONDS
+    assert get_request_timeout_seconds({}, default=300.0) == 300.0
+
+
+def test_get_request_timeout_seconds_env_overrides_default() -> None:
+    env = {"GOODEYE_TIMEOUT_SECONDS": "45.5"}
+    assert get_request_timeout_seconds(env) == 45.5
+    assert get_request_timeout_seconds(env, default=300.0) == 45.5
 
 
 def test_version_fallback_reads_pyproject_version() -> None:

@@ -18,7 +18,12 @@ from rich.console import Console
 from rich.table import Table
 
 from goodeye_cli.client import GoodeyeClient
-from goodeye_cli.config import get_api_key, get_server
+from goodeye_cli.config import (
+    VERIFIER_REQUEST_TIMEOUT_SECONDS,
+    get_api_key,
+    get_request_timeout_seconds,
+    get_server,
+)
 from goodeye_cli.errors import AuthRequired, GoodeyeError, ValidationFailed
 from goodeye_cli.wire import TemplateDetail
 
@@ -41,8 +46,9 @@ def _client(*, require_auth: bool) -> GoodeyeClient:
 
 def _client_for_template_verifier_run(*, anonymous: bool) -> GoodeyeClient:
     """Anonymous runs never attach stored credentials, even if configured."""
+    timeout = get_request_timeout_seconds(default=VERIFIER_REQUEST_TIMEOUT_SECONDS)
     if anonymous:
-        return GoodeyeClient(get_server(), api_key=None)
+        return GoodeyeClient(get_server(), api_key=None, timeout=timeout)
     api_key = get_api_key()
     if not api_key:
         raise AuthRequired(
@@ -50,7 +56,7 @@ def _client_for_template_verifier_run(*, anonymous: bool) -> GoodeyeClient:
             message="Authentication required (or pass --anonymous for a public preview).",
             hint="Run `goodeye login`, set GOODEYE_API_KEY, or use --anonymous.",
         )
-    return GoodeyeClient(get_server(), api_key=api_key)
+    return GoodeyeClient(get_server(), api_key=api_key, timeout=timeout)
 
 
 def _parse_kv_flags(items: list[str], *, label: str) -> dict[str, str]:

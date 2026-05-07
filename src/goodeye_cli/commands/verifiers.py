@@ -13,7 +13,12 @@ from rich.table import Table
 
 from goodeye_cli.client import GoodeyeClient
 from goodeye_cli.commands.prompts import confirm_destructive
-from goodeye_cli.config import get_api_key, get_server
+from goodeye_cli.config import (
+    VERIFIER_REQUEST_TIMEOUT_SECONDS,
+    get_api_key,
+    get_request_timeout_seconds,
+    get_server,
+)
 from goodeye_cli.errors import AuthRequired, ValidationFailed
 
 app = typer.Typer(
@@ -33,7 +38,7 @@ app = typer.Typer(
 )
 
 
-def _client() -> GoodeyeClient:
+def _client(*, timeout_default: float | None = None) -> GoodeyeClient:
     api_key = get_api_key()
     if not api_key:
         raise AuthRequired(
@@ -41,7 +46,12 @@ def _client() -> GoodeyeClient:
             message="Authentication required.",
             hint="Run `goodeye login` or set GOODEYE_API_KEY.",
         )
-    return GoodeyeClient(get_server(), api_key=api_key)
+    timeout = (
+        get_request_timeout_seconds(default=timeout_default)
+        if timeout_default is not None
+        else get_request_timeout_seconds()
+    )
+    return GoodeyeClient(get_server(), api_key=api_key, timeout=timeout)
 
 
 def _json_object(raw: str, label: str) -> dict[str, Any]:
@@ -238,7 +248,7 @@ def run(
     """
     inputs = _json_object(inputs_json, "--inputs-json")
     console = Console()
-    with _client() as client:
+    with _client(timeout_default=VERIFIER_REQUEST_TIMEOUT_SECONDS) as client:
         result = client.run_verifier(
             verifier_id,
             inputs={key: str(value) for key, value in inputs.items()},

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import httpx
 import respx
@@ -47,6 +48,40 @@ def _sample_run_json(*, remaining: int | None) -> dict:
         "error_code": None,
         "error_message": None,
     }
+
+
+def test_run_template_verifier_uses_long_request_timeout(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    captured: dict[str, float | None] = {}
+
+    class FakeClient:
+        def __init__(self, server: str, *, api_key: str | None, timeout: float | None = None):
+            captured["timeout"] = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+        def run_template_verifier(self, *args: object, **kwargs: object):
+            return SimpleNamespace(
+                status="success",
+                passed=True,
+                reasoning=None,
+                verifier_run_id="run_1",
+                anonymous_verifier_run_id=None,
+            )
+
+    monkeypatch.setattr("goodeye_cli.commands.templates.GoodeyeClient", FakeClient)
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["templates", "run-verifier", "sample@1", "tone"])
+
+    assert result.exit_code == 0, result.output
+    assert captured["timeout"] == 300.0
 
 
 @respx.mock

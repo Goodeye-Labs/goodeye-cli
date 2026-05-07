@@ -13,6 +13,10 @@ Source order for the server URL (highest wins):
     1. ``GOODEYE_SERVER`` environment variable.
     2. ``credentials.json`` ``server`` field.
     3. ``DEFAULT_SERVER`` constant.
+
+Source order for request timeout seconds (highest wins):
+    1. ``GOODEYE_TIMEOUT_SECONDS`` environment variable.
+    2. Command-specific default.
 """
 
 from __future__ import annotations
@@ -23,7 +27,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from goodeye_cli.errors import ValidationFailed
+
 DEFAULT_SERVER = "https://api.goodeyelabs.com"
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 30.0
+VERIFIER_REQUEST_TIMEOUT_SECONDS = 300.0
 
 
 @dataclass(frozen=True)
@@ -133,6 +141,31 @@ def get_server(paths: ConfigPaths | None = None, env: dict[str, str] | None = No
     if creds and isinstance(creds.get("server"), str):
         return str(creds["server"]).rstrip("/")
     return DEFAULT_SERVER
+
+
+def get_request_timeout_seconds(
+    env: dict[str, str] | None = None,
+    *,
+    default: float = DEFAULT_REQUEST_TIMEOUT_SECONDS,
+) -> float:
+    """Resolve the HTTP request timeout in seconds."""
+    environ = env if env is not None else os.environ
+    raw = environ.get("GOODEYE_TIMEOUT_SECONDS")
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValidationFailed(
+            slug="validation_error",
+            message="GOODEYE_TIMEOUT_SECONDS must be a positive number.",
+        ) from exc
+    if value <= 0:
+        raise ValidationFailed(
+            slug="validation_error",
+            message="GOODEYE_TIMEOUT_SECONDS must be a positive number.",
+        )
+    return value
 
 
 def get_api_key(paths: ConfigPaths | None = None, env: dict[str, str] | None = None) -> str | None:

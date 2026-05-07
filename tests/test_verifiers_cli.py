@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import respx
@@ -121,6 +122,38 @@ def test_verifiers_run_outputs_reasoning(tmp_config_paths: ConfigPaths, monkeypa
     assert result.exit_code == 0, result.output
     assert "FAIL" in result.output
     assert "concrete next action" in result.output
+
+
+def test_verifiers_run_uses_long_request_timeout(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    captured: dict[str, float | None] = {}
+
+    class FakeClient:
+        def __init__(self, server: str, *, api_key: str | None, timeout: float | None = None):
+            captured["timeout"] = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+        def run_verifier(self, *args: object, **kwargs: object):
+            return SimpleNamespace(
+                status="success",
+                passed=True,
+                reasoning=None,
+                verifier_run_id="run_1",
+            )
+
+    monkeypatch.setattr("goodeye_cli.commands.verifiers.GoodeyeClient", FakeClient)
+
+    result = runner.invoke(app, ["verifiers", "run", "high-signal-chart"])
+
+    assert result.exit_code == 0, result.output
+    assert captured["timeout"] == 300.0
 
 
 @respx.mock
