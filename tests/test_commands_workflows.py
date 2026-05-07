@@ -175,13 +175,14 @@ def test_workflows_get_json_flag(tmp_config_paths: ConfigPaths, monkeypatch) -> 
 def test_publish_minimal_front_matter(
     tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
-    """Claude-Code-style minimal workflow: just name + description + body."""
+    """Front-matter can provide the required workflow metadata."""
     _setup_creds(monkeypatch, tmp_config_paths)
     workflow_file = tmp_path / "hello.md"
     workflow_file.write_text(
         "---\n"
         "name: hello\n"
         "description: Say hi to the world. Use when onboarding.\n"
+        "outcome: Help new users complete onboarding.\n"
         "---\n"
         "# Hello\n\nGreet the user.\n"
     )
@@ -206,8 +207,8 @@ def test_publish_minimal_front_matter(
     assert sent["description"].startswith("Say hi")
     # visibility is no longer a workflow field (dropped with templates).
     assert "visibility" not in sent
-    # No discovery facets in the payload when front-matter omits them.
-    assert "outcome" not in sent
+    assert sent["outcome"] == "Help new users complete onboarding."
+    # No tags in the payload when front-matter omits them.
     assert "tags" not in sent
     assert "unknown" not in sent
     # Body round-trips with front matter intact so Goodeye can return the same
@@ -256,13 +257,122 @@ def test_publish_reads_markdown_from_stdin(tmp_config_paths: ConfigPaths, monkey
 
 
 @respx.mock
+def test_publish_accepts_body_only_stdin_with_metadata_flags(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    markdown = "# Workflow body\n\nUse this generated workflow body.\n"
+    route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "workflow_id": "skl_body_only",
+                "version": 1,
+                "version_token": "tok-body-only",
+                "name": "body-only-workflow",
+            },
+        )
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "workflows",
+            "publish",
+            "-",
+            "--name",
+            "body-only-workflow",
+            "--description",
+            "Save generated markdown without embedding metadata.",
+            "--outcome",
+            "Reduce local workflow artifacts",
+            "--tag",
+            "agent",
+            "--tag",
+            "stdin",
+        ],
+        input=markdown,
+    )
+
+    assert result.exit_code == 0, result.output
+    sent = _json.loads(route.calls.last.request.content.decode())
+    assert sent["name"] == "body-only-workflow"
+    assert sent["description"] == "Save generated markdown without embedding metadata."
+    assert sent["outcome"] == "Reduce local workflow artifacts"
+    assert sent["tags"] == ["agent", "stdin"]
+    assert sent["body"] == markdown
+
+
+@respx.mock
+def test_publish_cli_metadata_flags_override_front_matter(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    markdown = (
+        "---\n"
+        "name: front-name\n"
+        "description: Front-matter description.\n"
+        "outcome: Front-matter outcome\n"
+        "tags: [front, yaml]\n"
+        "---\n"
+        "# Body\n"
+    )
+    route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "workflow_id": "skl_override",
+                "version": 1,
+                "version_token": "tok-override",
+                "name": "flag-name",
+            },
+        )
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "workflows",
+            "publish",
+            "-",
+            "--name",
+            "flag-name",
+            "--description",
+            "Flag description.",
+            "--outcome",
+            "Flag outcome",
+            "--tag",
+            "flag",
+            "--tag",
+            "override",
+        ],
+        input=markdown,
+    )
+
+    assert result.exit_code == 0, result.output
+    sent = _json.loads(route.calls.last.request.content.decode())
+    assert sent["name"] == "flag-name"
+    assert sent["description"] == "Flag description."
+    assert sent["outcome"] == "Flag outcome"
+    assert sent["tags"] == ["flag", "override"]
+    assert sent["body"] == markdown
+
+
+@respx.mock
 def test_publish_forwards_verifier_bindings(
     tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
     workflow_file = tmp_path / "with-v.md"
     workflow_file.write_text(
-        "---\nname: with-v\ndescription: Workflow with verifier bindings.\n---\n# Body\n",
+        "---\n"
+        "name: with-v\n"
+        "description: Workflow with verifier bindings.\n"
+        "outcome: Keep verifier bindings attached.\n"
+        "---\n"
+        "# Body\n",
     )
     route = respx.post(f"{SERVER}/v1/workflows").mock(
         return_value=httpx.Response(
@@ -303,7 +413,9 @@ def test_publish_update_without_verifier_flags_preserves_server_bindings(
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
     workflow_file = tmp_path / "hello.md"
-    workflow_file.write_text("---\nname: hello\ndescription: Say hi.\n---\n# Hello\n")
+    workflow_file.write_text(
+        "---\nname: hello\ndescription: Say hi.\noutcome: Greet users.\n---\n# Hello\n"
+    )
     route = respx.post(f"{SERVER}/v1/workflows").mock(
         return_value=httpx.Response(
             201,
@@ -341,7 +453,9 @@ def test_publish_clear_verifiers_sends_explicit_empty_list(
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
     workflow_file = tmp_path / "hello.md"
-    workflow_file.write_text("---\nname: hello\ndescription: Say hi.\n---\n# Hello\n")
+    workflow_file.write_text(
+        "---\nname: hello\ndescription: Say hi.\noutcome: Greet users.\n---\n# Hello\n"
+    )
     route = respx.post(f"{SERVER}/v1/workflows").mock(
         return_value=httpx.Response(
             201,
@@ -381,7 +495,12 @@ def test_publish_accepts_slug_alias_in_front_matter(
     _setup_creds(monkeypatch, tmp_config_paths)
     workflow_file = tmp_path / "legacy.md"
     workflow_file.write_text(
-        "---\nslug: my-workflow\ndescription: test desc\n---\nBody\n",
+        "---\n"
+        "slug: my-workflow\n"
+        "description: test desc\n"
+        "outcome: Keep slug alias working.\n"
+        "---\n"
+        "Body\n",
     )
     route = respx.post(f"{SERVER}/v1/workflows").mock(
         return_value=httpx.Response(
@@ -425,11 +544,30 @@ def test_publish_stdin_missing_description_errors(
     _setup_creds(monkeypatch, tmp_config_paths)
     runner = CliRunner()
 
-    result = runner.invoke(app, ["workflows", "publish", "-"], input="---\nname: no-desc\n---\nBody\n")
+    result = runner.invoke(
+        app,
+        ["workflows", "publish", "-"],
+        input="---\nname: no-desc\n---\nBody\n",
+    )
 
     assert result.exit_code != 0
     assert result.exception is not None
     assert "description" in str(result.exception).lower()
+
+
+def test_publish_missing_outcome_errors(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    workflow_file = tmp_path / "no-outcome.md"
+    workflow_file.write_text("---\nname: no-outcome\ndescription: Has no outcome.\n---\nBody\n")
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["workflows", "publish", str(workflow_file)])
+
+    assert result.exit_code != 0
+    assert result.exception is not None
+    assert "outcome" in str(result.exception).lower()
 
 
 def test_publish_unreadable_file_errors(
@@ -546,7 +684,9 @@ def test_publish_source_flag_is_forwarded(
     """`--source teach` must reach the server as the literal "teach", not the file body."""
     _setup_creds(monkeypatch, tmp_config_paths)
     workflow_file = tmp_path / "hello.md"
-    workflow_file.write_text("---\nname: hello\ndescription: Say hi.\n---\n# Hello\n")
+    workflow_file.write_text(
+        "---\nname: hello\ndescription: Say hi.\noutcome: Greet users.\n---\n# Hello\n"
+    )
     route = respx.post(f"{SERVER}/v1/workflows").mock(
         return_value=httpx.Response(
             201,
@@ -573,7 +713,9 @@ def test_publish_omits_source_when_flag_absent(
     """No --source flag -> source must not be populated with the markdown body."""
     _setup_creds(monkeypatch, tmp_config_paths)
     workflow_file = tmp_path / "hello.md"
-    workflow_file.write_text("---\nname: hello\ndescription: Say hi.\n---\n# Hello\n")
+    workflow_file.write_text(
+        "---\nname: hello\ndescription: Say hi.\noutcome: Greet users.\n---\n# Hello\n"
+    )
     route = respx.post(f"{SERVER}/v1/workflows").mock(
         return_value=httpx.Response(
             201,
@@ -627,11 +769,20 @@ def test_publish_unknown_front_matter_is_not_special(
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "publish", str(workflow_file)])
+    result = runner.invoke(
+        app,
+        [
+            "workflows",
+            "publish",
+            str(workflow_file),
+            "--outcome",
+            "Required outcome from CLI flag",
+        ],
+    )
     assert result.exit_code == 0, result.output
 
     sent = _json.loads(route.calls.last.request.content.decode())
-    assert "outcome" not in sent
+    assert sent["outcome"] == "Required outcome from CLI flag"
     assert "tags" not in sent
     assert "unknown" not in sent
     assert "deprecated" not in result.output.lower()

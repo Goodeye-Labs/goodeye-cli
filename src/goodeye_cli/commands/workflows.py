@@ -205,34 +205,46 @@ def _parse_front_matter(source: str) -> tuple[dict[str, Any], str]:
     return {}, source
 
 
-def _coerce_outcome(front_matter: dict[str, Any]) -> str | None:
-    raw = front_matter.get("outcome")
+def _coerce_required_text(raw: Any, *, field_name: str, missing_message: str) -> str:
+    if raw is None:
+        raise ValidationFailed(
+            slug="validation_error",
+            message=missing_message,
+        )
+    if isinstance(raw, str) and raw.strip():
+        return raw
+    raise ValidationFailed(
+        slug="validation_error",
+        message=f"`{field_name}` must be a non-empty string.",
+    )
+
+
+def _coerce_outcome(raw: Any) -> str | None:
     if raw is None:
         return None
     if isinstance(raw, str) and raw.strip():
         return raw
     raise ValidationFailed(
         slug="validation_error",
-        message="`outcome` in front-matter must be a non-empty string.",
+        message="`outcome` must be a non-empty string.",
     )
 
 
-def _coerce_tags(front_matter: dict[str, Any]) -> list[str]:
-    raw = front_matter.get("tags")
+def _coerce_tags(raw: Any) -> list[str]:
     if raw is None:
         return []
     if isinstance(raw, list):
         return [str(t) for t in raw]
     raise ValidationFailed(
         slug="validation_error",
-        message="`tags` in front-matter must be a list of strings.",
+        message="`tags` must be a list of strings.",
     )
 
 
 def _extract_discovery_facets(front_matter: dict[str, Any]) -> tuple[str | None, list[str]]:
     """Pull supported discovery facets from top-level front matter."""
-    outcome = _coerce_outcome(front_matter)
-    tags = _coerce_tags(front_matter)
+    outcome = _coerce_outcome(front_matter.get("outcome"))
+    tags = _coerce_tags(front_matter.get("tags"))
     return outcome, tags
 
 
@@ -301,6 +313,24 @@ def publish(
     name_override: str | None = typer.Option(
         None, "--name", help="Override the `name` from front-matter."
     ),
+    description_override: str | None = typer.Option(
+        None, "--description", help="Override the `description` from front-matter."
+    ),
+    outcome_override: str | None = typer.Option(
+        None,
+        "--outcome",
+        help="Override the `outcome` from front-matter. Required for workflow discovery.",
+    ),
+    tag: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--tag",
+            help=(
+                "Workflow discovery tag. Repeat to set multiple tags; "
+                "overrides front-matter tags."
+            ),
+        ),
+    ] = None,
     expected_version_token: str | None = typer.Option(
         None,
         "--expected-version-token",
@@ -329,18 +359,29 @@ def publish(
 ) -> None:
     """Upload a workflow from a markdown file, or from stdin when FILE is `-`.
 
-    The front-matter follows the Claude Code skills convention:
+    Metadata can be passed as flags, read from YAML front-matter, or both.
+    When both are present, command-line flags win:
+
+    \b
+    goodeye workflows publish - \\
+      --name incident-postmortem \\
+      --description "Draft a postmortem from an incident transcript." \\
+      --outcome "Reduce mean-time-to-postmortem from days to hours." \\
+      --tag sre --tag postmortem
+
+    Front-matter follows the Goodeye workflow body convention:
 
     \b
     ---
     name: incident-postmortem
     description: Draft a postmortem from an incident transcript. Use when ...
-    # Optional discovery facets:
+    outcome: Reduce mean-time-to-postmortem from days to hours.
+    # Optional discovery facet:
     # tags: [sre, postmortem]
-    # outcome: Reduce mean-time-to-postmortem from days to hours.
     ---
 
-    Only ``name`` and ``description`` are required. Everything else is optional.
+    ``name``, ``description``, and ``outcome`` are required, either as
+    flags or front-matter. Tags are optional.
 
     Workflows are always private to the caller. To share a workflow as a
     public template, run ``goodeye templates publish <workflow-uuid-or-name>`` as a
@@ -357,23 +398,35 @@ def publish(
     # bodies round-trip through `goodeye workflows get`.
     body = markdown
 
-    effective_name: str | None = (
-        name_override or front_matter.get("name") or front_matter.get("slug")
+    effective_name = _coerce_required_text(
+        name_override
+        if name_override is not None
+        else front_matter.get("name") or front_matter.get("slug"),
+        field_name="name",
+        missing_message="Missing `name`. Add `name:` to the front-matter or pass --name.",
     )
-    if not isinstance(effective_name, str) or not effective_name:
-        raise ValidationFailed(
-            slug="validation_error",
-            message="Missing `name`. Add `name:` to the front-matter or pass --name.",
-        )
 
-    description = front_matter.get("description")
-    if not isinstance(description, str) or not description.strip():
-        raise ValidationFailed(
-            slug="validation_error",
-            message="Missing `description`. Add `description:` to the front-matter.",
-        )
+    description = _coerce_required_text(
+        description_override
+        if description_override is not None
+        else front_matter.get("description"),
+        field_name="description",
+        missing_message=(
+            "Missing `description`. Add `description:` to the front-matter "
+            "or pass --description."
+        ),
+    )
 
     outcome, tags = _extract_discovery_facets(front_matter)
+    if outcome_override is not None:
+        outcome = _coerce_outcome(outcome_override)
+    if outcome is None:
+        raise ValidationFailed(
+            slug="validation_error",
+            message="Missing `outcome`. Add `outcome:` to the front-matter or pass --outcome.",
+        )
+    if tag:
+        tags = list(tag)
     if clear_verifiers and verifier:
         raise ValidationFailed(
             slug="validation_error",

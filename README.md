@@ -64,12 +64,12 @@ goodeye templates get @handle/slug
 goodeye templates fork @handle/slug
 
 # Save a generated workflow without creating a local file
-goodeye workflows publish - <<'EOF'
----
-name: my-workflow
-description: One sentence on what this workflow does and when to use it.
----
-
+goodeye workflows publish - \
+  --name my-workflow \
+  --description "One sentence on what this workflow does and when to use it." \
+  --outcome "Reduce refund-row mislabels" \
+  --tag data \
+  --tag cleanup <<'EOF'
 # Body
 
 The rest of the workflow body goes here.
@@ -81,14 +81,12 @@ EOF
 For AI agents generating a workflow body, prefer stdin so no intermediate file is left in the user's working directory:
 
 ```sh
-goodeye workflows publish - <<'EOF'
----
-name: my-workflow
-description: One sentence on what this workflow does and when to use it.
-tags: [data, cleanup]
-outcome: Reduce refund-row mislabels.
----
-
+goodeye workflows publish - \
+  --name my-workflow \
+  --description "One sentence on what this workflow does and when to use it." \
+  --outcome "Reduce refund-row mislabels" \
+  --tag data \
+  --tag cleanup <<'EOF'
 # Body
 
 The rest of the workflow body goes here.
@@ -102,15 +100,16 @@ goodeye workflows publish ./my-workflow.md
 ```
 
 The markdown uses YAML front matter following the Goodeye workflow body
-convention. Only `name` and `description` are required:
+convention. `name`, `description`, and `outcome` are required; `tags` are
+optional:
 
 ```markdown
 ---
 name: my-workflow
 description: One sentence on what this workflow does and when to use it.
-# Optional discovery facets:
+outcome: Reduce refund-row mislabels.
+# Optional discovery facet:
 # tags: [data, cleanup]
-# outcome: Reduce refund-row mislabels.
 ---
 
 # Body
@@ -124,9 +123,10 @@ as fenced code blocks. LLM-judge checks are deployed separately as verifiers
 
 Workflows are always private to the caller. To share a workflow as a public
 template, run `goodeye templates publish <workflow-uuid-or-name>` as a separate,
-explicit step. `--name` on the command line overrides the front-matter
-`name`. Goodeye stores the full markdown body, including front matter, so
-`goodeye workflows get` can round-trip the workflow body.
+explicit step. `--name`, `--description`, `--outcome`, and `--tag` on the
+command line override matching front-matter metadata. Goodeye stores the full
+markdown body, including front matter when present, so `goodeye workflows get`
+can round-trip the workflow body.
 
 ### Verifiers
 
@@ -283,14 +283,16 @@ goodeye workflows get <id-or-name> [--version N] [--output PATH] [--json]
     agent-facing markers); --json prints the full record. Authentication is
     required: workflows are private.
 
-goodeye workflows publish <file.md|-> [--name NAME] [--expected-version-token TOKEN]
+goodeye workflows publish <file.md|-> [--name NAME] [--description TEXT] [--outcome TEXT] [--tag TAG] [--expected-version-token TOKEN]
     Publish a workflow from markdown. Use `-` to read markdown from stdin,
     which is preferred for generated agent output. File input is still useful
     for durable local files. Always private. If a workflow with the same name
     already exists under your account, a new version is appended (pass
-    --expected-version-token to confirm the parent version). Front-matter must
-    include `name:` and `description:`. To share publicly, run
-    `goodeye templates publish <workflow-uuid-or-name>` as a separate step.
+    --expected-version-token to confirm the parent version). Metadata may come
+    from flags, front matter, or both; flags override front matter. `name`,
+    `description`, and `outcome` are required. Repeat --tag to set tags. To
+    share publicly, run `goodeye templates publish <workflow-uuid-or-name>` as
+    a separate step.
 
 goodeye workflows delete <id-or-name> [--yes]
     Delete a workflow you own.
@@ -298,7 +300,7 @@ goodeye workflows delete <id-or-name> [--yes]
 goodeye workflows teach <id-or-name> [--trigger-context JSON]
     Fetch the teach SKILL pack for an existing workflow. The pack is
     printed to stdout for the calling agent to follow; persist the
-    refined workflow with `goodeye workflows publish - --source teach --expected-version-token <captured token>`.
+    refined workflow with `goodeye workflows publish - --name <name> --description <description> --outcome <outcome> --source teach --expected-version-token <captured token>`.
 
 goodeye workflows lineage <id-or-name> [--json]
     Show a workflow's fork lineage (parent template, upstream latest).
