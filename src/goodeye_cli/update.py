@@ -116,14 +116,14 @@ def load_update_cache(paths: ConfigPaths | None = None) -> dict[str, Any] | None
 
 
 def save_update_cache(
-    latest_version: str,
+    latest_version: str | None,
     paths: ConfigPaths | None = None,
     checked_at: datetime | None = None,
 ) -> Path:
-    """Persist the latest PyPI version and check timestamp to the config dir."""
+    """Persist the latest PyPI version (or a null failure marker) to the config dir."""
     p = paths or get_config_paths()
     timestamp = _normalize_datetime(checked_at or datetime.now(UTC))
-    payload = {
+    payload: dict[str, Any] = {
         "checked_at": timestamp.isoformat(),
         "latest_version": latest_version,
         "pypi_url": PYPI_JSON_URL,
@@ -148,26 +148,15 @@ def check_for_update(
     )
 
 
-def _result_from_fresh_cache(
-    cache: dict[str, Any],
-    *,
-    current_version: str,
-    now: datetime,
-) -> UpdateCheckResult | None:
-    latest_version = cache.get("latest_version")
+def _cache_is_fresh(cache: dict[str, Any], *, now: datetime) -> bool:
     checked_at_raw = cache.get("checked_at")
-    if not isinstance(latest_version, str) or not isinstance(checked_at_raw, str):
-        return None
-
-    checked_at = _normalize_datetime(datetime.fromisoformat(checked_at_raw))
-    if (now - checked_at).total_seconds() >= UPDATE_CHECK_INTERVAL_SECONDS:
-        return None
-
-    return UpdateCheckResult(
-        current_version=current_version,
-        latest_version=latest_version,
-        update_available=is_update_available(current_version, latest_version),
-    )
+    if not isinstance(checked_at_raw, str):
+        return False
+    try:
+        checked_at = _normalize_datetime(datetime.fromisoformat(checked_at_raw))
+    except ValueError:
+        return False
+    return (now - checked_at).total_seconds() < UPDATE_CHECK_INTERVAL_SECONDS
 
 
 def check_for_update_background(
@@ -180,20 +169,28 @@ def check_for_update_background(
     """Best-effort update check for non-blocking callers.
 
     Background checks intentionally swallow network, cache, and parse failures.
+    A fresh failure marker in the cache also short-circuits to ``None`` so
+    repeat invocations during a PyPI outage do not each pay the network timeout.
     """
     try:
         checked_at = _normalize_datetime(now or datetime.now(UTC))
         cache = load_update_cache(paths)
-        if cache is not None:
-            cached_result = _result_from_fresh_cache(
-                cache,
-                current_version=current_version,
-                now=checked_at,
-            )
-            if cached_result is not None:
-                return cached_result
+        if cache is not None and _cache_is_fresh(cache, now=checked_at):
+            cached_version = cache.get("latest_version")
+            if isinstance(cached_version, str):
+                return UpdateCheckResult(
+                    current_version=current_version,
+                    latest_version=cached_version,
+                    update_available=is_update_available(current_version, cached_version),
+                )
+            return None
 
-        latest_version = fetch_latest_pypi_version(timeout=timeout, transport=transport)
+        try:
+            latest_version = fetch_latest_pypi_version(timeout=timeout, transport=transport)
+        except GoodeyeError:
+            save_update_cache(None, paths=paths, checked_at=checked_at)
+            return None
+
         save_update_cache(latest_version, paths=paths, checked_at=checked_at)
         return UpdateCheckResult(
             current_version=current_version,
@@ -346,7 +343,6 @@ def _default_run_cmd(argv: Sequence[str]) -> CompletedProcess[str]:
         list(argv),
         check=False,
         text=True,
-        capture_output=True,
     )
 
 

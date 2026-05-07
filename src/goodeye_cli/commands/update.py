@@ -51,6 +51,11 @@ def update(
             hint=manual_update_commands_text(),
         )
 
+    typer.echo(
+        f"Upgrading goodeye from {result.current_version} "
+        f"to {result.latest_version} via {method}...",
+        err=True,
+    )
     run_update(method)
     typer.echo(
         f"Updated goodeye from {result.current_version} to {result.latest_version}."

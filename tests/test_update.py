@@ -136,28 +136,80 @@ def test_background_check_refreshes_stale_cache_and_writes_result(
     }
 
 
-def test_background_check_returns_none_on_network_failure() -> None:
+def test_background_check_returns_none_on_network_failure(
+    tmp_config_paths: ConfigPaths,
+) -> None:
     def fail(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("boom", request=request)
 
     result = check_for_update_background(
         current_version="0.7.1",
+        paths=tmp_config_paths,
         transport=httpx.MockTransport(fail),
     )
 
     assert result is None
 
 
-def test_background_check_returns_none_on_parse_failure() -> None:
+def test_background_check_returns_none_on_parse_failure(
+    tmp_config_paths: ConfigPaths,
+) -> None:
     def respond(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={})
 
     result = check_for_update_background(
         current_version="0.7.1",
+        paths=tmp_config_paths,
         transport=httpx.MockTransport(respond),
     )
 
     assert result is None
+
+
+def test_background_check_writes_failure_marker_and_skips_pypi_until_stale(
+    tmp_config_paths: ConfigPaths,
+) -> None:
+    now = datetime(2026, 5, 6, 12, 0, tzinfo=UTC)
+    calls = 0
+
+    def fail(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        raise httpx.ConnectError("boom", request=request)
+
+    transport = httpx.MockTransport(fail)
+
+    first = check_for_update_background(
+        current_version="0.7.1",
+        paths=tmp_config_paths,
+        now=now,
+        transport=transport,
+    )
+    assert first is None
+    assert calls == 1
+    assert load_update_cache(tmp_config_paths) == {
+        "checked_at": now.isoformat(),
+        "latest_version": None,
+        "pypi_url": PYPI_JSON_URL,
+    }
+
+    second = check_for_update_background(
+        current_version="0.7.1",
+        paths=tmp_config_paths,
+        now=now + timedelta(minutes=5),
+        transport=transport,
+    )
+    assert second is None
+    assert calls == 1, "fresh failure marker should suppress repeat PyPI calls"
+
+    third = check_for_update_background(
+        current_version="0.7.1",
+        paths=tmp_config_paths,
+        now=now + timedelta(seconds=UPDATE_CHECK_INTERVAL_SECONDS + 1),
+        transport=transport,
+    )
+    assert third is None
+    assert calls == 2, "stale failure marker should allow another PyPI attempt"
 
 
 def test_background_check_returns_none_on_cache_write_failure(tmp_path: Path) -> None:
