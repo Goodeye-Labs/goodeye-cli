@@ -394,14 +394,6 @@ goodeye templates transfer-ownership <template-ref> <user-id-or-email-or-handle>
     Hand a template off to another Goodeye user. Owner only.
     <template-ref> is a template UUID or @handle/slug.
 
-goodeye templates run-verifier <template-ref> <verifier-name> [--input KEY=VALUE]... \
-                               [--media-url URL] [--anonymous] [--json]
-    Run a verifier published with a template version against ad-hoc input.
-    Anonymous calls (`--anonymous`) skip credentials and are rate limited;
-    authenticated calls use your saved credentials. --input is repeatable
-    and must match the verifier's input contract; --media-url is required
-    for text_image and image contracts.
-
 goodeye verifiers deploy <config.json|->
     Deploy a verifier from JSON config (or append a new version). Use `-` to
     read verifier config JSON from stdin, which is preferred for generated
@@ -422,10 +414,14 @@ goodeye verifiers show <verifier_id> [--version N] [--json]
 goodeye verifiers run <verifier_id> [--inputs-json JSON] [--media-url URL] \
                                     [--version N] [--workflow-id UUID] \
                                     [--workflow-version N] [--workflow-ref TEXT] \
-                                    [--run-id TEXT] [--json]
-    Run a verifier and print PASS/FAIL plus reasoning. --inputs-json keys
-    must match the version's input_fields exactly. --media-url is required
-    for text_image and image contracts.
+                                    [--run-id TEXT] [--anonymous] [--json]
+    Run a verifier and print PASS/FAIL plus reasoning. <verifier_id> is a
+    UUID, system:<name>, or your caller-owned name (resolved client-side
+    via a single get_verifier call before the run). --anonymous skips
+    credentials for the public-preview path; rate limited and requires a
+    UUID or system:<name> (names cannot be resolved without auth).
+    --inputs-json keys must match the version's input_fields exactly.
+    --media-url is required for text_image and image contracts.
 
 goodeye verifiers revoke <verifier_id> [--yes]
     Revoke a verifier you own. Irreversible; existing run rows are kept.

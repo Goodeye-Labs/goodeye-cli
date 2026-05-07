@@ -615,3 +615,60 @@ def test_templates_transfer_ownership_team_target_rejected(
     assert getattr(result.exception, "slug", None) == "invalid_grantee_type"
     # Reference unused symbol so the import doesn't go stale.
     assert ValidationFailed is not None
+
+
+@respx.mock
+def test_fork_prints_auto_deployed_verifiers(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.post(f"{SERVER}/v1/templates/fork").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "workflow_id": "11111111-1111-1111-1111-111111111111",
+                "slug": "sample",
+                "name": "sample",
+                "parent_template_id": "22222222-2222-2222-2222-222222222222",
+                "parent_template_version": 1,
+                "version_token": None,
+                "redirected": False,
+                "deprecation_warning": None,
+                "verifiers": [
+                    {"name": "tone", "verifier_id": "33333333-3333-3333-3333-333333333333"},
+                    {"name": "factual", "verifier_id": "44444444-4444-4444-4444-444444444444"},
+                ],
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "fork", "sample"])
+    assert result.exit_code == 0, result.output
+    assert "tone" in result.stdout
+    assert "factual" in result.stdout
+    assert "33333333-3333-3333-3333-333333333333" in result.stdout
+
+
+@respx.mock
+def test_fork_with_no_verifiers_omits_verifier_section(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.post(f"{SERVER}/v1/templates/fork").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "workflow_id": "11111111-1111-1111-1111-111111111111",
+                "slug": "sample",
+                "name": "sample",
+                "parent_template_id": "22222222-2222-2222-2222-222222222222",
+                "parent_template_version": 1,
+                "version_token": None,
+                "redirected": False,
+                "deprecation_warning": None,
+                "verifiers": [],
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "fork", "sample"])
+    assert result.exit_code == 0, result.output
+    assert "verifier" not in result.stdout.lower()

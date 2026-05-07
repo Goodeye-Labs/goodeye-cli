@@ -29,8 +29,6 @@ from goodeye_cli.wire import (
     ExchangeResult,
     MeResponse,
     RenameHandleResult,
-    RunTemplateVerifierRequestWire,
-    RunTemplateVerifierResponseWire,
     TeamCreated,
     TeamDeleteResult,
     TeamList,
@@ -490,31 +488,6 @@ class GoodeyeClient:
         response = self._request("POST", "/v1/templates/fork", json_body=body)
         return TemplateForkResult.model_validate(response.json())
 
-    def run_template_verifier(
-        self,
-        template_identifier: str,
-        verifier_name: str,
-        *,
-        inputs: dict[str, str],
-        media_url: str | None = None,
-        anonymous: bool = False,
-    ) -> RunTemplateVerifierResponseWire:
-        """POST /v1/templates/{identifier}/verifiers/{name}/runs.
-
-        ``anonymous=True`` omits ``Authorization`` even when the client was
-        constructed with an API key (public template try-before-signup).
-        """
-        wire = RunTemplateVerifierRequestWire(inputs=inputs, media_url=media_url)
-        json_body = wire.model_dump(exclude_none=True)
-        path = f"/v1/templates/{template_identifier}/verifiers/{verifier_name}/runs"
-        response = self._request(
-            "POST",
-            path,
-            json_body=json_body,
-            authenticated=not anonymous,
-        )
-        return RunTemplateVerifierResponseWire.model_validate(response.json())
-
     def delete_template(
         self, template_id: str, *, reason: str | None = None
     ) -> TemplateDeleteResult:
@@ -623,7 +596,16 @@ class GoodeyeClient:
         workflow_version: int | None = None,
         workflow_ref: str | None = None,
         run_id: str | None = None,
+        anonymous: bool = False,
     ) -> VerifierRunResult:
+        """POST /v1/verifiers/{verifier_id}/runs.
+
+        ``anonymous=True`` omits ``Authorization`` even when the client was
+        constructed with an API key (public preview path; rate limited).
+        ``verifier_id`` must be a UUID or ``system:<name>`` for anonymous runs;
+        the CLI command resolves caller-owned names to UUIDs via
+        ``get_verifier`` before calling this method.
+        """
         body: dict[str, Any] = {"inputs": inputs}
         if media_url is not None:
             body["media_url"] = media_url
@@ -641,6 +623,7 @@ class GoodeyeClient:
             "POST",
             f"/v1/verifiers/{verifier_id}/runs",
             json_body=body,
+            authenticated=not anonymous,
         )
         return VerifierRunResult.model_validate(response.json())
 
