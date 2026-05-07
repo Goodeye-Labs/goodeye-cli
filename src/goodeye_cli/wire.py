@@ -391,13 +391,14 @@ class VerifierSummary(_WireBase):
     current_version: int
     status: str
     version_token: str
-    updated_at: str
+    updated_at: datetime | None = None
     role: str | None = None
     source_workflow_id: str | None = None
 
 
 class VerifierList(_WireBase):
     items: list[VerifierSummary]
+    next_cursor: str | None = None
 
 
 class VerifierDeployResult(_WireBase):

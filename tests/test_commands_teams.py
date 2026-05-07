@@ -7,6 +7,8 @@ CLI forwards the server's structured errors.
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import respx
 from typer.testing import CliRunner
@@ -76,9 +78,49 @@ def test_teams_list_prints_table(tmp_config_paths: ConfigPaths, monkeypatch) -> 
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["teams", "list"])
+    result = runner.invoke(app, ["teams", "list", "--table"])
     assert result.exit_code == 0, result.output
     assert "acme" in result.output
+
+
+@respx.mock
+def test_teams_list_defaults_to_compact_json_envelope(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE")
+    respx.get(f"{SERVER}/v1/teams").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "team_id": _TEAM_ID,
+                        "handle": "acme",
+                        "owner_user_id": _USER_ID,
+                        "role": "owner",
+                    }
+                ]
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["teams", "list"])
+    assert result.exit_code == 0, result.output
+    assert result.output == (
+        f'{{"items":[{{"team_id":"{_TEAM_ID}","handle":"acme",'
+        f'"owner_user_id":"{_USER_ID}","role":"owner","created_at":null,'
+        '"updated_at":null}]}\n'
+    )
+
+
+def test_teams_list_does_not_expose_pagination_flags(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE")
+    runner = CliRunner()
+    result = runner.invoke(app, ["teams", "list", "--limit", "25"])
+    assert result.exit_code != 0
+    assert "No such option" in result.output
 
 
 @respx.mock
@@ -127,11 +169,46 @@ def test_teams_members_renders_table(tmp_config_paths: ConfigPaths, monkeypatch)
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["teams", "members", _TEAM_ID])
+    result = runner.invoke(app, ["teams", "members", _TEAM_ID, "--table"])
     assert result.exit_code == 0, result.output
     assert "ownerhandle" in result.output
     assert "owner" in result.output
     assert "member" in result.output
+
+
+@respx.mock
+def test_teams_members_defaults_to_compact_json_envelope(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE")
+    respx.get(f"{SERVER}/v1/teams/{_TEAM_ID}/members").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "user_id": _USER_ID,
+                        "email": "owner@example.com",
+                        "handle": "ownerhandle",
+                        "role": "owner",
+                    }
+                ]
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["teams", "members", _TEAM_ID])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output) == {
+        "items": [
+            {
+                "user_id": _USER_ID,
+                "email": "owner@example.com",
+                "handle": "ownerhandle",
+                "role": "owner",
+            }
+        ]
+    }
 
 
 @respx.mock

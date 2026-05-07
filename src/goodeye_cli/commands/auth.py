@@ -13,6 +13,13 @@ from rich.table import Table
 from goodeye_cli.client import GoodeyeClient
 from goodeye_cli.config import get_api_key, get_server
 from goodeye_cli.errors import AuthRequired
+from goodeye_cli.output import (
+    echo_json,
+    fetch_pages,
+    items_envelope,
+    next_page_hint,
+    resolve_output_mode,
+)
 
 app = typer.Typer(help="Manage API keys.", no_args_is_help=True)
 
@@ -76,22 +83,23 @@ def create_key(
 @app.command("list-keys")
 def list_keys(
     json_output: bool = typer.Option(False, "--json", help="Print results as JSON."),
+    table_output: bool = typer.Option(False, "--table", help="Print results as a table."),
+    limit: int = typer.Option(25, "--limit", "-l", min=1, help="Max results per page."),
+    cursor: str | None = typer.Option(None, "--cursor", help="Start listing from this cursor."),
+    all_pages: bool = typer.Option(False, "--all", help="Follow cursors and combine all pages."),
 ) -> None:
     """List your API keys. Secrets are never shown."""
     console = Console()
+    mode = resolve_output_mode(json_output=json_output, table_output=table_output)
     with _require_client() as client:
-        # Auto-follow cursor so we show everything the user owns.
-        items = []
-        cursor: str | None = None
-        while True:
-            page = client.list_api_keys(cursor=cursor)
-            items.extend(page.items)
-            cursor = page.next_cursor
-            if not cursor:
-                break
+        items, final_cursor = fetch_pages(
+            lambda page_cursor: client.list_api_keys(limit=limit, cursor=page_cursor),
+            cursor=cursor,
+            all_pages=all_pages,
+        )
 
-    if json_output:
-        typer.echo("[" + ",".join(key.model_dump_json() for key in items) + "]")
+    if mode == "json":
+        echo_json(items_envelope(items, next_cursor=final_cursor))
         return
 
     table = Table(title="API keys")
@@ -104,6 +112,13 @@ def list_keys(
         console.print("[dim]No API keys.[/dim]")
     else:
         console.print(table)
+    if final_cursor:
+        hint = next_page_hint(
+            ("goodeye", "auth", "list-keys"),
+            next_cursor=final_cursor,
+            limit=limit,
+        )
+        console.print(f"[dim]{hint}[/dim]")
 
 
 @app.command("revoke-key")
