@@ -660,6 +660,55 @@ def test_verifiers_run_anonymous_uuid_omits_authorization(
     assert route.call_count == 1
     assert route.calls.last.request.headers.get("Authorization") is None
     assert "anon_1" in result.output
+    assert "4 anonymous runs remaining today" in result.output
+
+
+@respx.mock
+def test_verifiers_run_anonymous_low_quota_warning(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """When only one anonymous run remains, the CLI surfaces the singular form."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    payload = _success_run_payload(anonymous=True) | {"remaining_anonymous_runs": 1}
+    respx.post(f"{SERVER}/v1/verifiers/{VERIFIER_UUID}/runs").mock(
+        return_value=httpx.Response(201, json=payload),
+    )
+    result = runner.invoke(
+        app,
+        [
+            "verifiers",
+            "run",
+            VERIFIER_UUID,
+            "--inputs-json",
+            '{"output":"hi"}',
+            "--anonymous",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "1 anonymous run remaining today" in result.output
+
+
+@respx.mock
+def test_verifiers_run_authenticated_does_not_show_quota(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """Authenticated runs never include the anonymous-quota line, even on a passing run."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.post(f"{SERVER}/v1/verifiers/{VERIFIER_UUID}/runs").mock(
+        return_value=httpx.Response(201, json=_success_run_payload(anonymous=False)),
+    )
+    result = runner.invoke(
+        app,
+        [
+            "verifiers",
+            "run",
+            VERIFIER_UUID,
+            "--inputs-json",
+            '{"output":"hi"}',
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "anonymous" not in result.output.lower()
 
 
 @respx.mock
