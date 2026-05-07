@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +60,37 @@ def _client(*, timeout_default: float | None = None) -> GoodeyeClient:
         else get_request_timeout_seconds()
     )
     return GoodeyeClient(get_server(), api_key=api_key, timeout=timeout)
+
+
+def _client_for_run(*, anonymous: bool, timeout_default: float | None = None) -> GoodeyeClient:
+    """Build a client for ``verifiers run``.
+
+    Anonymous runs never attach stored credentials, even if configured.
+    Authenticated runs require an API key on file.
+    """
+    timeout = (
+        get_request_timeout_seconds(default=timeout_default)
+        if timeout_default is not None
+        else get_request_timeout_seconds()
+    )
+    if anonymous:
+        return GoodeyeClient(get_server(), api_key=None, timeout=timeout)
+    api_key = get_api_key()
+    if not api_key:
+        raise AuthRequired(
+            slug="auth_required",
+            message="Authentication required (or pass --anonymous for a public preview).",
+            hint="Run `goodeye login`, set GOODEYE_API_KEY, or use --anonymous.",
+        )
+    return GoodeyeClient(get_server(), api_key=api_key, timeout=timeout)
+
+
+def _is_uuid(value: str) -> bool:
+    try:
+        uuid.UUID(value)
+    except ValueError:
+        return False
+    return True
 
 
 def _json_object(raw: str, label: str) -> dict[str, Any]:
@@ -213,8 +245,8 @@ def run(
     verifier_id: str = typer.Argument(
         ...,
         help=(
-            "Verifier UUID, your caller-owned name for an active verifier, "
-            "or system:<name> for a seeded platform judge."
+            "Verifier UUID, system:<name>, or your caller-owned name "
+            "(resolved client-side before the run call)."
         ),
     ),
     inputs_json: str = typer.Option(
@@ -260,6 +292,14 @@ def run(
         "--run-id",
         help="Caller-supplied correlation ID stamped onto the run row.",
     ),
+    anonymous: bool = typer.Option(
+        False,
+        "--anonymous",
+        help=(
+            "Do not send credentials (anonymous public preview; strict rate "
+            "limits). Requires a verifier UUID or system:<name>."
+        ),
+    ),
     json_output: bool = typer.Option(False, "--json", help="Print JSON."),
 ) -> None:
     """Run a verifier and print pass/fail plus reasoning.
@@ -273,9 +313,28 @@ def run(
     """
     inputs = _json_object(inputs_json, "--inputs-json")
     console = Console()
-    with _client(timeout_default=VERIFIER_REQUEST_TIMEOUT_SECONDS) as client:
+    is_uuid = _is_uuid(verifier_id)
+    is_system = verifier_id.startswith("system:")
+    if not is_uuid and not is_system and anonymous:
+        raise ValidationFailed(
+            slug="validation_error",
+            message=(
+                "Anonymous runs require a verifier UUID. Names cannot be "
+                "resolved without authentication."
+            ),
+        )
+    with _client_for_run(
+        anonymous=anonymous, timeout_default=VERIFIER_REQUEST_TIMEOUT_SECONDS
+    ) as client:
+        resolved_id = verifier_id
+        if not is_uuid and not is_system:
+            # Authenticated path: resolve the caller-owned name to a UUID
+            # before the run call so the server-side run boundary stays
+            # UUID-or-system: only.
+            resolved = client.get_verifier(verifier_id)
+            resolved_id = resolved.verifier_id
         result = client.run_verifier(
-            verifier_id,
+            resolved_id,
             inputs={key: str(value) for key, value in inputs.items()},
             media_url=media_url,
             version=version,
@@ -283,6 +342,7 @@ def run(
             workflow_version=workflow_version,
             workflow_ref=workflow_ref,
             run_id=run_id,
+            anonymous=anonymous,
         )
     if json_output:
         typer.echo(result.model_dump_json(indent=2))
@@ -293,7 +353,8 @@ def run(
     passed = result.passed is True
     label = "PASS" if passed else "FAIL"
     color = "green" if passed else "red"
-    console.print(f"[bold {color}]{label}[/bold {color}] verifier_run_id={result.verifier_run_id}")
+    run_id_display = result.verifier_run_id or result.anonymous_verifier_run_id
+    console.print(f"[bold {color}]{label}[/bold {color}] verifier_run_id={run_id_display}")
     if result.reasoning:
         console.print(result.reasoning)
 

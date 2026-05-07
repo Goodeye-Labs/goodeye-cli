@@ -25,6 +25,13 @@ def _setup_creds(monkeypatch, tmp_config_paths: ConfigPaths) -> None:
     monkeypatch.delenv("GOODEYE_SERVER", raising=False)
 
 
+def _setup_no_creds(monkeypatch, tmp_config_paths: ConfigPaths) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_config_paths.config_dir.parent))
+    monkeypatch.delenv("GOODEYE_API_KEY", raising=False)
+    monkeypatch.delenv("GOODEYE_SERVER", raising=False)
+    monkeypatch.setenv("GOODEYE_SERVER", SERVER)
+
+
 @respx.mock
 def test_verifiers_list_prints_json(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
@@ -149,6 +156,28 @@ def test_verifiers_list_all_follows_cursor(tmp_config_paths: ConfigPaths, monkey
 @respx.mock
 def test_verifiers_run_outputs_reasoning(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
+    resolved_uuid = "11111111-1111-1111-1111-111111111111"
+
+    # The CLI resolves caller-owned names to a UUID before the run call.
+    respx.get(f"{SERVER}/v1/verifiers/ver_1").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "verifier_id": resolved_uuid,
+                "name": "ver_1",
+                "description": "x",
+                "version": 1,
+                "criterion": "c",
+                "input_contract": "text",
+                "input_fields": ["message"],
+                "few_shot_examples": [],
+                "judge_model_config": {},
+                "reasoning_field_description": "r",
+                "config_hash": "h",
+                "status": "active",
+            },
+        )
+    )
 
     def check_request(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content.decode())
@@ -157,7 +186,7 @@ def test_verifiers_run_outputs_reasoning(tmp_config_paths: ConfigPaths, monkeypa
             201,
             json={
                 "verifier_run_id": "run_1",
-                "verifier_id": "ver_1",
+                "verifier_id": resolved_uuid,
                 "version": 1,
                 "status": "success",
                 "passed": False,
@@ -167,7 +196,7 @@ def test_verifiers_run_outputs_reasoning(tmp_config_paths: ConfigPaths, monkeypa
             },
         )
 
-    respx.post(f"{SERVER}/v1/verifiers/ver_1/runs").mock(side_effect=check_request)
+    respx.post(f"{SERVER}/v1/verifiers/{resolved_uuid}/runs").mock(side_effect=check_request)
     result = runner.invoke(
         app,
         [
@@ -199,12 +228,16 @@ def test_verifiers_run_uses_long_request_timeout(
         def __exit__(self, *exc: object) -> None:
             return None
 
+        def get_verifier(self, *args: object, **kwargs: object):
+            return SimpleNamespace(verifier_id="11111111-1111-1111-1111-111111111111")
+
         def run_verifier(self, *args: object, **kwargs: object):
             return SimpleNamespace(
                 status="success",
                 passed=True,
                 reasoning=None,
                 verifier_run_id="run_1",
+                anonymous_verifier_run_id=None,
             )
 
     monkeypatch.setattr("goodeye_cli.commands.verifiers.GoodeyeClient", FakeClient)
@@ -220,6 +253,27 @@ def test_verifiers_run_forwards_provenance_flags(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
+    resolved_uuid = "11111111-1111-1111-1111-111111111111"
+
+    respx.get(f"{SERVER}/v1/verifiers/ver_1").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "verifier_id": resolved_uuid,
+                "name": "ver_1",
+                "description": "x",
+                "version": 1,
+                "criterion": "c",
+                "input_contract": "text",
+                "input_fields": ["message"],
+                "few_shot_examples": [],
+                "judge_model_config": {},
+                "reasoning_field_description": "r",
+                "config_hash": "h",
+                "status": "active",
+            },
+        )
+    )
 
     def check_request(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content.decode())
@@ -231,7 +285,7 @@ def test_verifiers_run_forwards_provenance_flags(
             201,
             json={
                 "verifier_run_id": "run_2",
-                "verifier_id": "ver_1",
+                "verifier_id": resolved_uuid,
                 "version": 1,
                 "status": "success",
                 "passed": True,
@@ -241,7 +295,7 @@ def test_verifiers_run_forwards_provenance_flags(
             },
         )
 
-    respx.post(f"{SERVER}/v1/verifiers/ver_1/runs").mock(side_effect=check_request)
+    respx.post(f"{SERVER}/v1/verifiers/{resolved_uuid}/runs").mock(side_effect=check_request)
     result = runner.invoke(
         app,
         [
@@ -559,3 +613,207 @@ def test_verifiers_revoke_human_decline_exits_zero(
         result = runner.invoke(app, ["verifiers", "revoke", "ver_1"])
     assert result.exit_code == 0, result.output
     assert "Cancelled" in result.output
+
+
+# ----- run --anonymous and name resolution -----
+
+
+VERIFIER_UUID = "11111111-1111-1111-1111-111111111111"
+
+
+def _success_run_payload(*, anonymous: bool) -> dict:
+    return {
+        "verifier_run_id": None if anonymous else "run_1",
+        "anonymous_verifier_run_id": "anon_1" if anonymous else None,
+        "remaining_anonymous_runs": 4 if anonymous else None,
+        "verifier_id": VERIFIER_UUID,
+        "version": 1,
+        "status": "success",
+        "passed": True,
+        "reasoning": "ok",
+        "duration_ms": 3,
+        "created_at": "2026-05-04T00:00:00+00:00",
+    }
+
+
+@respx.mock
+def test_verifiers_run_anonymous_uuid_omits_authorization(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """--anonymous + UUID drops auth and prints the anonymous_verifier_run_id."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    route = respx.post(f"{SERVER}/v1/verifiers/{VERIFIER_UUID}/runs").mock(
+        return_value=httpx.Response(201, json=_success_run_payload(anonymous=True)),
+    )
+    result = runner.invoke(
+        app,
+        [
+            "verifiers",
+            "run",
+            VERIFIER_UUID,
+            "--inputs-json",
+            '{"output":"hi"}',
+            "--anonymous",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert route.call_count == 1
+    assert route.calls.last.request.headers.get("Authorization") is None
+    assert "anon_1" in result.output
+
+
+@respx.mock
+def test_verifiers_run_anonymous_uuid_works_without_credentials(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """--anonymous succeeds with no creds on disk and no env key."""
+    _setup_no_creds(monkeypatch, tmp_config_paths)
+    route = respx.post(f"{SERVER}/v1/verifiers/{VERIFIER_UUID}/runs").mock(
+        return_value=httpx.Response(201, json=_success_run_payload(anonymous=True)),
+    )
+    result = runner.invoke(
+        app,
+        [
+            "verifiers",
+            "run",
+            VERIFIER_UUID,
+            "--inputs-json",
+            '{"output":"hi"}',
+            "--anonymous",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert route.call_count == 1
+    assert route.calls.last.request.headers.get("Authorization") is None
+    payload = json.loads(result.output)
+    assert payload["anonymous_verifier_run_id"] == "anon_1"
+    assert payload["remaining_anonymous_runs"] == 4
+
+
+@respx.mock
+def test_verifiers_run_authenticated_name_resolves_via_get_verifier_first(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """A non-UUID, non-system name triggers a get_verifier round-trip first."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    get_route = respx.get(f"{SERVER}/v1/verifiers/cta-present").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "verifier_id": VERIFIER_UUID,
+                "name": "cta-present",
+                "description": "x",
+                "version": 1,
+                "criterion": "c",
+                "input_contract": "text",
+                "input_fields": ["output"],
+                "few_shot_examples": [],
+                "judge_model_config": {},
+                "reasoning_field_description": "r",
+                "config_hash": "h",
+                "status": "active",
+            },
+        )
+    )
+    run_route = respx.post(f"{SERVER}/v1/verifiers/{VERIFIER_UUID}/runs").mock(
+        return_value=httpx.Response(201, json=_success_run_payload(anonymous=False)),
+    )
+    result = runner.invoke(
+        app,
+        [
+            "verifiers",
+            "run",
+            "cta-present",
+            "--inputs-json",
+            '{"output":"hi"}',
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert get_route.call_count == 1
+    assert run_route.call_count == 1
+
+
+@respx.mock
+def test_verifiers_run_anonymous_with_name_rejects_without_http(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """--anonymous with a non-UUID name exits non-zero and makes no HTTP call."""
+    _setup_no_creds(monkeypatch, tmp_config_paths)
+    name_route = respx.get(f"{SERVER}/v1/verifiers/cta-present").mock(
+        return_value=httpx.Response(500, json={"error": "should not be called"})
+    )
+    run_route = respx.post(f"{SERVER}/v1/verifiers/cta-present/runs").mock(
+        return_value=httpx.Response(500, json={"error": "should not be called"})
+    )
+    result = runner.invoke(
+        app,
+        [
+            "verifiers",
+            "run",
+            "cta-present",
+            "--inputs-json",
+            '{"output":"hi"}',
+            "--anonymous",
+        ],
+    )
+    assert result.exit_code != 0
+    assert name_route.call_count == 0
+    assert run_route.call_count == 0
+    assert isinstance(result.exception, ValidationFailed)
+    assert "anonymous" in str(result.exception).lower()
+
+
+@respx.mock
+def test_verifiers_run_authenticated_uuid_skips_get_verifier(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """A UUID arg goes straight to the runs endpoint (no resolution round-trip)."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    get_route = respx.get(f"{SERVER}/v1/verifiers/{VERIFIER_UUID}").mock(
+        return_value=httpx.Response(500, json={"error": "should not be called"})
+    )
+    run_route = respx.post(f"{SERVER}/v1/verifiers/{VERIFIER_UUID}/runs").mock(
+        return_value=httpx.Response(201, json=_success_run_payload(anonymous=False)),
+    )
+    result = runner.invoke(
+        app,
+        [
+            "verifiers",
+            "run",
+            VERIFIER_UUID,
+            "--inputs-json",
+            '{"output":"hi"}',
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert get_route.call_count == 0
+    assert run_route.call_count == 1
+
+
+@respx.mock
+def test_verifiers_run_authenticated_system_alias_skips_get_verifier(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """system:<name> passes through with no resolution round-trip."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    get_route = respx.get(f"{SERVER}/v1/verifiers/system:workflow-design-qa").mock(
+        return_value=httpx.Response(500, json={"error": "should not be called"})
+    )
+    url = f"{SERVER}/v1/verifiers/system:workflow-design-qa/runs"
+    run_route = respx.post(url).mock(
+        return_value=httpx.Response(201, json=_success_run_payload(anonymous=False)),
+    )
+    result = runner.invoke(
+        app,
+        [
+            "verifiers",
+            "run",
+            "system:workflow-design-qa",
+            "--inputs-json",
+            '{"design":"x"}',
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert get_route.call_count == 0
+    assert run_route.call_count == 1

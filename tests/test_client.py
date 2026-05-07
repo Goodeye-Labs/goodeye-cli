@@ -38,35 +38,35 @@ def test_authorization_header_is_sent() -> None:
 
 
 @respx.mock
-def test_run_template_verifier_anonymous_omits_authorization_with_api_key_client() -> None:
-    """Anonymous template verifier runs must not send Bearer auth (httpx header merge)."""
+def test_run_verifier_anonymous_omits_authorization_with_api_key_client() -> None:
+    """Anonymous verifier runs must not send Bearer auth (httpx header merge)."""
+    verifier_id = "00000000-0000-0000-0000-000000000abc"
     payload = {
         "verifier_run_id": None,
         "anonymous_verifier_run_id": "anon-1",
-        "verifier_name": "tone",
-        "template_version_id": "tv-uuid",
-        "template_version": 1,
-        "verifier_version": 1,
+        "remaining_anonymous_runs": 4,
+        "verifier_id": verifier_id,
+        "version": 1,
         "status": "success",
         "passed": True,
         "reasoning": "ok",
         "duration_ms": 12,
-        "remaining_anonymous_runs": 4,
         "created_at": "2026-01-01T00:00:00+00:00",
         "error_code": None,
         "error_message": None,
     }
-    route = respx.post(f"{SERVER}/v1/templates/sample@1/verifiers/tone/runs").mock(
-        return_value=httpx.Response(200, json=payload),
+    route = respx.post(f"{SERVER}/v1/verifiers/{verifier_id}/runs").mock(
+        return_value=httpx.Response(201, json=payload),
     )
     with GoodeyeClient(SERVER, api_key="good_live_X") as client:
-        result = client.run_template_verifier(
-            "sample@1",
-            "tone",
+        result = client.run_verifier(
+            verifier_id,
             inputs={"output": "hi"},
             anonymous=True,
         )
     assert result.passed is True
+    assert result.anonymous_verifier_run_id == "anon-1"
+    assert result.remaining_anonymous_runs == 4
     assert route.call_count == 1
     assert route.calls.last.request.headers.get("Authorization") is None
 
