@@ -596,8 +596,11 @@ class GoodeyeClient:
         response = self._request("POST", "/v1/verifiers", json_body=payload)
         return VerifierDeployResult.model_validate(response.json())
 
-    def list_verifiers(self) -> VerifierList:
-        response = self._request("GET", "/v1/verifiers")
+    def list_verifiers(self, limit: int = 50, cursor: str | None = None) -> VerifierList:
+        params: dict[str, Any] = {"limit": limit}
+        if cursor:
+            params["cursor"] = cursor
+        response = self._request("GET", "/v1/verifiers", params=params)
         return VerifierList.model_validate(response.json())
 
     def get_verifier(

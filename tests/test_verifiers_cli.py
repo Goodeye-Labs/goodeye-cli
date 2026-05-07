@@ -28,7 +28,7 @@ def _setup_creds(monkeypatch, tmp_config_paths: ConfigPaths) -> None:
 @respx.mock
 def test_verifiers_list_prints_json(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.get(f"{SERVER}/v1/verifiers").mock(
+    route = respx.get(f"{SERVER}/v1/verifiers").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -43,15 +43,19 @@ def test_verifiers_list_prints_json(tmp_config_paths: ConfigPaths, monkeypatch) 
                         "updated_at": "2026-05-04T00:00:00+00:00",
                     },
                 ],
+                "next_cursor": "more",
             },
         )
     )
     result = runner.invoke(app, ["verifiers", "list", "--json"])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
-    assert isinstance(data, list)
-    assert len(data) == 1
-    assert data[0]["name"] == "cta-present"
+    assert set(data) == {"items", "next_cursor"}
+    assert len(data["items"]) == 1
+    assert data["items"][0]["name"] == "cta-present"
+    assert data["next_cursor"] == "more"
+    params = dict(route.calls.last.request.url.params)
+    assert params["limit"] == "25"
 
 
 @respx.mock
@@ -79,12 +83,67 @@ def test_verifiers_list_table_shows_role_and_source_workflow(
             },
         )
     )
-    result = runner.invoke(app, ["verifiers", "list"])
+    result = runner.invoke(app, ["verifiers", "list", "--table"])
     assert result.exit_code == 0, result.output
     assert "Role" in result.output
     assert "Source wf" in result.output
     assert "exec" in result.output
     assert "wf_shared" in result.output
+
+
+@respx.mock
+def test_verifiers_list_all_follows_cursor(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    route = respx.get(f"{SERVER}/v1/verifiers").mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                json={
+                    "items": [
+                        {
+                            "verifier_id": "ver_1",
+                            "name": "one",
+                            "description": "One.",
+                            "current_version": 1,
+                            "status": "active",
+                            "version_token": "token1",
+                            "updated_at": "2026-05-04T00:00:00+00:00",
+                        },
+                    ],
+                    "next_cursor": "c1",
+                },
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "items": [
+                        {
+                            "verifier_id": "ver_2",
+                            "name": "two",
+                            "description": "Two.",
+                            "current_version": 1,
+                            "status": "active",
+                            "version_token": "token2",
+                            "updated_at": "2026-05-04T00:00:00+00:00",
+                        },
+                    ],
+                    "next_cursor": None,
+                },
+            ),
+        ]
+    )
+
+    result = runner.invoke(app, ["verifiers", "list", "--all", "--cursor", "start", "--limit", "2"])
+
+    assert result.exit_code == 0, result.output
+    assert route.call_count == 2
+    assert '"ver_1"' in result.output
+    assert '"ver_2"' in result.output
+    assert result.output.rstrip().endswith('"next_cursor":null}')
+    first_params = dict(route.calls[0].request.url.params)
+    second_params = dict(route.calls[1].request.url.params)
+    assert first_params == {"limit": "2", "cursor": "start"}
+    assert second_params == {"limit": "2", "cursor": "c1"}
 
 
 @respx.mock

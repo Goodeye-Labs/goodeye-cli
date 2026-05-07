@@ -245,6 +245,24 @@ authenticated.
 
 ## Command reference
 
+### Output modes and pagination
+
+List and search commands are TTY-aware: when stdout is a terminal they print a
+Rich table by default, and when stdout is redirected or captured they print
+compact single-line JSON. Pass `--table` or `--json` to choose explicitly; the
+flags are mutually exclusive. JSON list output is always wrapped in an object:
+paginated lists print `{"items":[...],"next_cursor":...}`, while unpaginated
+lists print `{"items":[...]}`. Search commands print the search response object
+with `items`, `query`, `limit`, and `search_mode`.
+
+Paginated list commands (`workflows list`, `templates list`, `verifiers list`,
+and `auth list-keys`) fetch one page by default with `--limit 25`. Use
+`--limit N` to change page size, `--cursor TOKEN` to start from a cursor, or
+`--all` to follow cursors and combine all returned items. Table output shows a
+short next-page command when more results are available. `teams list`, `teams
+members`, and `workflows grants` are currently unpaginated and do not expose
+`--limit`, `--cursor`, or `--all`.
+
 ```
 goodeye login
     Interactive sign-in for humans: browser/device-code flow; saves
@@ -273,22 +291,25 @@ goodeye whoami
 goodeye auth create-key --name NAME [--copy]
     Create a new API key. The secret is shown once - save it somewhere safe.
 
-goodeye auth list-keys
-    List your API keys. Secrets are never shown.
+goodeye auth list-keys [--limit N] [--cursor TOKEN] [--all] [--json|--table]
+    List your API keys. Secrets are never shown. Fetches one page by default;
+    --all follows cursors and returns a combined items envelope.
 
 goodeye auth revoke-key <key-id-or-name>
     Revoke an API key. The key stops working immediately. The argument may
     be the ID shown by `auth list-keys` or a unique key name.
 
-goodeye workflows list [--filter mine|shared-with-me|all] [--tag TAG] [--search QUERY] [--json]
+goodeye workflows list [--filter mine|shared-with-me|all] [--tag TAG] [--search QUERY] [--limit N] [--cursor TOKEN] [--all] [--json|--table]
     List workflows you can access (owned + shared with you via grants). The
     ID column is accepted by `get`, `delete`, and grant commands. When signed
-    in, you can also use your own workflow name (slug).
+    in, you can also use your own workflow name (slug). Fetches one page by
+    default; --all follows cursors and returns a combined items envelope.
 
-goodeye workflows search <query> [--filter mine|shared-with-me|all] [--tag TAG] [--limit N] [--json]
+goodeye workflows search <query> [--filter mine|shared-with-me|all] [--tag TAG] [--limit N] [--json|--table]
     LLM-ranked natural-language search over workflows you can access.
     Use this when you remember roughly what a workflow does but not its
-    name; use `list` for plain enumeration or tag filtering.
+    name; use `list` for plain enumeration or tag filtering. Defaults to
+    --limit 5.
 
 goodeye workflows get <id-or-name> [--version N] [--output PATH] [--json]
     Download a workflow. Prints markdown to stdout (wrapped with
@@ -323,8 +344,8 @@ goodeye workflows grant <id-or-name> <grantee> <view|edit|admin>
 goodeye workflows revoke-grant <id-or-name> <grantee>
     Revoke a direct grant.
 
-goodeye workflows grants <id-or-name> [--json]
-    List grants on a workflow.
+goodeye workflows grants <id-or-name> [--json|--table]
+    List grants on a workflow. Currently unpaginated.
 
 goodeye workflows leave <id-or-name> [--yes]
     Remove your own direct grant on a shared workflow.
@@ -332,11 +353,14 @@ goodeye workflows leave <id-or-name> [--yes]
 goodeye workflows transfer-ownership <id-or-name> <new-owner>
     Transfer a workflow you own to another user.
 
-goodeye templates list [--filter all|mine] [--search QUERY] [--json]
-    Browse the public template catalog. Anonymous reads allowed.
+goodeye templates list [--filter all|mine] [--search QUERY] [--limit N] [--cursor TOKEN] [--all] [--json|--table]
+    Browse the public template catalog. Anonymous reads allowed. Fetches one
+    page by default; --all follows cursors and returns a combined items
+    envelope.
 
-goodeye templates search <query> [--filter all|mine] [--limit N] [--json]
-    LLM-ranked natural-language search over public templates.
+goodeye templates search <query> [--filter all|mine] [--limit N] [--json|--table]
+    LLM-ranked natural-language search over public templates. Defaults to
+    --limit 5.
 
 goodeye templates get <identifier> [--version N] [--output PATH] [--json]
     Fetch a public template by UUID or @handle/slug[@vN]. Anonymous reads
@@ -387,8 +411,10 @@ goodeye verifiers deploy <config.json|->
     model_settings optional. expected_version_token is required when
     re-deploying an existing verifier (get it from `verifiers list`).
 
-goodeye verifiers list [--json]
+goodeye verifiers list [--limit N] [--cursor TOKEN] [--all] [--json|--table]
     List active verifiers you own with their current version and version token.
+    Fetches one page by default; --all follows cursors and returns a combined
+    items envelope.
 
 goodeye verifiers show <verifier_id> [--version N] [--json]
     Show one verifier version: criterion, contract, calibration, config_hash.
@@ -416,6 +442,14 @@ goodeye me claim-handle <handle>
 goodeye me rename-handle <new-handle>
     Change a previously claimed handle. Subject to a cooldown and yearly
     cap; old-handle template URLs redirect for a 90-day window.
+
+goodeye teams list [--filter all|mine|member] [--json|--table]
+    List teams visible to you. Currently unpaginated; JSON output is an
+    items envelope.
+
+goodeye teams members <team> [--json|--table]
+    List members of a team. Currently unpaginated; JSON output is an
+    items envelope.
 ```
 
 ## Configuration

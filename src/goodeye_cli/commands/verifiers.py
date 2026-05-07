@@ -20,6 +20,13 @@ from goodeye_cli.config import (
     get_server,
 )
 from goodeye_cli.errors import AuthRequired, ValidationFailed
+from goodeye_cli.output import (
+    echo_json,
+    fetch_pages,
+    items_envelope,
+    next_page_hint,
+    resolve_output_mode,
+)
 
 app = typer.Typer(
     help=(
@@ -144,7 +151,13 @@ def deploy(
 
 
 @app.command("list")
-def list_cmd(json_output: bool = typer.Option(False, "--json", help="Print JSON.")) -> None:
+def list_cmd(
+    json_output: bool = typer.Option(False, "--json", help="Print JSON."),
+    table_output: bool = typer.Option(False, "--table", help="Print results as a table."),
+    limit: int = typer.Option(25, "--limit", "-l", min=1, help="Max results per page."),
+    cursor: str | None = typer.Option(None, "--cursor", help="Start listing from this cursor."),
+    all_pages: bool = typer.Option(False, "--all", help="Follow cursors and combine all pages."),
+) -> None:
     """List active (non-revoked) verifiers you own.
 
     Shows the current version and version token for each verifier. Use
@@ -152,10 +165,15 @@ def list_cmd(json_output: bool = typer.Option(False, "--json", help="Print JSON.
     specific version.
     """
     console = Console()
+    mode = resolve_output_mode(json_output=json_output, table_output=table_output)
     with _client() as client:
-        result = client.list_verifiers()
-    if json_output:
-        typer.echo(json.dumps([item.model_dump(mode="json") for item in result.items], indent=2))
+        items, final_cursor = fetch_pages(
+            lambda page_cursor: client.list_verifiers(limit=limit, cursor=page_cursor),
+            cursor=cursor,
+            all_pages=all_pages,
+        )
+    if mode == "json":
+        echo_json(items_envelope(items, next_cursor=final_cursor))
         return
     table = Table(title="Semantic verifiers")
     table.add_column("ID")
@@ -165,7 +183,7 @@ def list_cmd(json_output: bool = typer.Option(False, "--json", help="Print JSON.
     table.add_column("Role")
     table.add_column("Source wf")
     table.add_column("Description")
-    for item in result.items:
+    for item in items:
         role = item.role or "—"
         src = item.source_workflow_id or "—"
         table.add_row(
@@ -177,10 +195,17 @@ def list_cmd(json_output: bool = typer.Option(False, "--json", help="Print JSON.
             src,
             item.description,
         )
-    if not result.items:
+    if not items:
         console.print("[dim]No verifiers.[/dim]")
     else:
         console.print(table)
+    if final_cursor:
+        hint = next_page_hint(
+            ("goodeye", "verifiers", "list"),
+            next_cursor=final_cursor,
+            limit=limit,
+        )
+        console.print(f"[dim]{hint}[/dim]")
 
 
 @app.command("run")
