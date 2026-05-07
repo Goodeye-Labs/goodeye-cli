@@ -50,3 +50,6 @@ coverage.xml
 # Worktrees
 .worktrees/
 .claude/worktrees/
+
+# Local design/spec drafts
+docs/superpowers/
