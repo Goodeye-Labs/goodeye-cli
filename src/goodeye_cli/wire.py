@@ -398,6 +398,7 @@ class VerifierSummary(_WireBase):
 
 class VerifierList(_WireBase):
     items: list[VerifierSummary]
+    next_cursor: str | None = None
 
 
 class VerifierDeployResult(_WireBase):

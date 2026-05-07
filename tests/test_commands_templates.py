@@ -29,6 +29,80 @@ def _setup_no_creds(monkeypatch, tmp_config_paths: ConfigPaths) -> None:
 
 
 @respx.mock
+def test_templates_list_defaults_to_compact_json_envelope(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_no_creds(monkeypatch, tmp_config_paths)
+    route = respx.get(f"{SERVER}/v1/templates").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "id": "tpl_01",
+                        "slug": "demo",
+                        "name": "demo",
+                        "handle": "h",
+                        "owner_user_id": "user_1",
+                        "latest_version": 2,
+                        "outcome": "demo outcome",
+                        "publishing_handle": "h",
+                    }
+                ],
+                "next_cursor": "next",
+            },
+        )
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "list", "--filter", "all"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output == (
+        '{"items":[{"id":"tpl_01","slug":"demo","name":"demo","handle":"h",'
+        '"owner_user_id":"user_1","latest_version":2,"description":"",'
+        '"outcome":"demo outcome","tags":[],"publishing_handle":"h",'
+        '"published_at":null}],"next_cursor":"next"}\n'
+    )
+    params = dict(route.calls.last.request.url.params)
+    assert params["filter"] == "all"
+    assert params["limit"] == "25"
+
+
+@respx.mock
+def test_templates_list_table_flag_renders_table(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_no_creds(monkeypatch, tmp_config_paths)
+    respx.get(f"{SERVER}/v1/templates").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "id": "tpl_01",
+                        "slug": "demo",
+                        "name": "demo",
+                        "handle": "h",
+                        "owner_user_id": "user_1",
+                        "latest_version": 2,
+                        "outcome": "demo outcome",
+                        "publishing_handle": "h",
+                    }
+                ],
+                "next_cursor": None,
+            },
+        )
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "list", "--table"])
+
+    assert result.exit_code == 0, result.output
+    assert "@h/demo" in result.output
+
+
+@respx.mock
 def test_templates_search_requires_auth(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     from goodeye_cli.errors import AuthRequired
 
@@ -72,7 +146,54 @@ def test_templates_search_posts_to_search_endpoint(
     assert req.method == "POST"
     assert req.url.path == "/v1/templates/search"
     assert json.loads(req.content.decode())["query"] == "chart critique"
+    assert result.output == (
+        '{"items":[{"id":"tpl_01","rank":1,"match_reason":"Matches chart critique.",'
+        '"slug":"template-search","name":"template-search","handle":"example",'
+        '"description":"","outcome":"","tags":[]}],"query":"chart critique",'
+        '"limit":5,"search_mode":"llm"}\n'
+    )
+
+
+@respx.mock
+def test_templates_search_table_flag_renders_table(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.post(f"{SERVER}/v1/templates/search").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "id": "tpl_01",
+                        "slug": "template-search",
+                        "name": "template-search",
+                        "handle": "example",
+                        "rank": 1,
+                        "match_reason": "Matches chart critique.",
+                    }
+                ],
+                "query": "chart critique",
+                "limit": 5,
+                "search_mode": "llm",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "search", "chart critique", "--table"])
+    assert result.exit_code == 0, result.output
+    assert "Template search" in result.output
     assert "Matches chart critique" in result.output
+
+
+def test_templates_search_rejects_json_and_table(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "search", "x", "--json", "--table"])
+    assert result.exit_code != 0
+    assert "Use either --json or --table" in result.output
 
 
 @respx.mock

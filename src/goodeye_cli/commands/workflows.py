@@ -17,6 +17,13 @@ from goodeye_cli.client import GoodeyeClient
 from goodeye_cli.commands.prompts import confirm_destructive
 from goodeye_cli.config import get_api_key, get_server
 from goodeye_cli.errors import AuthRequired, ValidationFailed
+from goodeye_cli.output import (
+    echo_json,
+    fetch_pages,
+    items_envelope,
+    next_page_hint,
+    resolve_output_mode,
+)
 from goodeye_cli.wire import WorkflowDetail
 
 _WORKFLOW_VERIFIER_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,127}$")
@@ -53,26 +60,29 @@ def list_cmd(
     tag: str | None = typer.Option(None, "--tag", "-t", help="Filter by tag."),
     search: str | None = typer.Option(None, "--search", "-s", help="Search query."),
     json_output: bool = typer.Option(False, "--json", help="Print results as JSON."),
+    table_output: bool = typer.Option(False, "--table", help="Print results as a table."),
+    limit: int = typer.Option(25, "--limit", "-l", min=1, help="Max results per page."),
+    cursor: str | None = typer.Option(None, "--cursor", help="Start listing from this cursor."),
+    all_pages: bool = typer.Option(False, "--all", help="Follow cursors and combine all pages."),
 ) -> None:
     """List workflows you own."""
     console = Console()
-    items: list[Any] = []
+    mode = resolve_output_mode(json_output=json_output, table_output=table_output)
     with _client(require_auth=True) as client:
-        cursor: str | None = None
-        while True:
-            page = client.list_workflows(
+        items, final_cursor = fetch_pages(
+            lambda page_cursor: client.list_workflows(
                 filter_=filter_.lower() if filter_ else None,
                 tag=tag,
                 search=search,
-                cursor=cursor,
-            )
-            items.extend(page.items)
-            cursor = page.next_cursor
-            if not cursor:
-                break
+                limit=limit,
+                cursor=page_cursor,
+            ),
+            cursor=cursor,
+            all_pages=all_pages,
+        )
 
-    if json_output:
-        typer.echo("[" + ",".join(i.model_dump_json() for i in items) + "]")
+    if mode == "json":
+        echo_json(items_envelope(items, next_cursor=final_cursor))
         return
 
     table = Table(title=f"Workflows ({filter_})")
@@ -90,6 +100,18 @@ def list_cmd(
         console.print("[dim]No workflows matched.[/dim]")
     else:
         console.print(table)
+    if final_cursor:
+        hint = next_page_hint(
+            ("goodeye", "workflows", "list"),
+            next_cursor=final_cursor,
+            limit=limit,
+            options=(
+                ("--filter", filter_.lower() if filter_ else None),
+                ("--tag", tag),
+                ("--search", search),
+            ),
+        )
+        console.print(f"[dim]{hint}[/dim]")
 
 
 @app.command("search")
@@ -105,9 +127,11 @@ def search_cmd(
     tag: str | None = typer.Option(None, "--tag", "-t", help="Restrict candidates to this tag."),
     limit: int = typer.Option(5, "--limit", "-l", min=1, max=10, help="Max results (1-10)."),
     json_output: bool = typer.Option(False, "--json", help="Print JSON."),
+    table_output: bool = typer.Option(False, "--table", help="Print results as a table."),
 ) -> None:
     """LLM-ranked search over your workflows (not lexical list filtering)."""
     console = Console()
+    mode = resolve_output_mode(json_output=json_output, table_output=table_output)
     with _client(require_auth=True) as client:
         result = client.search_workflows(
             query=query,
@@ -115,8 +139,8 @@ def search_cmd(
             tag=tag,
             limit=limit,
         )
-    if json_output:
-        typer.echo(result.model_dump_json(indent=2))
+    if mode == "json":
+        echo_json(result)
         return
 
     table = Table(title="Workflow search")
@@ -579,13 +603,15 @@ def revoke_grant(
 def grants(
     workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
     json_output: bool = typer.Option(False, "--json", help="Print grants as JSON."),
+    table_output: bool = typer.Option(False, "--table", help="Print grants as a table."),
 ) -> None:
     """List workflow grants."""
     console = Console()
+    mode = resolve_output_mode(json_output=json_output, table_output=table_output)
     with _client(require_auth=True) as client:
         result = client.list_workflow_grants(workflow_id)
-    if json_output:
-        typer.echo(result.model_dump_json(indent=2))
+    if mode == "json":
+        echo_json(result)
         return
     table = Table(title=f"Workflow grants ({workflow_id})")
     table.add_column("Grantee")

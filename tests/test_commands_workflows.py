@@ -53,14 +53,48 @@ def test_workflows_list_renders_table(tmp_config_paths: ConfigPaths, monkeypatch
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "list", "--filter", "all"])
+    result = runner.invoke(app, ["workflows", "list", "--filter", "all", "--table"])
     assert result.exit_code == 0, result.output
     assert "skl_01" in result.output
     assert "skl_02" in result.output
 
 
 @respx.mock
-def test_workflows_list_follows_cursor(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+def test_workflows_list_defaults_to_one_compact_json_page(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    route = respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    {"id": "skl_01", "name": "a", "visibility": "public", "current_version": 1}
+                ],
+                "next_cursor": "c1",
+            },
+        )
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "list", "--filter", "all"])
+    assert result.exit_code == 0, result.output
+    assert route.call_count == 1
+    assert result.output == (
+        '{"items":[{"id":"skl_01","name":"a","current_version":1,'
+        '"description":"","outcome":"","tags":[],"updated_at":null,'
+        '"owner_user_id":null,"parent_template_id":null,'
+        '"parent_template_version":null,"effective_role":null,'
+        '"version_token":null}],"next_cursor":"c1"}\n'
+    )
+    params = dict(route.calls.last.request.url.params)
+    assert params["filter"] == "all"
+    assert params["limit"] == "25"
+    assert "cursor" not in params
+
+
+@respx.mock
+def test_workflows_list_all_follows_cursor(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
     responses = [
         httpx.Response(
@@ -85,10 +119,41 @@ def test_workflows_list_follows_cursor(tmp_config_paths: ConfigPaths, monkeypatc
     route = respx.get(f"{SERVER}/v1/workflows").mock(side_effect=responses)
 
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "list", "--filter", "public"])
+    result = runner.invoke(app, ["workflows", "list", "--filter", "all", "--all"])
     assert result.exit_code == 0, result.output
     assert route.call_count == 2
-    assert "skl_01" in result.output and "skl_02" in result.output
+    assert '"skl_01"' in result.output and '"skl_02"' in result.output
+    assert result.output.rstrip().endswith('"next_cursor":null}')
+
+
+@respx.mock
+def test_workflows_list_table_prints_next_page_hint(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    {"id": "skl_01", "name": "a", "visibility": "public", "current_version": 1}
+                ],
+                "next_cursor": "c1",
+            },
+        )
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["workflows", "list", "--filter", "all", "--tag", "ops", "--search", "triage", "--table"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "skl_01" in result.output
+    assert "--cursor c1" in result.output
+    assert "--filter all" in result.output
+    assert "--tag ops" in result.output
+    assert "--search triage" in result.output
 
 
 @respx.mock
@@ -124,6 +189,41 @@ def test_workflows_search_posts_to_search_endpoint(
     assert req.url.path == "/v1/workflows/search"
     body = _json.loads(req.content.decode())
     assert body["query"] == "chart critique"
+    assert result.output == (
+        '{"items":[{"id":"w1","rank":1,"match_reason":"Matches chart critique.",'
+        '"slug":"one","name":"one","description":"","outcome":"","tags":[]}],'
+        '"query":"chart critique","limit":5,"search_mode":"llm"}\n'
+    )
+
+
+@respx.mock
+def test_workflows_search_table_flag_renders_table(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.post(f"{SERVER}/v1/workflows/search").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "id": "w1",
+                        "slug": "one",
+                        "name": "one",
+                        "rank": 1,
+                        "match_reason": "Matches chart critique.",
+                    }
+                ],
+                "query": "chart critique",
+                "limit": 5,
+                "search_mode": "llm",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "search", "chart critique", "--table"])
+    assert result.exit_code == 0, result.output
+    assert "Workflow search" in result.output
     assert "Matches chart critique" in result.output
 
 
@@ -871,7 +971,7 @@ def test_workflow_grant_commands(tmp_config_paths: ConfigPaths, monkeypatch) -> 
 
     runner = CliRunner()
     grant = runner.invoke(app, ["workflows", "grant", "wf_1", "analytics", "admin"])
-    grants = runner.invoke(app, ["workflows", "grants", "wf_1"])
+    grants = runner.invoke(app, ["workflows", "grants", "wf_1", "--table"])
     revoke = runner.invoke(app, ["workflows", "revoke-grant", "wf_1", "analytics"])
     leave = runner.invoke(app, ["workflows", "leave", "wf_1", "--yes"])
 
@@ -883,6 +983,40 @@ def test_workflow_grant_commands(tmp_config_paths: ConfigPaths, monkeypatch) -> 
     revoke_body = _json.loads(revoke_route.calls.last.request.content.decode())
     assert revoke_body["grantee_email_or_at_team_handle"] == "analytics"
     assert leave.exit_code == 0, leave.output
+
+
+@respx.mock
+def test_workflows_grants_defaults_to_compact_json_envelope(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.get(f"{SERVER}/v1/workflows/wf_1/grants").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "grantee_type": "team",
+                        "grantee_identifier": "@analytics",
+                        "role": "admin",
+                        "granted_by": "owner",
+                        "granted_at": "2026-04-24T00:00:00Z",
+                        "is_via_team": True,
+                    }
+                ]
+            },
+        )
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "grants", "wf_1"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output == (
+        '{"items":[{"grantee_type":"team","grantee_identifier":"@analytics",'
+        '"role":"admin","granted_by":"owner","granted_at":"2026-04-24T00:00:00Z",'
+        '"is_via_team":true}]}\n'
+    )
 
 
 @respx.mock

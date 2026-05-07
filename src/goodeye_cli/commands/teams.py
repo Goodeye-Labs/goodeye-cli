@@ -15,6 +15,7 @@ from goodeye_cli.client import GoodeyeClient
 from goodeye_cli.commands.prompts import confirm_destructive
 from goodeye_cli.config import get_api_key, get_server
 from goodeye_cli.errors import AuthRequired
+from goodeye_cli.output import echo_json, items_envelope, resolve_output_mode
 
 app = typer.Typer(help="Manage teams.", no_args_is_help=True)
 
@@ -65,11 +66,18 @@ def list_cmd(
         help="Scope filter: all, mine, or member.",
         case_sensitive=False,
     ),
+    json_output: bool = typer.Option(False, "--json", help="Print results as JSON."),
+    table_output: bool = typer.Option(False, "--table", help="Print results as a table."),
 ) -> None:
     """List teams visible to you (owned + member of)."""
     console = Console()
+    mode = resolve_output_mode(json_output=json_output, table_output=table_output)
     with _require_client() as client:
         result = client.list_teams(filter_=filter_.lower())
+
+    if mode == "json":
+        echo_json(result)
+        return
 
     if not result.items:
         console.print("[dim]No teams matched.[/dim]")
@@ -87,11 +95,18 @@ def list_cmd(
 @app.command("members")
 def members(
     team: str = typer.Argument(..., help="Team UUID or handle."),
+    json_output: bool = typer.Option(False, "--json", help="Print results as JSON."),
+    table_output: bool = typer.Option(False, "--table", help="Print results as a table."),
 ) -> None:
     """List members of a team (owner appears via a synthetic row)."""
     console = Console()
+    mode = resolve_output_mode(json_output=json_output, table_output=table_output)
     with _require_client() as client:
         rows = client.list_team_members(team)
+
+    if mode == "json":
+        echo_json(items_envelope(rows))
+        return
 
     table = Table(title=f"Members of {team}")
     table.add_column("User ID", no_wrap=True)
