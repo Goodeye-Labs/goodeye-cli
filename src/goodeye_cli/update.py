@@ -106,7 +106,11 @@ def is_update_available(current: str, latest: str) -> bool:
 
     if latest_version <= current_version:
         return False
-    return not (latest_version.is_prerelease and not current_version.is_prerelease)
+    # Stable users should not be nudged toward an alpha/beta/rc; spelled out as a
+    # separate branch rather than `return not (... and ...)` for readability.
+    if latest_version.is_prerelease and not current_version.is_prerelease:  # noqa: SIM103
+        return False
+    return True
 
 
 def load_update_cache(paths: ConfigPaths | None = None) -> dict[str, Any] | None:
@@ -391,8 +395,10 @@ def run_update(
 ) -> None:
     """Run the updater for a detected install method.
 
-    ``run_cmd`` defaults to ``subprocess.run`` with captured output. Tests may
-    inject a stub that returns a ``CompletedProcess`` without executing a shell.
+    ``run_cmd`` defaults to ``subprocess.run`` streaming stdout/stderr to the
+    parent terminal so the user sees the upgrade tool's progress live. Tests
+    may inject a stub that returns a ``CompletedProcess`` without executing a
+    shell.
     """
     if method == "unsupported":
         raise GoodeyeError(

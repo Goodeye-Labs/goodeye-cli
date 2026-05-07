@@ -82,6 +82,7 @@ def _maybe_emit_background_update_notice() -> None:
 
         typer.echo(update_checks.format_update_notice(result), err=True)
     except Exception:
+        # Swallow everything: a broken update check must never break the user's command.
         return
 
 

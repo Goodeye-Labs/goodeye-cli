@@ -319,6 +319,19 @@ def test_detect_install_method_editable_direct_url_unsupported(tmp_path: Any) ->
     )
 
 
+def test_detect_install_method_pip_without_direct_url_legacy(tmp_path: Any) -> None:
+    prefix, pyexe = _venv_prefix(tmp_path)
+    dist = _fake_dist(direct_url=None)
+    assert (
+        detect_install_method(
+            sys_executable=str(pyexe),
+            sys_prefix=str(prefix),
+            distribution=cast(Distribution, dist),
+        )
+        == "pip"
+    )
+
+
 def test_detect_install_method_pip_with_pypi_direct_url(tmp_path: Any) -> None:
     prefix, pyexe = _venv_prefix(tmp_path)
     dist = _fake_dist(
