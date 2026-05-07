@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json as _json
+import re
 
 import httpx
 import respx
@@ -20,6 +21,21 @@ def _setup_creds(monkeypatch, tmp_config_paths: ConfigPaths) -> None:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_config_paths.config_dir.parent))
     monkeypatch.delenv("GOODEYE_API_KEY", raising=False)
     monkeypatch.delenv("GOODEYE_SERVER", raising=False)
+
+
+def test_workflows_teach_help_documents_required_publish_metadata() -> None:
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "teach", "--help"])
+
+    assert result.exit_code == 0, result.output
+    plain_output = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+    normalized = " ".join(plain_output.split())
+    assert (
+        "goodeye workflows publish - --name <name> --description <description> "
+        "--outcome <outcome> --source teach --expected-version-token "
+        "<captured at stage 2>"
+    ) in normalized
+    assert "goodeye workflows publish - --source teach --expected-version-token" not in normalized
 
 
 @respx.mock

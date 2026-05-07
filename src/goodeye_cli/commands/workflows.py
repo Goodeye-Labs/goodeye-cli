@@ -205,58 +205,46 @@ def _parse_front_matter(source: str) -> tuple[dict[str, Any], str]:
     return {}, source
 
 
-def _coerce_legacy_manifest(front_matter: dict[str, Any]) -> dict[str, Any]:
-    raw = front_matter.get("manifest")
+def _coerce_required_text(raw: Any, *, field_name: str, missing_message: str) -> str:
     if raw is None:
-        return {}
-    if not isinstance(raw, dict):
         raise ValidationFailed(
             slug="validation_error",
-            message="`manifest` in front-matter must be a mapping.",
+            message=missing_message,
         )
-    return dict(raw)
+    if isinstance(raw, str) and raw.strip():
+        return raw
+    raise ValidationFailed(
+        slug="validation_error",
+        message=f"`{field_name}` must be a non-empty string.",
+    )
 
 
-def _coerce_outcome(front_matter: dict[str, Any], legacy: dict[str, Any]) -> str | None:
-    raw = front_matter.get("outcome", legacy.get("outcome"))
+def _coerce_outcome(raw: Any) -> str | None:
     if raw is None:
         return None
     if isinstance(raw, str) and raw.strip():
         return raw
     raise ValidationFailed(
         slug="validation_error",
-        message="`outcome` in front-matter must be a non-empty string.",
+        message="`outcome` must be a non-empty string.",
     )
 
 
-def _coerce_tags(front_matter: dict[str, Any], legacy: dict[str, Any]) -> list[str]:
-    raw = front_matter.get("tags", legacy.get("tags"))
+def _coerce_tags(raw: Any) -> list[str]:
     if raw is None:
         return []
     if isinstance(raw, list):
         return [str(t) for t in raw]
     raise ValidationFailed(
         slug="validation_error",
-        message="`tags` in front-matter must be a list of strings.",
+        message="`tags` must be a list of strings.",
     )
 
 
-def _extract_discovery_facets(
-    front_matter: dict[str, Any], *, console: Console
-) -> tuple[str | None, list[str]]:
-    """Pull outcome+tags from the front-matter, promoting legacy manifest keys."""
-    legacy = _coerce_legacy_manifest(front_matter)
-    outcome = _coerce_outcome(front_matter, legacy)
-    tags = _coerce_tags(front_matter, legacy)
-    if legacy:
-        dropped = sorted(set(legacy) - {"outcome", "tags"})
-        if dropped:
-            console.print(
-                "[yellow]Warning:[/yellow] front-matter `manifest:` block is "
-                "deprecated. Promoted `outcome` / `tags` to the top level; "
-                f"dropped: {', '.join(dropped)}. The server no longer stores "
-                "these fields; move verifier scripts and cURLs into the body."
-            )
+def _extract_discovery_facets(front_matter: dict[str, Any]) -> tuple[str | None, list[str]]:
+    """Pull supported discovery facets from top-level front matter."""
+    outcome = _coerce_outcome(front_matter.get("outcome"))
+    tags = _coerce_tags(front_matter.get("tags"))
     return outcome, tags
 
 
@@ -285,12 +273,64 @@ def _parse_workflow_verifier_flags(values: list[str]) -> list[dict[str, str]]:
     return rows
 
 
+def _read_markdown_input(source: str) -> str:
+    if source == "-":
+        return sys.stdin.read()
+    path = Path(source)
+    if not path.exists():
+        raise ValidationFailed(
+            slug="validation_error",
+            message=f"Markdown file not found: {source}",
+        )
+    if not path.is_file():
+        raise ValidationFailed(
+            slug="validation_error",
+            message=f"Markdown path is not a file: {source}",
+        )
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeError as exc:
+        raise ValidationFailed(
+            slug="validation_error",
+            message=f"Could not decode markdown file as UTF-8: {source}",
+        ) from exc
+    except OSError as exc:
+        raise ValidationFailed(
+            slug="validation_error",
+            message=f"Could not read markdown file: {source}",
+        ) from exc
+
+
 @app.command("publish")
 def publish(
-    file: Path = typer.Argument(..., exists=True, readable=True, help="Markdown file to upload."),
+    file: str = typer.Argument(
+        ...,
+        help=(
+            "Markdown workflow file to upload, or '-' to read markdown from stdin "
+            "(preferred for generated agent output)."
+        ),
+    ),
     name_override: str | None = typer.Option(
         None, "--name", help="Override the `name` from front-matter."
     ),
+    description_override: str | None = typer.Option(
+        None, "--description", help="Override the `description` from front-matter."
+    ),
+    outcome_override: str | None = typer.Option(
+        None,
+        "--outcome",
+        help="Override the `outcome` from front-matter. Required for workflow discovery.",
+    ),
+    tag: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--tag",
+            help=(
+                "Workflow discovery tag. Repeat to set multiple tags; "
+                "overrides front-matter tags."
+            ),
+        ),
+    ] = None,
     expected_version_token: str | None = typer.Option(
         None,
         "--expected-version-token",
@@ -317,52 +357,76 @@ def publish(
         help="Send an explicit empty verifier binding list, removing existing bindings.",
     ),
 ) -> None:
-    """Upload a workflow from a markdown file with YAML front-matter.
+    """Upload a workflow from a markdown file, or from stdin when FILE is `-`.
 
-    The front-matter follows the Claude Code skills convention:
+    Metadata can be passed as flags, read from YAML front-matter, or both.
+    When both are present, command-line flags win:
+
+    \b
+    goodeye workflows publish - \\
+      --name incident-postmortem \\
+      --description "Draft a postmortem from an incident transcript." \\
+      --outcome "Reduce mean-time-to-postmortem from days to hours." \\
+      --tag sre --tag postmortem
+
+    Front-matter follows the Goodeye workflow body convention:
 
     \b
     ---
     name: incident-postmortem
     description: Draft a postmortem from an incident transcript. Use when ...
-    # Optional discovery facets:
+    outcome: Reduce mean-time-to-postmortem from days to hours.
+    # Optional discovery facet:
     # tags: [sre, postmortem]
-    # outcome: Reduce mean-time-to-postmortem from days to hours.
     ---
 
-    Only ``name`` and ``description`` are required. Everything else is optional.
+    ``name``, ``description``, and ``outcome`` are required, either as
+    flags or front-matter. Tags are optional.
 
     Workflows are always private to the caller. To share a workflow as a
     public template, run ``goodeye templates publish <workflow-uuid-or-name>`` as a
     separate, explicit step.
 
-    Verifier scripts and Truesight cURLs belong in the body as fenced code
-    blocks; the registry treats the body as opaque markdown.
+    Inline deterministic checks may live in the body as fenced code blocks.
+    Deploy LLM-judge checks separately as verifiers and reference them by
+    verifier_id or verifier_id@version.
     """
     console = Console()
-    markdown = file.read_text(encoding="utf-8")
+    markdown = _read_markdown_input(file)
     front_matter, _stripped_body = _parse_front_matter(markdown)
-    # Server stores the full markdown (including front-matter) so the workflow
-    # round-trips as a drop-in Claude Code SKILL.md.
+    # Server stores the full markdown (including front-matter) so workflow
+    # bodies round-trip through `goodeye workflows get`.
     body = markdown
 
-    effective_name: str | None = (
-        name_override or front_matter.get("name") or front_matter.get("slug")
+    effective_name = _coerce_required_text(
+        name_override
+        if name_override is not None
+        else front_matter.get("name") or front_matter.get("slug"),
+        field_name="name",
+        missing_message="Missing `name`. Add `name:` to the front-matter or pass --name.",
     )
-    if not isinstance(effective_name, str) or not effective_name:
+
+    description = _coerce_required_text(
+        description_override
+        if description_override is not None
+        else front_matter.get("description"),
+        field_name="description",
+        missing_message=(
+            "Missing `description`. Add `description:` to the front-matter "
+            "or pass --description."
+        ),
+    )
+
+    outcome, tags = _extract_discovery_facets(front_matter)
+    if outcome_override is not None:
+        outcome = _coerce_outcome(outcome_override)
+    if outcome is None:
         raise ValidationFailed(
             slug="validation_error",
-            message="Missing `name`. Add `name:` to the front-matter or pass --name.",
+            message="Missing `outcome`. Add `outcome:` to the front-matter or pass --outcome.",
         )
-
-    description = front_matter.get("description")
-    if not isinstance(description, str) or not description.strip():
-        raise ValidationFailed(
-            slug="validation_error",
-            message="Missing `description`. Add `description:` to the front-matter.",
-        )
-
-    outcome, tags = _extract_discovery_facets(front_matter, console=console)
+    if tag:
+        tags = list(tag)
     if clear_verifiers and verifier:
         raise ValidationFailed(
             slug="validation_error",
@@ -445,7 +509,9 @@ def teach(
 
     The command returns the pack content; the agent (or you, working from
     a script) follows the pack to run the teach session and persist the
-    result via 'goodeye workflows publish' with --source teach.
+    result via `goodeye workflows publish - --name <name>
+    --description <description> --outcome <outcome> --source teach
+    --expected-version-token <captured at stage 2>`.
     """
     parsed_ctx = _parse_optional_json_object(trigger_context, label="--trigger-context")
     stderr = Console(stderr=True)

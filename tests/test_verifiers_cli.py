@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 
 from goodeye_cli.app import app
 from goodeye_cli.config import ConfigPaths, save_credentials
+from goodeye_cli.errors import ValidationFailed
 
 SERVER = "https://example.test"
 runner = CliRunner()
@@ -207,6 +208,126 @@ def test_verifiers_deploy_posts_json_body(
     result = runner.invoke(app, ["verifiers", "deploy", str(cfg)])
     assert result.exit_code == 0, result.output
     assert "Deployed" in result.output
+
+
+@respx.mock
+def test_verifiers_deploy_reads_json_from_stdin(
+    tmp_config_paths: ConfigPaths,
+    monkeypatch,
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    payload = {
+        "name": "stdin-v",
+        "description": "Verifier from stdin.",
+        "criterion": "Pass if text is polite. Fail if text is rude.",
+        "input_contract": "text",
+        "input_fields": ["body"],
+        "few_shot_examples": [],
+    }
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        assert json.loads(request.content.decode()) == payload
+        return httpx.Response(
+            201,
+            json={
+                "verifier_id": "vid-stdin",
+                "version": 1,
+                "version_token": "tok-stdin",
+                "name": "stdin-v",
+                "status": "active",
+                "input_contract": "text",
+                "config_hash": "abc",
+            },
+        )
+
+    respx.post(f"{SERVER}/v1/verifiers").mock(side_effect=respond)
+    result = runner.invoke(app, ["verifiers", "deploy", "-"], input=json.dumps(payload))
+
+    assert result.exit_code == 0, result.output
+    assert "Deployed" in result.output
+
+
+def test_verifiers_deploy_stdin_invalid_json_errors(
+    tmp_config_paths: ConfigPaths,
+    monkeypatch,
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+
+    result = runner.invoke(app, ["verifiers", "deploy", "-"], input="{not json")
+
+    assert result.exit_code != 0
+    assert result.exception is not None
+    assert "must be valid json" in str(result.exception).lower()
+
+
+def test_verifiers_deploy_file_read_failure_errors_cleanly(
+    tmp_config_paths: ConfigPaths,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    cfg = tmp_path / "v.json"
+    cfg.write_text("{}", encoding="utf-8")
+
+    def fail_read_text(*args, **kwargs) -> str:
+        raise PermissionError("permission denied")
+
+    monkeypatch.setattr("goodeye_cli.commands.verifiers.Path.read_text", fail_read_text)
+
+    result = runner.invoke(app, ["verifiers", "deploy", str(cfg)])
+
+    assert result.exit_code != 0
+    assert result.exception is not None
+    assert "could not read verifier config" in str(result.exception).lower()
+    assert "permission denied" in str(result.exception).lower()
+
+
+def test_verifiers_deploy_missing_file_errors_cleanly(
+    tmp_config_paths: ConfigPaths,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    cfg = tmp_path / "missing.json"
+
+    result = runner.invoke(app, ["verifiers", "deploy", str(cfg)])
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ValidationFailed)
+    assert "not found" in str(result.exception).lower()
+    assert str(cfg) in str(result.exception)
+
+
+def test_verifiers_deploy_directory_path_errors_cleanly(
+    tmp_config_paths: ConfigPaths,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+
+    result = runner.invoke(app, ["verifiers", "deploy", str(tmp_path)])
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ValidationFailed)
+    assert "not a file" in str(result.exception).lower()
+    assert str(tmp_path) in str(result.exception)
+
+
+def test_verifiers_deploy_invalid_utf8_file_errors_cleanly(
+    tmp_config_paths: ConfigPaths,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    cfg = tmp_path / "invalid.json"
+    cfg.write_bytes(b"\xff")
+
+    result = runner.invoke(app, ["verifiers", "deploy", str(cfg)])
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ValidationFailed)
+    assert "utf-8" in str(result.exception).lower()
+    assert str(cfg) in str(result.exception)
 
 
 @respx.mock

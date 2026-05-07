@@ -243,8 +243,7 @@ def test_get_workflow_json_returns_detail_model() -> None:
 
 
 @respx.mock
-def test_get_workflow_json_tolerates_legacy_manifest_field() -> None:
-    """Older deploys may still echo a `manifest` field; WorkflowDetail should ignore it."""
+def test_get_workflow_json_ignores_unknown_fields() -> None:
     payload = {
         "id": "skl_1",
         "name": "example",
@@ -252,14 +251,14 @@ def test_get_workflow_json_tolerates_legacy_manifest_field() -> None:
         "version": 1,
         "body": "hello",
         "description": "ex",
-        "manifest": {"tags": ["x"]},
+        "unexpected": {"tags": ["x"]},
     }
     respx.get(f"{SERVER}/v1/workflows/example").mock(return_value=httpx.Response(200, json=payload))
     with GoodeyeClient(SERVER) as client:
         result = client.get_workflow("example", accept_markdown=False)
     assert not isinstance(result, str)
     assert result.name == "example"
-    assert not hasattr(result, "manifest")
+    assert not hasattr(result, "unexpected")
     assert result.tags == []
 
 
