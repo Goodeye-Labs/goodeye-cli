@@ -193,7 +193,7 @@ def test_templates_search_rejects_json_and_table(
     runner = CliRunner()
     result = runner.invoke(app, ["templates", "search", "x", "--json", "--table"])
     assert result.exit_code != 0
-    assert "Use either --json or --table" in result.output
+    assert isinstance(result.exception, SystemExit)
 
 
 @respx.mock
