@@ -57,7 +57,5 @@ def update(
         err=True,
     )
     run_update(method)
-    typer.echo(
-        f"Updated goodeye from {result.current_version} to {result.latest_version}."
-    )
+    typer.echo(f"Updated goodeye from {result.current_version} to {result.latest_version}.")
     typer.echo("Run `goodeye --version` to verify the new version is active.")

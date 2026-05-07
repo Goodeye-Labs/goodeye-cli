@@ -371,19 +371,12 @@ def _tool_missing_error(tool: str, argv: list[str]) -> GoodeyeError:
 
 
 def _subprocess_failed_error(argv: list[str], proc: CompletedProcess[str]) -> GoodeyeError:
-    tail_out = (proc.stdout or "").strip()[-400:]
-    tail_err = (proc.stderr or "").strip()[-400:]
-    detail_bits: list[str] = []
-    if tail_out:
-        detail_bits.append(f"stdout (tail): {tail_out}")
-    if tail_err:
-        detail_bits.append(f"stderr (tail): {tail_err}")
-    detail = "\n".join(detail_bits) if detail_bits else "no captured output"
     joined = " ".join(argv)
     return GoodeyeError(
         slug="update_command_failed",
         message=(
-            f"Update command failed (exit {proc.returncode}): {joined}\n{detail}"
+            f"Update command failed (exit {proc.returncode}): {joined}\n"
+            "See the upgrade tool's output above for the underlying error."
         ),
         hint=manual_update_commands_text(),
     )

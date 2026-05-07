@@ -44,8 +44,8 @@ Once installed, the `goodeye` command is available on your `PATH`.
 
 The CLI checks PyPI in the background (at most every four hours) and may print a short notice to **stderr** when a newer release exists. Notices are skipped in CI (`CI` set), for `--json` output, and for `goodeye update` itself so machine-readable stdout stays clean.
 
-- `goodeye update --check` — show your installed version vs PyPI and whether an upgrade exists.
-- `goodeye update` — upgrade automatically when the install method is recognized:
+- `goodeye update --check`: show your installed version vs PyPI and whether an upgrade exists.
+- `goodeye update`: upgrade automatically when the install method is recognized:
   - **uv tool:** runs `uv tool upgrade goodeye`
   - **pipx:** runs `pipx upgrade goodeye`
   - **pip:** runs `python -m pip install --upgrade goodeye` using the same interpreter as the CLI

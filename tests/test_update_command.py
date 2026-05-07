@@ -127,9 +127,7 @@ def test_goodeye_update_uv_tool_path(
     monkeypatch.setattr(
         cmd_update_module,
         "run_update",
-        lambda method, **kw: run_update(
-            method, run_cmd=fake_run_cmd, which=lambda _: "/fake/uv"
-        ),
+        lambda method, **kw: run_update(method, run_cmd=fake_run_cmd, which=lambda _: "/fake/uv"),
     )
 
     result = CliRunner().invoke(app, ["update"])
@@ -199,9 +197,7 @@ def test_goodeye_update_pip_path(
     monkeypatch.setattr(
         cmd_update_module,
         "run_update",
-        lambda method, **kw: run_update(
-            method, run_cmd=fake_run_cmd, python_executable=py
-        ),
+        lambda method, **kw: run_update(method, run_cmd=fake_run_cmd, python_executable=py),
     )
 
     result = CliRunner().invoke(app, ["update"])
@@ -235,7 +231,7 @@ def test_goodeye_update_unsupported_install(
 
 def test_run_update_subprocess_failure_includes_command_and_hint() -> None:
     def fake_run_cmd(argv: list[str]) -> CompletedProcess[str]:
-        return CompletedProcess(argv, 2, stdout="out", stderr="pip exploded")
+        return CompletedProcess(argv, 2, stdout=None, stderr=None)
 
     with pytest.raises(GoodeyeError) as excinfo:
         run_update("pip", run_cmd=fake_run_cmd, python_executable="/fake/py")
@@ -243,8 +239,10 @@ def test_run_update_subprocess_failure_includes_command_and_hint() -> None:
     err = excinfo.value
     assert err.slug == "update_command_failed"
     assert "exit 2" in err.message
-    assert "pip exploded" in err.message
     assert "pip install" in err.message or "-m pip" in err.message
+    assert "above" in err.message
+    assert err.hint is not None
+    assert "uv tool upgrade" in err.hint
 
 
 def test_run_update_oserror_from_subprocess() -> None:
@@ -310,9 +308,7 @@ def test_detect_install_method_pipx_prefix(tmp_path: Any) -> None:
 
 def test_detect_install_method_editable_direct_url_unsupported(tmp_path: Any) -> None:
     prefix, pyexe = _venv_prefix(tmp_path)
-    dist = _fake_dist(
-        direct_url={"url": "file:///src/goodeye", "dir_info": {"editable": True}}
-    )
+    dist = _fake_dist(direct_url={"url": "file:///src/goodeye", "dir_info": {"editable": True}})
     assert (
         detect_install_method(
             sys_executable=str(pyexe),
