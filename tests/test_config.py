@@ -31,6 +31,7 @@ def test_get_config_paths_uses_xdg(tmp_path: Path) -> None:
     assert paths.config_dir == tmp_path / "goodeye"
     assert paths.credentials_file == tmp_path / "goodeye" / "credentials.json"
     assert paths.config_file == tmp_path / "goodeye" / "config.json"
+    assert paths.update_check_file == tmp_path / "goodeye" / "update-check.json"
 
 
 def test_get_config_paths_defaults_to_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
