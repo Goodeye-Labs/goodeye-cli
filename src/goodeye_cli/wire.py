@@ -391,7 +391,7 @@ class VerifierSummary(_WireBase):
     current_version: int
     status: str
     version_token: str
-    updated_at: str
+    updated_at: datetime | None = None
     role: str | None = None
     source_workflow_id: str | None = None
 
