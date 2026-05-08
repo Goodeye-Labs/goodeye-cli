@@ -21,6 +21,7 @@ from goodeye_cli.commands import register as register_cmd
 from goodeye_cli.commands import teams as teams_cmds
 from goodeye_cli.commands import templates as templates_cmds
 from goodeye_cli.commands import update as update_cmd
+from goodeye_cli.commands import usage as usage_cmd
 from goodeye_cli.commands import verifiers as verifiers_cmds
 from goodeye_cli.commands import whoami as whoami_cmd
 from goodeye_cli.commands import workflows as workflows_cmds
@@ -41,6 +42,7 @@ app.command("register-verify")(register_cmd.register_verify)
 app.command("logout")(logout_cmd.logout)
 app.command("update")(update_cmd.update)
 app.command("whoami")(whoami_cmd.whoami)
+app.command("usage")(usage_cmd.usage)
 app.command("design")(design_cmd.design)
 
 # Command groups.

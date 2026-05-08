@@ -43,6 +43,7 @@ from goodeye_cli.wire import (
     TemplateTransferOwnershipResult,
     TemplateUndeleteResult,
     TemplateUnpublishResult,
+    UsageResponse,
     VerifierDeployResult,
     VerifierList,
     VerifierRevokeResult,
@@ -192,6 +193,10 @@ class GoodeyeClient:
     def get_me(self) -> MeResponse:
         response = self._request("GET", "/v1/me")
         return MeResponse.model_validate(response.json())
+
+    def get_usage(self) -> UsageResponse:
+        response = self._request("GET", "/v1/me/usage")
+        return UsageResponse.model_validate(response.json())
 
     def claim_handle(self, handle: str) -> ClaimHandleResult:
         response = self._request("PATCH", "/v1/me", json_body={"handle": handle})
