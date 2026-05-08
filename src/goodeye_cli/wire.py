@@ -209,6 +209,7 @@ class TemplateSummary(_WireBase):
     outcome: str = ""
     tags: list[str] = Field(default_factory=list)
     publishing_handle: str
+    safety_verification_status: str = "unverified"
     published_at: datetime | None = None
 
 
@@ -262,15 +263,23 @@ class TemplateDetail(_WireBase):
     release_notes: str | None = None
     publishing_handle: str
     safety_verification_status: str = "unverified"
+    safety_verification: TemplateSafetyVerification | None = None
     published_at: datetime | None = None
     unpublished_at: datetime | None = None
     verifier_snapshots: list[TemplateVerifierSnapshotWire] = Field(default_factory=list)
+
+
+class TemplateSafetyVerification(_WireBase):
+    status: str = "unverified"
+    advisory_run_id: str | None = None
+    advisory_reasoning: str | None = None
 
 
 class TemplatePublishResult(_WireBase):
     template_id: str
     version: int
     publishing_handle: str
+    safety_verification: TemplateSafetyVerification | None = None
 
 
 class TemplateUnpublishResult(_WireBase):
