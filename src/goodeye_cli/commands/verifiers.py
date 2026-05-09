@@ -216,8 +216,8 @@ def list_cmd(
     table.add_column("Source wf")
     table.add_column("Description")
     for item in items:
-        role = item.role or "—"
-        src = item.source_workflow_id or "—"
+        role = item.role or "-"
+        src = item.source_workflow_id or "-"
         table.add_row(
             item.verifier_id,
             item.name,

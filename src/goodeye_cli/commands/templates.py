@@ -308,8 +308,8 @@ def fork(
         console.print()
         console.print("[bold]Semantic verifiers pinned on this fork[/bold]")
         for ref in result.verifiers:
-            role = ref.role or "—"
-            src = ref.source_workflow_id or "—"
+            role = ref.role or "-"
+            src = ref.source_workflow_id or "-"
             console.print(
                 f"  • [cyan]{ref.name}[/cyan] → {ref.verifier_id}  "
                 f"[dim](role={role}, source_workflow_id={src})[/dim]"
