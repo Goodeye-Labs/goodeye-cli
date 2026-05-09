@@ -31,6 +31,22 @@ class MeResponse(_WireBase):
     handle_claimed_at: datetime | None = None
 
 
+class UsageResponse(_WireBase):
+    """Monthly credit usage summary returned by GET /v1/me/usage.
+
+    Money-shaped fields are strings to preserve exact decimal values across
+    the wire (callers parse them with ``Decimal`` or ``float`` as needed).
+    """
+
+    tier: str
+    period_start: datetime
+    period_end: datetime
+    granted_usd: str
+    used_usd: str
+    remaining_usd: str
+    unpaid_balance_usd: str
+
+
 class ClaimHandleResult(_WireBase):
     handle: str
     claimed_at: datetime | None = None
