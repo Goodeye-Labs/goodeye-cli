@@ -367,7 +367,7 @@ class TeamList(_WireBase):
 
 class TeamMember(_WireBase):
     user_id: str
-    email: str
+    email: str | None = None
     handle: str | None = None
     role: str
 
@@ -440,3 +440,51 @@ class VerifierRevokeResult(_WireBase):
     verifier_id: str
     name: str
     revoked: bool
+
+
+# ----- invitations -----
+
+
+class InvitationSummary(_WireBase):
+    id: str
+    kind: str
+    target_id: str
+    target_label: str
+    proposed_by_handle: str
+    proposed_to_handle: str
+    created_at: datetime
+    expires_at: datetime
+    resolved_at: datetime | None = None
+    resolution: str | None = None
+
+
+class InvitationList(_WireBase):
+    items: list[InvitationSummary]
+    next_cursor: str | None = None
+
+
+class InvitationAcceptResult(_WireBase):
+    """Shape of the action performed on accept (varies by invitation kind)."""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class InvitationDeclineResult(_WireBase):
+    invitation_id: str
+    resolution: str
+
+
+class InvitationCancelResult(_WireBase):
+    invitation_id: str
+    resolution: str
+
+
+# ----- invite-envelope shapes for propose operations -----
+
+
+class InvitationEnvelope(_WireBase):
+    """Returned by propose operations when an invitation is created."""
+
+    invitation_id: str
+    kind: str
+    expires_at: datetime
