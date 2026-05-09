@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 
 @dataclass
@@ -17,7 +17,11 @@ class GoodeyeError(Exception):
         hint: Optional suggested next step for the user.
         status_code: HTTP status code associated with the error, when the error
             originated from a server response.
+        exit_code: Process exit code. Defaults to 1; subclasses may override
+            to let scripts distinguish error categories.
     """
+
+    exit_code: ClassVar[int] = 1
 
     slug: str
     message: str
@@ -64,6 +68,25 @@ class ServerError(GoodeyeError):
     """Generic 5xx or unknown error from the server."""
 
 
+class SafetyVerificationFailed(GoodeyeError):
+    """Publish blocked: the hard-block safety rubric rejected the template body.
+
+    Exit code 2 so callers can distinguish "template rejected" from other errors.
+    The judge's reasoning is in ``message``; the run id is in ``extras["verifier_run_id"]``.
+    """
+
+    exit_code: ClassVar[int] = 2
+
+
+class SafetyVerificationUnavailable(GoodeyeError):
+    """Publish failed: the safety verifier runtime was unreachable or errored.
+
+    Exit code 3 so callers can distinguish "judge is down" from "template rejected".
+    """
+
+    exit_code: ClassVar[int] = 3
+
+
 _SLUG_MAP: dict[str, type[GoodeyeError]] = {
     "auth_required": AuthRequired,
     "invalid_credentials": InvalidCredentials,
@@ -75,6 +98,8 @@ _SLUG_MAP: dict[str, type[GoodeyeError]] = {
     "conflict": Conflict,
     "handle_already_claimed": Conflict,
     "internal_error": ServerError,
+    "safety_verification_failed": SafetyVerificationFailed,
+    "safety_verification_unavailable": SafetyVerificationUnavailable,
 }
 
 
@@ -94,7 +119,7 @@ def error_from_body(
         extras: dict[str, Any] = {}
     else:
         slug = str(body["error"])
-        raw_message = body.get("message")
+        raw_message = body.get("message") or body.get("reasoning")
         message = str(raw_message) if isinstance(raw_message, str) else f"HTTP {status_code}"
         raw_hint = body.get("hint")
         hint = str(raw_hint) if isinstance(raw_hint, str) else None
