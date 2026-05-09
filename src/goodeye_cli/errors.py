@@ -68,6 +68,14 @@ class ServerError(GoodeyeError):
     """Generic 5xx or unknown error from the server."""
 
 
+class AccountSuspended(GoodeyeError):
+    """Caller's account has been suspended (HTTP 403, slug=account_suspended)."""
+
+
+class BudgetExhausted(GoodeyeError):
+    """Caller's monthly credit budget has been exhausted (HTTP 402, slug=budget_exhausted)."""
+
+
 class SafetyVerificationFailed(GoodeyeError):
     """Publish blocked: the hard-block safety rubric rejected the template body.
 
@@ -98,6 +106,8 @@ _SLUG_MAP: dict[str, type[GoodeyeError]] = {
     "conflict": Conflict,
     "handle_already_claimed": Conflict,
     "internal_error": ServerError,
+    "account_suspended": AccountSuspended,
+    "budget_exhausted": BudgetExhausted,
     "safety_verification_failed": SafetyVerificationFailed,
     "safety_verification_unavailable": SafetyVerificationUnavailable,
 }
