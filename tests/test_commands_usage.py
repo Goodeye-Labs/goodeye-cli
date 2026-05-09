@@ -203,9 +203,7 @@ def test_usage_command_renders_account_suspended(
 
 
 @respx.mock
-def test_usage_command_renders_budget_exhausted(
-    tmp_config_paths: ConfigPaths, monkeypatch
-) -> None:
+def test_usage_command_renders_budget_exhausted(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE")
     respx.get(f"{SERVER}/v1/me/usage").mock(
         return_value=httpx.Response(
