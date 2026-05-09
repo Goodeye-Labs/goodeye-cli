@@ -1022,13 +1022,14 @@ def test_workflows_grants_defaults_to_compact_json_envelope(
 @respx.mock
 def test_workflows_transfer_ownership_command(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
+    inv_id = "dddddddd-dddd-dddd-dddd-dddddddddddd"
     route = respx.post(f"{SERVER}/v1/workflows/wf_1/transfer-ownership").mock(
         return_value=httpx.Response(
             200,
             json={
-                "workflow_id": "wf_1",
-                "owner_user_id": "user_2",
-                "transferred": True,
+                "invitation_id": inv_id,
+                "kind": "workflow_ownership_transfer",
+                "expires_at": "2026-02-01T00:00:00Z",
             },
         )
     )
@@ -1039,8 +1040,8 @@ def test_workflows_transfer_ownership_command(tmp_config_paths: ConfigPaths, mon
     assert result.exit_code == 0, result.output
     body = _json.loads(route.calls.last.request.content.decode())
     assert body["new_owner_user_id_or_email"] == "new@example.com"
-    assert "Transferred" in result.output
-    assert "user_2" in result.output
+    assert "transfer invited" in result.output
+    assert inv_id in result.output
 
 
 def test_parse_front_matter_extracts_unknown_nested_fields() -> None:

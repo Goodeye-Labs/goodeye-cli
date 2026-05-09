@@ -27,6 +27,10 @@ from goodeye_cli.wire import (
     ClientConfig,
     DeviceAuthResponse,
     ExchangeResult,
+    InvitationAcceptResult,
+    InvitationCancelResult,
+    InvitationDeclineResult,
+    InvitationList,
     MeResponse,
     RenameHandleResult,
     TeamCreated,
@@ -40,7 +44,6 @@ from goodeye_cli.wire import (
     TemplateList,
     TemplatePublishResult,
     TemplateSearchResponse,
-    TemplateTransferOwnershipResult,
     TemplateUndeleteResult,
     TemplateUnpublishResult,
     UsageResponse,
@@ -60,7 +63,6 @@ from goodeye_cli.wire import (
     WorkflowSaveResult,
     WorkflowSearchResponse,
     WorkflowTeachResult,
-    WorkflowTransferOwnershipResult,
 )
 
 
@@ -352,13 +354,13 @@ class GoodeyeClient:
 
     def transfer_workflow_ownership(
         self, workflow_id: str, new_owner_user_id_or_email: str
-    ) -> WorkflowTransferOwnershipResult:
+    ) -> dict[str, Any]:
         response = self._request(
             "POST",
             f"/v1/workflows/{workflow_id}/transfer-ownership",
             json_body={"new_owner_user_id_or_email": new_owner_user_id_or_email},
         )
-        return WorkflowTransferOwnershipResult.model_validate(response.json())
+        return response.json()
 
     def lookup_workflow_lineage(self, id_or_slug: str) -> WorkflowLineage:
         response = self._request("GET", f"/v1/workflows/{id_or_slug}/lineage")
@@ -522,13 +524,13 @@ class GoodeyeClient:
 
     def transfer_template_ownership(
         self, template_id: str, new_owner_user_id_or_email: str
-    ) -> TemplateTransferOwnershipResult:
+    ) -> dict[str, Any]:
         response = self._request(
             "POST",
             f"/v1/templates/{template_id}/transfer-ownership",
             json_body={"new_owner_user_id_or_email": new_owner_user_id_or_email},
         )
-        return TemplateTransferOwnershipResult.model_validate(response.json())
+        return response.json()
 
     # ----- teams -----
     def create_team(self, handle: str) -> TeamCreated:
@@ -635,6 +637,39 @@ class GoodeyeClient:
     def revoke_verifier(self, verifier_id: str) -> VerifierRevokeResult:
         response = self._request("DELETE", f"/v1/verifiers/{verifier_id}")
         return VerifierRevokeResult.model_validate(response.json())
+
+    # ----- invitations -----
+    def list_invitations(
+        self,
+        *,
+        filter_: str | None = None,
+        state: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> InvitationList:
+        params: dict[str, Any] = {}
+        if filter_:
+            params["filter"] = filter_
+        if state:
+            params["state"] = state
+        if limit is not None:
+            params["limit"] = limit
+        if cursor:
+            params["cursor"] = cursor
+        response = self._request("GET", "/v1/invitations", params=params)
+        return InvitationList.model_validate(response.json())
+
+    def accept_invitation(self, invitation_id: str) -> InvitationAcceptResult:
+        response = self._request("POST", f"/v1/invitations/{invitation_id}/accept", json_body={})
+        return InvitationAcceptResult.model_validate(response.json())
+
+    def decline_invitation(self, invitation_id: str) -> InvitationDeclineResult:
+        response = self._request("POST", f"/v1/invitations/{invitation_id}/decline", json_body={})
+        return InvitationDeclineResult.model_validate(response.json())
+
+    def cancel_invitation(self, invitation_id: str) -> InvitationCancelResult:
+        response = self._request("POST", f"/v1/invitations/{invitation_id}/cancel", json_body={})
+        return InvitationCancelResult.model_validate(response.json())
 
     def get_design_prompt(self) -> dict[str, Any]:
         response = self._request("GET", "/v1/design/workflow-prompt")

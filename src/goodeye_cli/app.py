@@ -14,6 +14,7 @@ from goodeye_cli import __version__
 from goodeye_cli import update as update_checks
 from goodeye_cli.commands import auth as auth_cmds
 from goodeye_cli.commands import design as design_cmd
+from goodeye_cli.commands import invitations as invitations_cmds
 from goodeye_cli.commands import login as login_cmd
 from goodeye_cli.commands import logout as logout_cmd
 from goodeye_cli.commands import me as me_cmds
@@ -52,6 +53,7 @@ app.add_typer(workflows_cmds.app, name="workflows", help="Browse and manage work
 app.add_typer(templates_cmds.app, name="templates", help="Browse, publish, and fork templates.")
 app.add_typer(teams_cmds.app, name="teams", help="Manage teams.")
 app.add_typer(verifiers_cmds.app, name="verifiers", help="Deploy and run verifiers.")
+app.add_typer(invitations_cmds.app, name="invitations", help="Manage invitations.")
 
 
 def _version_callback(value: bool) -> None:
