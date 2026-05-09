@@ -104,6 +104,24 @@ def test_invitations_list_next_cursor_hint(tmp_config_paths: ConfigPaths, monkey
 
 
 @respx.mock
+def test_invitations_list_accepts_null_target_label(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """Server returns null target_label when the underlying resource was deleted."""
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE")
+    item = dict(_ITEM)
+    item["target_label"] = None
+    respx.get(f"{SERVER}/v1/invitations").mock(
+        return_value=httpx.Response(200, json={"items": [item], "next_cursor": None})
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["invitations", "list", "--json"])
+    assert result.exit_code == 0, result.output
+    parsed = json.loads(result.output)
+    assert parsed["items"][0]["target_label"] is None
+
+
+@respx.mock
 def test_invitations_accept_calls_correct_endpoint(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:

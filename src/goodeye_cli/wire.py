@@ -474,7 +474,10 @@ class InvitationSummary(_WireBase):
     id: str
     kind: str
     target_id: str
-    target_label: str
+    # target_label is None when the underlying team / workflow / template has
+    # been deleted while the invitation is still pending; pending_invitations
+    # has no FK on target_id, so the row outlives its target.
+    target_label: str | None = None
     proposed_by_handle: str
     proposed_to_handle: str
     created_at: datetime

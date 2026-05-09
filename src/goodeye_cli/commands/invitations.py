@@ -86,7 +86,7 @@ def list_cmd(
             table.add_row(
                 item.id,
                 item.kind,
-                item.target_label,
+                item.target_label or "(deleted)",
                 item.proposed_by_handle,
                 item.proposed_to_handle,
                 str(item.expires_at),
