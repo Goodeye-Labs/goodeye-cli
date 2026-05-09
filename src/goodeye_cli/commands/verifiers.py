@@ -163,7 +163,7 @@ def deploy(
                               inputs, media_url, passed, reasoning. Must satisfy
                               the contract (text-only, text+image, or image-only).
       model_settings          Optional {"model": ..., "reasoning_effort": ...}.
-                              reasoning_effort: minimal | low | medium | high.
+                              reasoning_effort: low | medium | high | xhigh.
                               Only these two fields are honored.
       expected_version_token  Required when re-deploying an existing verifier.
                               Get the current token from `goodeye verifiers list`
