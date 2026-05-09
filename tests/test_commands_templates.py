@@ -675,9 +675,7 @@ def test_fork_with_no_verifiers_omits_verifier_section(
 
 
 @respx.mock
-def test_templates_publish_clean_shows_verified(
-    tmp_config_paths: ConfigPaths, monkeypatch
-) -> None:
+def test_templates_publish_clean_shows_verified(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
     respx.post(f"{SERVER}/v1/templates").mock(
         return_value=httpx.Response(
@@ -751,9 +749,7 @@ def test_templates_publish_no_safety_block_is_silent(
 
 
 @respx.mock
-def test_templates_publish_blocked_exits_2(
-    tmp_config_paths: ConfigPaths, monkeypatch
-) -> None:
+def test_templates_publish_blocked_exits_2(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
     respx.post(f"{SERVER}/v1/templates").mock(
         return_value=httpx.Response(

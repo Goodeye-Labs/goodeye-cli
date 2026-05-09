@@ -236,10 +236,10 @@ def publish(
             result = client.publish_template_version(workflow_ref, release_notes=release_notes)
     except SafetyVerificationFailed as exc:
         stderr.print(f"[bold red]safety_verification_failed[/bold red]: {exc.message}")
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=2) from exc
     except SafetyVerificationUnavailable as exc:
         stderr.print(f"[bold red]safety_verification_unavailable[/bold red]: {exc.message}")
-        raise typer.Exit(code=3)
+        raise typer.Exit(code=3) from exc
     console.print(
         f"[green]Published[/green] template {result.template_id} v{result.version} "
         f"as @{result.publishing_handle}"
