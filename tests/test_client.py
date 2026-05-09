@@ -44,7 +44,6 @@ def test_run_verifier_anonymous_omits_authorization_with_api_key_client() -> Non
     payload = {
         "verifier_run_id": None,
         "anonymous_verifier_run_id": "anon-1",
-        "remaining_anonymous_runs": 4,
         "verifier_id": verifier_id,
         "version": 1,
         "status": "success",
@@ -66,7 +65,6 @@ def test_run_verifier_anonymous_omits_authorization_with_api_key_client() -> Non
         )
     assert result.passed is True
     assert result.anonymous_verifier_run_id == "anon-1"
-    assert result.remaining_anonymous_runs == 4
     assert route.call_count == 1
     assert route.calls.last.request.headers.get("Authorization") is None
 

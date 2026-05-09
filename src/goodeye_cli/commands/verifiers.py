@@ -296,8 +296,9 @@ def run(
         False,
         "--anonymous",
         help=(
-            "Do not send credentials (anonymous public preview; strict rate "
-            "limits). Requires a verifier UUID or system:<name>."
+            "Do not send credentials (anonymous public preview; spend is gated "
+            "by a small per-IP credit budget). Requires a verifier UUID or "
+            "system:<name>."
         ),
     ),
     json_output: bool = typer.Option(False, "--json", help="Print JSON."),
@@ -357,14 +358,6 @@ def run(
     console.print(f"[bold {color}]{label}[/bold {color}] verifier_run_id={run_id_display}")
     if result.reasoning:
         console.print(result.reasoning)
-    if anonymous and result.remaining_anonymous_runs is not None:
-        remaining = result.remaining_anonymous_runs
-        unit = "run" if remaining == 1 else "runs"
-        tone = "yellow" if remaining <= 1 else "dim"
-        console.print(
-            f"[{tone}]{remaining} anonymous {unit} remaining today "
-            f"(per-IP cap; sign up for a free account for higher limits).[/{tone}]"
-        )
 
 
 @app.command("show")

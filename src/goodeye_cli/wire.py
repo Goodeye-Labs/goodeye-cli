@@ -449,7 +449,6 @@ class VerifierVersionDetail(_WireBase):
 class VerifierRunResult(_WireBase):
     verifier_run_id: str | None = None
     anonymous_verifier_run_id: str | None = None
-    remaining_anonymous_runs: int | None = None
     verifier_id: str
     version: int
     status: str
