@@ -95,9 +95,7 @@ def test_invitations_list_json_output(tmp_config_paths: ConfigPaths, monkeypatch
 def test_invitations_list_next_cursor_hint(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE")
     respx.get(f"{SERVER}/v1/invitations").mock(
-        return_value=httpx.Response(
-            200, json={"items": [_ITEM], "next_cursor": "tok_abc"}
-        )
+        return_value=httpx.Response(200, json={"items": [_ITEM], "next_cursor": "tok_abc"})
     )
     runner = CliRunner()
     result = runner.invoke(app, ["invitations", "list", "--table"])
@@ -140,9 +138,7 @@ def test_invitations_decline_calls_correct_endpoint(
 ) -> None:
     _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE")
     route = respx.post(f"{SERVER}/v1/invitations/{_INV_ID}/decline").mock(
-        return_value=httpx.Response(
-            200, json={"invitation_id": _INV_ID, "resolution": "declined"}
-        )
+        return_value=httpx.Response(200, json={"invitation_id": _INV_ID, "resolution": "declined"})
     )
     runner = CliRunner()
     result = runner.invoke(app, ["invitations", "decline", _INV_ID])
@@ -157,9 +153,7 @@ def test_invitations_cancel_calls_correct_endpoint(
 ) -> None:
     _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE")
     route = respx.post(f"{SERVER}/v1/invitations/{_INV_ID}/cancel").mock(
-        return_value=httpx.Response(
-            200, json={"invitation_id": _INV_ID, "resolution": "cancelled"}
-        )
+        return_value=httpx.Response(200, json={"invitation_id": _INV_ID, "resolution": "cancelled"})
     )
     runner = CliRunner()
     result = runner.invoke(app, ["invitations", "cancel", _INV_ID])
