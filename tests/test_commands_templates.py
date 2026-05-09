@@ -62,7 +62,7 @@ def test_templates_list_defaults_to_compact_json_envelope(
         '{"items":[{"id":"tpl_01","slug":"demo","name":"demo","handle":"h",'
         '"owner_user_id":"user_1","latest_version":2,"description":"",'
         '"outcome":"demo outcome","tags":[],"publishing_handle":"h",'
-        '"published_at":null}],"next_cursor":"next"}\n'
+        '"safety_verification_status":"unverified","published_at":null}],"next_cursor":"next"}\n'
     )
     params = dict(route.calls.last.request.url.params)
     assert params["filter"] == "all"
@@ -672,3 +672,162 @@ def test_fork_with_no_verifiers_omits_verifier_section(
     result = runner.invoke(app, ["templates", "fork", "sample"])
     assert result.exit_code == 0, result.output
     assert "verifier" not in result.stdout.lower()
+
+
+@respx.mock
+def test_templates_publish_clean_shows_verified(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.post(f"{SERVER}/v1/templates").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "template_id": "tpl_01",
+                "version": 1,
+                "publishing_handle": "h",
+                "safety_verification": {
+                    "status": "clean",
+                    "advisory_run_id": "11111111-1111-1111-1111-111111111111",
+                },
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "publish", "my-workflow"])
+    assert result.exit_code == 0, result.output
+    assert "Published" in result.output
+    assert "verified" in result.output
+
+
+@respx.mock
+def test_templates_publish_flagged_shows_warning_and_reasoning(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.post(f"{SERVER}/v1/templates").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "template_id": "tpl_02",
+                "version": 1,
+                "publishing_handle": "h",
+                "safety_verification": {
+                    "status": "flagged",
+                    "advisory_run_id": "22222222-2222-2222-2222-222222222222",
+                    "advisory_reasoning": "Broad scope detected.",
+                },
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "publish", "my-workflow"])
+    assert result.exit_code == 0, result.output
+    assert "Published" in result.output
+    assert "advisory concerns flagged" in result.output
+    assert "Broad scope detected." in result.output
+
+
+@respx.mock
+def test_templates_publish_no_safety_block_is_silent(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.post(f"{SERVER}/v1/templates").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "template_id": "tpl_03",
+                "version": 1,
+                "publishing_handle": "h",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "publish", "my-workflow"])
+    assert result.exit_code == 0, result.output
+    assert "Published" in result.output
+    assert "safety" not in result.output.lower()
+
+
+@respx.mock
+def test_templates_publish_blocked_exits_2(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.post(f"{SERVER}/v1/templates").mock(
+        return_value=httpx.Response(
+            422,
+            json={
+                "error": "safety_verification_failed",
+                "verifier_run_id": "11111111-1111-1111-1111-111111111111",
+                "reasoning": "Template contains instruction override patterns.",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "publish", "my-workflow"])
+    assert result.exit_code == 2
+    assert "safety_verification_failed" in result.output
+    assert "instruction override" in result.output
+
+
+@respx.mock
+def test_templates_publish_verifier_unavailable_exits_3(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.post(f"{SERVER}/v1/templates").mock(
+        return_value=httpx.Response(
+            503,
+            json={
+                "error": "safety_verification_unavailable",
+                "message": "Safety verifier runtime timed out.",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "publish", "my-workflow"])
+    assert result.exit_code == 3
+    assert "safety_verification_unavailable" in result.output
+
+
+@respx.mock
+def test_templates_list_table_shows_safety_column(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_no_creds(monkeypatch, tmp_config_paths)
+    respx.get(f"{SERVER}/v1/templates").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "id": "tpl_01",
+                        "slug": "clean-workflow",
+                        "name": "clean-workflow",
+                        "handle": "h",
+                        "owner_user_id": "user_1",
+                        "latest_version": 1,
+                        "outcome": "outcome",
+                        "publishing_handle": "h",
+                        "safety_verification_status": "clean",
+                    },
+                    {
+                        "id": "tpl_02",
+                        "slug": "flagged-workflow",
+                        "name": "flagged-workflow",
+                        "handle": "h",
+                        "owner_user_id": "user_1",
+                        "latest_version": 1,
+                        "outcome": "outcome",
+                        "publishing_handle": "h",
+                        "safety_verification_status": "flagged",
+                    },
+                ],
+                "next_cursor": None,
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "list", "--table"])
+    assert result.exit_code == 0, result.output
+    assert "Safety" in result.output
+    assert "verified" in result.output
+    assert "advisory" in result.output
