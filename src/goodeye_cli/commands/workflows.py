@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 import sys
 from pathlib import Path
@@ -498,34 +497,9 @@ def lineage(
     )
 
 
-def _parse_optional_json_object(raw: str | None, *, label: str) -> dict[str, Any] | None:
-    if raw is None:
-        return None
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ValidationFailed(
-            slug="validation_error",
-            message=f"{label} must be valid JSON.",
-        ) from exc
-    if parsed is None:
-        return None
-    if not isinstance(parsed, dict):
-        raise ValidationFailed(
-            slug="validation_error",
-            message=f"{label} must be a JSON object or null.",
-        )
-    return parsed
-
-
 @app.command("teach")
 def teach(
     workflow_id: str = typer.Argument(..., help="Workflow UUID or name to teach"),
-    trigger_context: str | None = typer.Option(
-        None,
-        "--trigger-context",
-        help="Optional opaque JSON object echoed in the teach result.",
-    ),
 ) -> None:
     """Fetch the teach SKILL pack for an existing workflow.
 
@@ -535,14 +509,10 @@ def teach(
     --description <description> --outcome <outcome> --source teach
     --expected-version-token <captured at stage 2>`.
     """
-    parsed_ctx = _parse_optional_json_object(trigger_context, label="--trigger-context")
     stderr = Console(stderr=True)
     with _client(require_auth=True) as client:
-        result = client.teach_workflow(workflow_id, trigger_context=parsed_ctx)
+        result = client.teach_workflow(workflow_id)
     stderr.print(f"[bold]workflow_id:[/bold] {result.workflow_id}")
-    if result.trigger_context_echo:
-        stderr.print("[bold]trigger_context_echo:[/bold]")
-        stderr.print_json(data=result.trigger_context_echo)
     # Write skill_md raw to stdout so markdown link syntax (`[text](url)`) is not
     # parsed as Rich markup, line wrapping is left to the caller, and piping into
     # an agent or file produces a clean SKILL.md.

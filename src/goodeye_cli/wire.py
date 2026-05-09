@@ -211,7 +211,6 @@ class WorkflowLineage(_WireBase):
 class WorkflowTeachResult(_WireBase):
     workflow_id: str
     skill_md: str
-    trigger_context_echo: dict[str, Any] | None = None
 
 
 class TemplateSummary(_WireBase):

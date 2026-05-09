@@ -366,20 +366,8 @@ class GoodeyeClient:
         response = self._request("GET", f"/v1/workflows/{id_or_slug}/lineage")
         return WorkflowLineage.model_validate(response.json())
 
-    def teach_workflow(
-        self,
-        workflow_id: str,
-        *,
-        trigger_context: dict[str, Any] | None = None,
-    ) -> WorkflowTeachResult:
-        payload: dict[str, Any] = {}
-        if trigger_context is not None:
-            payload["trigger_context"] = trigger_context
-        response = self._request(
-            "POST",
-            f"/v1/workflows/{workflow_id}/teach",
-            json_body=payload,
-        )
+    def teach_workflow(self, workflow_id: str) -> WorkflowTeachResult:
+        response = self._request("POST", f"/v1/workflows/{workflow_id}/teach")
         return WorkflowTeachResult.model_validate(response.json())
 
     # ----- templates -----
