@@ -206,6 +206,10 @@ class WorkflowLineage(_WireBase):
     parent_template_version: int | None = None
     upstream_latest_version: int | None = None
     is_upstream_unpublished: bool | None = None
+    parent_template_deleted_at: str | None = None
+    parent_template_delete_reason: str | None = None
+    parent_version_deprecated_at: str | None = None
+    parent_version_deprecation_message: str | None = None
 
 
 class WorkflowTeachResult(_WireBase):

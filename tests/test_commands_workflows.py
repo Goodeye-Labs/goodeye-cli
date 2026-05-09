@@ -1044,6 +1044,119 @@ def test_workflows_transfer_ownership_command(tmp_config_paths: ConfigPaths, mon
     assert inv_id in result.output
 
 
+@respx.mock
+def test_workflows_lineage_renders_not_a_fork(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.get(f"{SERVER}/v1/workflows/wf_1/lineage").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "workflow_id": "wf_1",
+                "parent_template_id": None,
+                "parent_template_version": None,
+                "upstream_latest_version": None,
+                "is_upstream_unpublished": None,
+                "parent_template_deleted_at": None,
+                "parent_template_delete_reason": None,
+                "parent_version_deprecated_at": None,
+                "parent_version_deprecation_message": None,
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "lineage", "wf_1"])
+    assert result.exit_code == 0, result.output
+    assert "Not a fork" in result.output
+
+
+@respx.mock
+def test_workflows_lineage_renders_clean_fork(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.get(f"{SERVER}/v1/workflows/wf_1/lineage").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "workflow_id": "wf_1",
+                "parent_template_id": "tpl_1",
+                "parent_template_version": 2,
+                "upstream_latest_version": 3,
+                "is_upstream_unpublished": False,
+                "parent_template_deleted_at": None,
+                "parent_template_delete_reason": None,
+                "parent_version_deprecated_at": None,
+                "parent_version_deprecation_message": None,
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "lineage", "wf_1"])
+    assert result.exit_code == 0, result.output
+    assert "tpl_1" in result.output
+    assert "deleted" not in result.output.lower()
+    assert "deprecated" not in result.output.lower()
+
+
+@respx.mock
+def test_workflows_lineage_surfaces_deleted_and_deprecated_parent(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.get(f"{SERVER}/v1/workflows/wf_1/lineage").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "workflow_id": "wf_1",
+                "parent_template_id": "tpl_1",
+                "parent_template_version": 2,
+                "upstream_latest_version": 3,
+                "is_upstream_unpublished": False,
+                "parent_template_deleted_at": "2026-04-01T00:00:00Z",
+                "parent_template_delete_reason": "retired",
+                "parent_version_deprecated_at": "2026-03-15T00:00:00Z",
+                "parent_version_deprecation_message": "please move to v3",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "lineage", "wf_1"])
+    assert result.exit_code == 0, result.output
+    assert "deleted" in result.output.lower()
+    assert "retired" in result.output
+    assert "deprecated" in result.output.lower()
+    assert "please move to v3" in result.output
+
+
+@respx.mock
+def test_workflows_lineage_json_includes_all_fields(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.get(f"{SERVER}/v1/workflows/wf_1/lineage").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "workflow_id": "wf_1",
+                "parent_template_id": "tpl_1",
+                "parent_template_version": 2,
+                "upstream_latest_version": 3,
+                "is_upstream_unpublished": False,
+                "parent_template_deleted_at": "2026-04-01T00:00:00Z",
+                "parent_template_delete_reason": "retired",
+                "parent_version_deprecated_at": "2026-03-15T00:00:00Z",
+                "parent_version_deprecation_message": "please move to v3",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "lineage", "wf_1", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = _json.loads(result.output)
+    assert payload["parent_template_deleted_at"] == "2026-04-01T00:00:00Z"
+    assert payload["parent_template_delete_reason"] == "retired"
+    assert payload["parent_version_deprecated_at"] == "2026-03-15T00:00:00Z"
+    assert payload["parent_version_deprecation_message"] == "please move to v3"
+
+
 def test_parse_front_matter_extracts_unknown_nested_fields() -> None:
     source = "---\nname: foo\ndescription: bar\nunknown:\n  outcome: x\n---\nBody text\n"
     fm, body = _parse_front_matter(source)

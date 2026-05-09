@@ -495,6 +495,18 @@ def lineage(
         f"upstream latest: v{result.upstream_latest_version}; "
         f"upstream unpublished at pinned version: {result.is_upstream_unpublished}."
     )
+    if result.parent_template_deleted_at is not None:
+        reason = result.parent_template_delete_reason or "no reason given"
+        console.print(
+            f"[yellow]Parent template deleted[/yellow] "
+            f"at {result.parent_template_deleted_at} ({reason})."
+        )
+    if result.parent_version_deprecated_at is not None:
+        message = result.parent_version_deprecation_message or "no message"
+        console.print(
+            f"[yellow]Pinned version deprecated[/yellow] "
+            f"at {result.parent_version_deprecated_at}: {message}."
+        )
 
 
 @app.command("teach")
