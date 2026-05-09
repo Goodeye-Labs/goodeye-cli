@@ -397,13 +397,14 @@ def test_team_client_methods_send_identifier_payloads() -> None:
 
 @respx.mock
 def test_transfer_workflow_ownership_client_method() -> None:
+    inv_id = "dddddddd-dddd-dddd-dddd-dddddddddddd"
     route = respx.post(f"{SERVER}/v1/workflows/wf_1/transfer-ownership").mock(
         return_value=httpx.Response(
             200,
             json={
-                "workflow_id": "wf_1",
-                "owner_user_id": "user_2",
-                "transferred": True,
+                "invitation_id": inv_id,
+                "kind": "workflow_ownership_transfer",
+                "expires_at": "2026-02-01T00:00:00Z",
             },
         )
     )
@@ -413,9 +414,9 @@ def test_transfer_workflow_ownership_client_method() -> None:
 
     body = _json.loads(route.calls.last.request.content.decode())
     assert body["new_owner_user_id_or_email"] == "new@example.com"
-    assert result.workflow_id == "wf_1"
-    assert result.owner_user_id == "user_2"
-    assert result.transferred is True
+    assert isinstance(result, dict)
+    assert result["invitation_id"] == inv_id
+    assert result["kind"] == "workflow_ownership_transfer"
 
 
 @respx.mock

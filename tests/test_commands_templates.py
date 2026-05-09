@@ -505,13 +505,14 @@ def test_templates_deprecate_version_validation_error(
 @respx.mock
 def test_templates_transfer_ownership_success(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
+    inv_id = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
     respx.post(f"{SERVER}/v1/templates/tpl_01/transfer-ownership").mock(
         return_value=httpx.Response(
             200,
             json={
-                "template_id": "tpl_01",
-                "owner_user_id": "user_2",
-                "transferred": True,
+                "invitation_id": inv_id,
+                "kind": "template_ownership_transfer",
+                "expires_at": "2026-02-01T00:00:00Z",
             },
         )
     )
@@ -521,8 +522,8 @@ def test_templates_transfer_ownership_success(tmp_config_paths: ConfigPaths, mon
         ["templates", "transfer-ownership", "tpl_01", "new@example.com"],
     )
     assert result.exit_code == 0, result.output
-    assert "Transferred" in result.output
-    assert "user_2" in result.output
+    assert "transfer invited" in result.output
+    assert inv_id in result.output
 
 
 @respx.mock
@@ -533,7 +534,11 @@ def test_templates_transfer_ownership_accepts_handle(
     route = respx.post(f"{SERVER}/v1/templates/tpl_01/transfer-ownership").mock(
         return_value=httpx.Response(
             200,
-            json={"template_id": "tpl_01", "owner_user_id": "user_2", "transferred": True},
+            json={
+                "invitation_id": "ffffffff-ffff-ffff-ffff-ffffffffffff",
+                "kind": "template_ownership_transfer",
+                "expires_at": "2026-02-01T00:00:00Z",
+            },
         )
     )
     runner = CliRunner()
@@ -564,7 +569,7 @@ def test_templates_transfer_ownership_already_owned(
     runner = CliRunner()
     result = runner.invoke(app, ["templates", "transfer-ownership", "tpl_01", "new@example.com"])
     assert result.exit_code == 0, result.output
-    assert "already belongs to" in result.output
+    assert "No-op" in result.output
 
 
 @respx.mock
