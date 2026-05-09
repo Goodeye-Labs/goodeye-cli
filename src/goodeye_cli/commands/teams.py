@@ -110,11 +110,10 @@ def members(
 
     table = Table(title=f"Members of {team}")
     table.add_column("User ID", no_wrap=True)
-    table.add_column("Email")
     table.add_column("Handle")
     table.add_column("Role")
     for row in rows:
-        table.add_row(row.user_id, row.email, row.handle or "", row.role)
+        table.add_row(row.user_id, row.handle or "", row.role)
     console.print(table)
 
 
@@ -122,12 +121,26 @@ def members(
 def add_member(
     team: str = typer.Argument(..., help="Team UUID or handle."),
     user: str = typer.Argument(..., help="User UUID, email, or handle."),
+    json_output: bool = typer.Option(False, "--json", help="Print the raw response as JSON."),
 ) -> None:
-    """Add a member to a team. Owner only."""
+    """Add a member to a team. Owner only. Returns an invitation the recipient must accept."""
     console = Console()
     with _require_client() as client:
-        client.add_team_member(team, user)
-    console.print(f"[green]Added[/green] {user} to team {team}")
+        body = client.add_team_member(team, user)
+    if json_output:
+        from goodeye_cli.output import echo_json as _echo_json
+
+        _echo_json(body)
+        return
+    if "invitation_id" in body:
+        console.print("Invitation sent.")
+        console.print(f"  id:         {body['invitation_id']}")
+        console.print(f"  kind:       {body.get('kind', 'team_membership')}")
+        console.print(f"  expires_at: {body.get('expires_at', '')}")
+        console.print("")
+        console.print(f"Recipient must run: goodeye invitations accept {body['invitation_id']}")
+    else:
+        console.print(f"[green]Added[/green] {user} to team {team}")
 
 
 @app.command("remove-member")
@@ -146,9 +159,22 @@ def remove_member(
 def transfer_ownership(
     team: str = typer.Argument(..., help="Team UUID or handle."),
     new_owner: str = typer.Argument(..., help="New owner UUID, email, or handle."),
+    json_output: bool = typer.Option(False, "--json", help="Print the raw response as JSON."),
 ) -> None:
-    """Transfer team ownership. Old owner becomes a regular member."""
+    """Transfer team ownership. Returns an invitation the recipient must accept."""
     console = Console()
     with _require_client() as client:
-        client.transfer_team_ownership(team, new_owner)
-    console.print(f"[green]Transferred[/green] team {team} ownership to {new_owner}")
+        body = client.transfer_team_ownership(team, new_owner)
+    if json_output:
+        from goodeye_cli.output import echo_json as _echo_json
+
+        _echo_json(body)
+        return
+    if "invitation_id" in body:
+        console.print("Ownership transfer invited.")
+        console.print(f"  id:         {body['invitation_id']}")
+        console.print(f"  expires_at: {body.get('expires_at', '')}")
+        console.print("")
+        console.print(f"Recipient must run: goodeye invitations accept {body['invitation_id']}")
+    else:
+        console.print("No-op: target is already the owner.")

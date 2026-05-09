@@ -648,15 +648,23 @@ def leave(
 def transfer_ownership(
     workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
     new_owner: str = typer.Argument(..., help="New owner UUID, email, or handle."),
+    json_output: bool = typer.Option(False, "--json", help="Print the raw response as JSON."),
 ) -> None:
-    """Transfer a workflow to another user. Owner only."""
+    """Transfer a workflow to another user. Returns an invitation the recipient must accept."""
     console = Console()
     with _client(require_auth=True) as client:
-        result = client.transfer_workflow_ownership(workflow_id, new_owner)
-    if not result.transferred:
-        console.print(f"[dim]Ownership already belongs to[/dim] {result.owner_user_id}.")
+        body = client.transfer_workflow_ownership(workflow_id, new_owner)
+    if json_output:
+        echo_json(body)
         return
-    console.print(f"[green]Transferred[/green] {workflow_id} to {result.owner_user_id}.")
+    if "invitation_id" in body:
+        console.print("Ownership transfer invited.")
+        console.print(f"  id:         {body['invitation_id']}")
+        console.print(f"  expires_at: {body.get('expires_at', '')}")
+        console.print("")
+        console.print(f"Recipient must run: goodeye invitations accept {body['invitation_id']}")
+    else:
+        console.print("No-op: target is already the owner.")
 
 
 __all__ = [
