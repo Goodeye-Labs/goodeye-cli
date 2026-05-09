@@ -46,7 +46,6 @@ def test_teach_workflow_client_posts_trigger_context() -> None:
             json={
                 "workflow_id": "wf_1",
                 "skill_md": SKILL_MD_FIXTURE,
-                "trigger_context_echo": {"source": "cli-test"},
             },
         )
     )
@@ -61,7 +60,6 @@ def test_teach_workflow_client_posts_trigger_context() -> None:
     assert body == {"trigger_context": {"source": "cli-test"}}
     assert result.workflow_id == "wf_1"
     assert result.skill_md == SKILL_MD_FIXTURE
-    assert result.trigger_context_echo == {"source": "cli-test"}
 
 
 @respx.mock
@@ -72,7 +70,6 @@ def test_teach_workflow_client_omits_trigger_context_when_none() -> None:
             json={
                 "workflow_id": "wf_1",
                 "skill_md": SKILL_MD_FIXTURE,
-                "trigger_context_echo": None,
             },
         )
     )
@@ -83,7 +80,6 @@ def test_teach_workflow_client_omits_trigger_context_when_none() -> None:
     body = _json.loads(route.calls.last.request.content.decode())
     assert body == {}
     assert result.workflow_id == "wf_1"
-    assert result.trigger_context_echo is None
 
 
 @respx.mock
@@ -97,7 +93,6 @@ def test_workflows_teach_command_prints_skill_md(
             json={
                 "workflow_id": "wf_1",
                 "skill_md": SKILL_MD_FIXTURE,
-                "trigger_context_echo": None,
             },
         )
     )
@@ -121,7 +116,6 @@ def test_workflows_teach_command_with_trigger_context(
             json={
                 "workflow_id": "wf_1",
                 "skill_md": SKILL_MD_FIXTURE,
-                "trigger_context_echo": {"source": "cli"},
             },
         )
     )

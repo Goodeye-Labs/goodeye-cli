@@ -524,7 +524,7 @@ def teach(
     trigger_context: str | None = typer.Option(
         None,
         "--trigger-context",
-        help="Optional opaque JSON object echoed in the teach result.",
+        help="Optional opaque JSON object passed to teach_workflow.",
     ),
 ) -> None:
     """Fetch the teach SKILL pack for an existing workflow.
@@ -540,9 +540,6 @@ def teach(
     with _client(require_auth=True) as client:
         result = client.teach_workflow(workflow_id, trigger_context=parsed_ctx)
     stderr.print(f"[bold]workflow_id:[/bold] {result.workflow_id}")
-    if result.trigger_context_echo:
-        stderr.print("[bold]trigger_context_echo:[/bold]")
-        stderr.print_json(data=result.trigger_context_echo)
     # Write skill_md raw to stdout so markdown link syntax (`[text](url)`) is not
     # parsed as Rich markup, line wrapping is left to the caller, and piping into
     # an agent or file produces a clean SKILL.md.
