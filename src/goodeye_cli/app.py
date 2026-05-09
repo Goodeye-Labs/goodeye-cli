@@ -112,4 +112,4 @@ def main() -> None:
         console.print(f"[bold red]{exc.slug}[/bold red]: {exc.message}")
         if exc.hint:
             console.print(f"[dim]hint: {exc.hint}[/dim]")
-        sys.exit(1)
+        sys.exit(exc.exit_code)

@@ -17,7 +17,7 @@ from rich.table import Table
 
 from goodeye_cli.client import GoodeyeClient
 from goodeye_cli.config import get_api_key, get_server
-from goodeye_cli.errors import AuthRequired
+from goodeye_cli.errors import AuthRequired, SafetyVerificationFailed, SafetyVerificationUnavailable
 from goodeye_cli.output import (
     echo_json,
     fetch_pages,
@@ -83,12 +83,22 @@ def list_cmd(
     table.add_column("Handle/Slug", no_wrap=True)
     table.add_column("Latest", justify="right")
     table.add_column("Outcome")
+    table.add_column("Safety")
     table.add_column("Published by")
     for item in items:
+        status = item.safety_verification_status
+        safety_cell = (
+            "[green]verified[/green]"
+            if status == "clean"
+            else "[yellow]advisory[/yellow]"
+            if status == "flagged"
+            else "[dim]unverified[/dim]"
+        )
         table.add_row(
             f"@{item.handle}/{item.slug}",
             f"v{item.latest_version}",
             item.outcome,
+            safety_cell,
             item.publishing_handle,
         )
     if not items:
@@ -220,12 +230,28 @@ def publish(
     handle (run ``goodeye me claim-handle`` first).
     """
     console = Console()
-    with _client(require_auth=True) as client:
-        result = client.publish_template_version(workflow_ref, release_notes=release_notes)
+    stderr = Console(stderr=True)
+    try:
+        with _client(require_auth=True) as client:
+            result = client.publish_template_version(workflow_ref, release_notes=release_notes)
+    except SafetyVerificationFailed as exc:
+        stderr.print(f"[bold red]safety_verification_failed[/bold red]: {exc.message}")
+        raise typer.Exit(code=2) from exc
+    except SafetyVerificationUnavailable as exc:
+        stderr.print(f"[bold red]safety_verification_unavailable[/bold red]: {exc.message}")
+        raise typer.Exit(code=3) from exc
     console.print(
         f"[green]Published[/green] template {result.template_id} v{result.version} "
         f"as @{result.publishing_handle}"
     )
+    sv = result.safety_verification
+    if sv is not None:
+        if sv.status == "clean":
+            console.print("[dim]Safety:[/dim] [green]verified[/green]")
+        elif sv.status == "flagged":
+            console.print("[dim]Safety:[/dim] [yellow]advisory concerns flagged[/yellow]")
+            if sv.advisory_reasoning:
+                console.print(f"[dim]{sv.advisory_reasoning}[/dim]")
 
 
 @app.command("unpublish")
