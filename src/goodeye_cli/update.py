@@ -380,7 +380,7 @@ def _subprocess_failed_error(argv: list[str], proc: CompletedProcess[str]) -> Go
         slug="update_command_failed",
         message=(
             f"Update command failed (exit {proc.returncode}): {joined}\n"
-            "See the upgrade tool's output above for the underlying error."
+            "See the tool output above for the underlying error."
         ),
         hint=manual_update_commands_text(),
     )

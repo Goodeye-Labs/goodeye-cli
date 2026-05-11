@@ -52,7 +52,7 @@ def update(
         )
 
     typer.echo(
-        f"Upgrading goodeye from {result.current_version} "
+        f"Updating goodeye from {result.current_version} "
         f"to {result.latest_version} via {method}...",
         err=True,
     )
