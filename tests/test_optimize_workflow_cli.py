@@ -154,6 +154,35 @@ def test_workflows_optimize_rejects_max_iterations_above_cap(
     assert result.exit_code != 0
 
 
+@respx.mock
+def test_workflows_optimize_accepts_max_iterations_above_legacy_cap(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """Values above the legacy 50 cap but inside 1..1000 must be accepted.
+
+    1001 alone fails under either a 50 or 1000 cap and so cannot catch a
+    silent regression of typer's ``max=`` back to 50. Pin the contract
+    with an in-range value above 50.
+    """
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.post(f"{SERVER}/v1/workflows/wf_1/optimize").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "workflow_id": "wf_1",
+                "skill_md": SKILL_MD_FIXTURE,
+                "references": {},
+                "max_iterations": 200,
+            },
+        )
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "optimize", "wf_1", "--max-iterations", "200"])
+    assert result.exit_code == 0, result.output
+    assert "200" in result.output
+
+
 def test_workflows_optimize_help_documents_publish_metadata() -> None:
     runner = CliRunner()
     result = runner.invoke(app, ["workflows", "optimize", "--help"])
