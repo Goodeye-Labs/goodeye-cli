@@ -318,8 +318,8 @@ class SafetyCheckResult(_WireBase):
     resource_id: str
     resource_version: int
     status: str
-    block: SafetyCheckVerifierRun | None = None
-    advisory: SafetyCheckVerifierRun | None = None
+    block: SafetyCheckVerifierRun
+    advisory: SafetyCheckVerifierRun
 
 
 class TemplateUnpublishResult(_WireBase):

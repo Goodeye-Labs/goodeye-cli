@@ -1205,6 +1205,24 @@ def test_split_version_suffix_strips_only_trailing_version() -> None:
     assert _split_version_suffix("@alice/my-tpl@5") == ("@alice/my-tpl", 5)
 
 
+@pytest.mark.parametrize("value", ["my-workflow@abc", "my-workflow@1.2", "my-workflow@v1.2"])
+def test_split_version_suffix_rejects_non_numeric_suffix(value: str) -> None:
+    with pytest.raises(ValidationFailed, match="not a valid version number"):
+        _split_version_suffix(value)
+
+
+@pytest.mark.parametrize("value", ["my-workflow@abc", "my-workflow@1.2"])
+def test_check_safety_rejects_non_numeric_suffix_with_clear_error(
+    tmp_config_paths: ConfigPaths, monkeypatch, value: str
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "check-safety", value])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ValidationFailed)
+    assert "not a valid version number" in str(result.exception)
+
+
 @respx.mock
 def test_workflows_check_safety_clean(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
@@ -1300,3 +1318,84 @@ def test_workflows_check_safety_requires_auth(tmp_config_paths: ConfigPaths, mon
     result = runner.invoke(app, ["workflows", "check-safety", "whatever"])
     assert result.exit_code != 0
     assert route.call_count == 0
+
+
+@respx.mock
+def test_workflows_check_safety_version_flag_overrides_at_suffix(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """``--version 5`` wins over ``@3`` parsed from the identifier."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    workflow_id = "my-workflow"
+    route = respx.post(f"{SERVER}/v1/workflows/{workflow_id}/safety-check").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "resource_type": "workflow",
+                "resource_id": "11111111-1111-1111-1111-111111111111",
+                "resource_version": 5,
+                "status": "clean",
+                "block": {
+                    "verifier_id": "22222222-2222-2222-2222-222222222222",
+                    "verifier_version": 2,
+                    "verifier_run_id": "33333333-3333-3333-3333-333333333333",
+                    "verdict": "pass",
+                    "reasoning": "ok",
+                },
+                "advisory": {
+                    "verifier_id": "44444444-4444-4444-4444-444444444444",
+                    "verifier_version": 1,
+                    "verifier_run_id": "55555555-5555-5555-5555-555555555555",
+                    "verdict": "pass",
+                    "reasoning": "ok",
+                },
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        app, ["workflows", "check-safety", f"{workflow_id}@3", "--version", "5", "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    assert route.call_count == 1
+    params = dict(route.calls.last.request.url.params)
+    assert params == {"version": "5"}
+
+
+@respx.mock
+def test_workflows_check_safety_escapes_rich_markup_in_reasoning(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """Server-controlled ``reasoning`` text must not be parsed as Rich markup."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    workflow_uuid = "11111111-1111-1111-1111-111111111111"
+    hostile = "Contains [bold red]injected[/bold red] markup tags."
+    respx.post(f"{SERVER}/v1/workflows/{workflow_uuid}/safety-check").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "resource_type": "workflow",
+                "resource_id": workflow_uuid,
+                "resource_version": 1,
+                "status": "clean",
+                "block": {
+                    "verifier_id": "22222222-2222-2222-2222-222222222222",
+                    "verifier_version": 1,
+                    "verdict": "pass",
+                    "reasoning": hostile,
+                },
+                "advisory": {
+                    "verifier_id": "44444444-4444-4444-4444-444444444444",
+                    "verifier_version": 1,
+                    "verdict": "pass",
+                    "reasoning": "ok",
+                },
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "check-safety", workflow_uuid])
+    assert result.exit_code == 0, result.output
+    # The literal hostile text must appear verbatim; if Rich parsed the
+    # `[bold red]` tags as markup the substring would have been stripped.
+    assert "[bold red]injected[/bold red]" in result.output

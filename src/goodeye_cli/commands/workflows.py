@@ -10,6 +10,7 @@ from typing import Annotated, Any
 import typer
 import yaml
 from rich.console import Console
+from rich.markup import escape as rich_escape
 from rich.table import Table
 
 from goodeye_cli.client import GoodeyeClient
@@ -634,7 +635,11 @@ def _split_version_suffix(value: str) -> tuple[str, int | None]:
 
     Returns ``(identifier_without_suffix, version)``. ``@`` characters
     inside the identifier (e.g. ``@handle/slug``) are preserved because
-    only the final segment after the last ``@`` is examined.
+    only the final segment after the last ``@`` is examined. A trailing
+    ``@<garbage>`` (non-numeric) is treated as user error: the caller
+    clearly meant to pin a version, so ``ValidationFailed`` is raised
+    instead of silently passing the unparsed string through to the
+    server (which would 404 with no useful signal).
     """
     if "@" not in value:
         return value, None
@@ -643,10 +648,22 @@ def _split_version_suffix(value: str) -> tuple[str, int | None]:
         return value, None
     candidate = tail[1:] if tail.startswith("v") else tail
     if not candidate.isdigit():
-        return value, None
+        raise ValidationFailed(
+            slug="validation_error",
+            message=(
+                f"Version suffix '{tail}' is not a valid version number. "
+                "Use @N or @vN (e.g. my-workflow@3 or my-workflow@v3)."
+            ),
+        )
     parsed = int(candidate)
     if parsed < 1:
-        return value, None
+        raise ValidationFailed(
+            slug="validation_error",
+            message=(
+                f"Version suffix '{tail}' is not a valid version number. "
+                "Use @N or @vN (e.g. my-workflow@3 or my-workflow@v3)."
+            ),
+        )
     return head, parsed
 
 
@@ -663,8 +680,6 @@ def _render_safety_check(result: SafetyCheckResult, console: Console) -> None:
         f"{result.resource_type} {result.resource_id} v{result.resource_version}"
     )
     for label, run in (("block", result.block), ("advisory", result.advisory)):
-        if run is None:
-            continue
         verdict_color = {
             "pass": "green",
             "fail": "red",
@@ -677,7 +692,9 @@ def _render_safety_check(result: SafetyCheckResult, console: Console) -> None:
             + ")"
         )
         if run.reasoning:
-            console.print(f"    {run.reasoning}")
+            # `reasoning` is server-controlled LLM-generated text. Escape so
+            # tags like `[bold]` or `[/red]` are not interpreted as Rich markup.
+            console.print(f"    {rich_escape(run.reasoning)}")
 
 
 @app.command("check-safety")
