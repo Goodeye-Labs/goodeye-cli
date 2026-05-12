@@ -33,6 +33,7 @@ from goodeye_cli.wire import (
     InvitationList,
     MeResponse,
     RenameHandleResult,
+    SafetyCheckResult,
     TeamCreated,
     TeamDeleteResult,
     TeamList,
@@ -370,6 +371,24 @@ class GoodeyeClient:
         response = self._request("POST", f"/v1/workflows/{workflow_id}/teach")
         return WorkflowTeachResult.model_validate(response.json())
 
+    def check_workflow_safety(
+        self, workflow_id: str, *, version: int | None = None
+    ) -> SafetyCheckResult:
+        """POST /v1/workflows/{workflow_id}/safety-check.
+
+        Runs the block and advisory safety verifiers against the workflow
+        body and returns a combined verdict. Auth required.
+        """
+        params: dict[str, Any] = {}
+        if version is not None:
+            params["version"] = version
+        response = self._request(
+            "POST",
+            f"/v1/workflows/{workflow_id}/safety-check",
+            params=params or None,
+        )
+        return SafetyCheckResult.model_validate(response.json())
+
     # ----- templates -----
     def list_templates(
         self,
@@ -519,6 +538,31 @@ class GoodeyeClient:
             json_body={"new_owner_user_id_or_email": new_owner_user_id_or_email},
         )
         return response.json()
+
+    def check_template_safety(
+        self,
+        template_id: str,
+        *,
+        version: int | None = None,
+        anonymous: bool = False,
+    ) -> SafetyCheckResult:
+        """POST /v1/templates/{template_id}/safety-check.
+
+        Runs the block and advisory safety verifiers against the template
+        body. Auth is optional: ``anonymous=True`` omits ``Authorization``
+        even when the client was constructed with an API key (public preview
+        path; anonymous spend is billed against the per-IP-hash grant).
+        """
+        params: dict[str, Any] = {}
+        if version is not None:
+            params["version"] = version
+        response = self._request(
+            "POST",
+            f"/v1/templates/{template_id}/safety-check",
+            params=params or None,
+            authenticated=not anonymous,
+        )
+        return SafetyCheckResult.model_validate(response.json())
 
     # ----- teams -----
     def create_team(self, handle: str) -> TeamCreated:

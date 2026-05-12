@@ -16,6 +16,7 @@ from rich.console import Console
 from rich.table import Table
 
 from goodeye_cli.client import GoodeyeClient
+from goodeye_cli.commands.workflows import _render_safety_check, _split_version_suffix
 from goodeye_cli.config import get_api_key, get_server
 from goodeye_cli.errors import AuthRequired, SafetyVerificationFailed, SafetyVerificationUnavailable
 from goodeye_cli.output import (
@@ -42,6 +43,18 @@ def _client(*, require_auth: bool) -> GoodeyeClient:
             hint="Run `goodeye login` or set GOODEYE_API_KEY.",
         )
     return GoodeyeClient(get_server(), api_key=api_key)
+
+
+def _client_for_safety_check(*, anonymous: bool) -> GoodeyeClient:
+    """Build a client for `templates check-safety`.
+
+    Anonymous calls never attach stored credentials, even if configured.
+    Authenticated calls attach an API key when one is on file but do not
+    require one (the server treats the template route as optional-auth).
+    """
+    if anonymous:
+        return GoodeyeClient(get_server(), api_key=None)
+    return GoodeyeClient(get_server(), api_key=get_api_key())
 
 
 @app.command("list")
@@ -382,6 +395,54 @@ def deprecate_version_cmd(
     )
 
 
+@app.command("check-safety")
+def check_safety(
+    template_id: str = typer.Argument(
+        ...,
+        help=(
+            "Template UUID, @handle/slug, or any of those pinned with "
+            "``@N`` or ``@vN`` (e.g. @alice/my-tpl@3). The ``--version`` "
+            "flag overrides any suffix."
+        ),
+    ),
+    version: int | None = typer.Option(
+        None,
+        "--version",
+        "-v",
+        help="Pin to a specific template version; overrides any ``@N`` suffix.",
+    ),
+    anonymous: bool = typer.Option(
+        False,
+        "--anonymous",
+        help=(
+            "Do not send credentials (anonymous public preview; spend is "
+            "billed against a small per-IP credit budget)."
+        ),
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Print JSON."),
+) -> None:
+    """Run the safety verifiers on a public template version.
+
+    Each call costs two metered verifier runs (one block, one advisory).
+    Auth is optional: pass ``--anonymous`` to run without sending an API
+    key. The verdicts are not persisted onto the template row; re-run to
+    re-check. Returns ``status=clean`` when both verifiers pass,
+    ``flagged`` when only the advisory fails, ``blocked`` when the block
+    verifier fails, and ``error`` when the block verifier errors.
+    """
+    console = Console()
+    parsed_id, parsed_version = _split_version_suffix(template_id)
+    effective_version = version if version is not None else parsed_version
+    with _client_for_safety_check(anonymous=anonymous) as client:
+        result = client.check_template_safety(
+            parsed_id, version=effective_version, anonymous=anonymous
+        )
+    if json_output:
+        typer.echo(result.model_dump_json(indent=2))
+        return
+    _render_safety_check(result, console)
+
+
 @app.command("transfer-ownership")
 def transfer_ownership_cmd(
     template_ref: str = typer.Argument(
@@ -413,6 +474,7 @@ def transfer_ownership_cmd(
 
 __all__ = [
     "app",
+    "check_safety",
     "delete_cmd",
     "deprecate_version_cmd",
     "fork",
