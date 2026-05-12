@@ -362,7 +362,7 @@ def publish(
     source: str | None = typer.Option(
         None,
         "--source",
-        help="Optional provenance marker: 'manual' or 'teach'. Defaults to NULL.",
+        help="Optional provenance marker: 'manual', 'teach', or 'optimization'. Defaults to NULL.",
     ),
     verifier: Annotated[
         list[str] | None,
