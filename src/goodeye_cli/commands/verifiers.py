@@ -164,7 +164,17 @@ def deploy(
                               the contract (text-only, text+image, or image-only).
       model_settings          Optional {"model": ..., "reasoning_effort": ...}.
                               reasoning_effort: low | medium | high | xhigh.
-                              Only these two fields are honored.
+                              Only these two fields are honored. Supported
+                              model values: openai/gpt-5.4-mini, openai/gpt-5.4,
+                              openai/gpt-5.5, openai/gpt-5.2-pro,
+                              anthropic/claude-haiku-4-5,
+                              anthropic/claude-sonnet-4-6,
+                              anthropic/claude-opus-4-6,
+                              anthropic/claude-opus-4-7,
+                              perplexity/sonar-pro,
+                              perplexity/sonar-reasoning-pro. Sonar-pro does
+                              not accept reasoning_effort; the server drops
+                              it for that model.
       expected_version_token  Required when re-deploying an existing verifier.
                               Get the current token from `goodeye verifiers list`
                               or the previous deploy response. Omit for first deploy.
