@@ -303,6 +303,27 @@ class TemplatePublishResult(_WireBase):
     safety_verification: TemplateSafetyVerification | None = None
 
 
+class SafetyCheckVerifierRun(_WireBase):
+    """One side (block or advisory) of a `safety-check` response."""
+
+    verifier_id: str | None = None
+    verifier_version: int | None = None
+    verifier_run_id: str | None = None
+    verdict: str
+    reasoning: str | None = None
+
+
+class SafetyCheckResult(_WireBase):
+    """Response shape for `POST /v1/{workflows,templates}/{id}/safety-check`."""
+
+    resource_type: str
+    resource_id: str
+    resource_version: int
+    status: str
+    block: SafetyCheckVerifierRun
+    advisory: SafetyCheckVerifierRun
+
+
 class TemplateUnpublishResult(_WireBase):
     template_id: str
     version: int

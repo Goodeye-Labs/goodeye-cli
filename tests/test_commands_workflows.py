@@ -11,7 +11,11 @@ import respx
 from typer.testing import CliRunner
 
 from goodeye_cli.app import app
-from goodeye_cli.commands.workflows import _parse_front_matter, _parse_workflow_verifier_flags
+from goodeye_cli.commands.workflows import (
+    _parse_front_matter,
+    _parse_workflow_verifier_flags,
+    _split_version_suffix,
+)
 from goodeye_cli.config import ConfigPaths, save_credentials
 from goodeye_cli.errors import ValidationFailed
 
@@ -1178,3 +1182,260 @@ def test_parse_workflow_verifier_flags_rejects_route_unsafe_names() -> None:
 def test_parse_workflow_verifier_flags_rejects_deploy_incompatible_names() -> None:
     with pytest.raises(ValidationFailed, match="name"):
         _parse_workflow_verifier_flags(["tone_check=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"])
+
+
+def test_split_version_suffix_returns_no_version_when_absent() -> None:
+    assert _split_version_suffix("my-workflow") == ("my-workflow", None)
+
+
+def test_split_version_suffix_parses_numeric_suffix() -> None:
+    assert _split_version_suffix("my-workflow@3") == ("my-workflow", 3)
+
+
+def test_split_version_suffix_parses_v_prefixed_suffix() -> None:
+    assert _split_version_suffix("my-workflow@v7") == ("my-workflow", 7)
+
+
+def test_split_version_suffix_ignores_non_version_suffix() -> None:
+    # ``@handle/slug`` looks like an identifier, not a version pin.
+    assert _split_version_suffix("@alice/my-tpl") == ("@alice/my-tpl", None)
+
+
+def test_split_version_suffix_strips_only_trailing_version() -> None:
+    assert _split_version_suffix("@alice/my-tpl@5") == ("@alice/my-tpl", 5)
+
+
+@pytest.mark.parametrize("value", ["my-workflow@abc", "my-workflow@1.2", "my-workflow@v1.2"])
+def test_split_version_suffix_rejects_non_numeric_suffix(value: str) -> None:
+    with pytest.raises(ValidationFailed, match="not a valid version number"):
+        _split_version_suffix(value)
+
+
+@pytest.mark.parametrize("value", ["my-workflow@abc", "my-workflow@1.2"])
+def test_check_safety_rejects_non_numeric_suffix_with_clear_error(
+    tmp_config_paths: ConfigPaths, monkeypatch, value: str
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "check-safety", value])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ValidationFailed)
+    assert "not a valid version number" in str(result.exception)
+
+
+@respx.mock
+def test_workflows_check_safety_clean(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    workflow_uuid = "11111111-1111-1111-1111-111111111111"
+    route = respx.post(f"{SERVER}/v1/workflows/{workflow_uuid}/safety-check").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "resource_type": "workflow",
+                "resource_id": workflow_uuid,
+                "resource_version": 2,
+                "status": "clean",
+                "block": {
+                    "verifier_id": "22222222-2222-2222-2222-222222222222",
+                    "verifier_version": 2,
+                    "verifier_run_id": "33333333-3333-3333-3333-333333333333",
+                    "verdict": "pass",
+                    "reasoning": "No prompt-injection patterns detected.",
+                },
+                "advisory": {
+                    "verifier_id": "44444444-4444-4444-4444-444444444444",
+                    "verifier_version": 1,
+                    "verifier_run_id": "55555555-5555-5555-5555-555555555555",
+                    "verdict": "pass",
+                    "reasoning": "Workflow scope is well bounded.",
+                },
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "check-safety", workflow_uuid])
+    assert result.exit_code == 0, result.output
+    assert route.call_count == 1
+    assert route.calls.last.request.headers.get("Authorization") == "Bearer good_live_EXAMPLE"
+    assert "CLEAN" in result.output
+    assert "pass" in result.output
+    assert "No prompt-injection" in result.output
+    assert "Workflow scope" in result.output
+
+
+@respx.mock
+def test_workflows_check_safety_strips_at_version_suffix(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    workflow_id = "my-workflow"
+    route = respx.post(f"{SERVER}/v1/workflows/{workflow_id}/safety-check").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "resource_type": "workflow",
+                "resource_id": "11111111-1111-1111-1111-111111111111",
+                "resource_version": 3,
+                "status": "flagged",
+                "block": {
+                    "verifier_id": "22222222-2222-2222-2222-222222222222",
+                    "verifier_version": 2,
+                    "verifier_run_id": "33333333-3333-3333-3333-333333333333",
+                    "verdict": "pass",
+                    "reasoning": "ok",
+                },
+                "advisory": {
+                    "verifier_id": "44444444-4444-4444-4444-444444444444",
+                    "verifier_version": 1,
+                    "verifier_run_id": "55555555-5555-5555-5555-555555555555",
+                    "verdict": "fail",
+                    "reasoning": "Scope is broad.",
+                },
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "check-safety", f"{workflow_id}@3", "--json"])
+    assert result.exit_code == 0, result.output
+    assert route.call_count == 1
+    params = dict(route.calls.last.request.url.params)
+    assert params == {"version": "3"}
+    payload = _json.loads(result.output)
+    assert payload["status"] == "flagged"
+    assert payload["advisory"]["verdict"] == "fail"
+
+
+@respx.mock
+def test_workflows_check_safety_requires_auth(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    """Without an API key on disk or env, the command fails before any HTTP call."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_config_paths.config_dir.parent))
+    monkeypatch.delenv("GOODEYE_API_KEY", raising=False)
+    monkeypatch.setenv("GOODEYE_SERVER", SERVER)
+    route = respx.post(f"{SERVER}/v1/workflows/whatever/safety-check").mock(
+        return_value=httpx.Response(500, json={"error": "should not be called"})
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "check-safety", "whatever"])
+    assert result.exit_code != 0
+    assert route.call_count == 0
+
+
+@respx.mock
+def test_workflows_check_safety_version_flag_overrides_at_suffix(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """``--version 5`` wins over ``@3`` parsed from the identifier."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    workflow_id = "my-workflow"
+    route = respx.post(f"{SERVER}/v1/workflows/{workflow_id}/safety-check").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "resource_type": "workflow",
+                "resource_id": "11111111-1111-1111-1111-111111111111",
+                "resource_version": 5,
+                "status": "clean",
+                "block": {
+                    "verifier_id": "22222222-2222-2222-2222-222222222222",
+                    "verifier_version": 2,
+                    "verifier_run_id": "33333333-3333-3333-3333-333333333333",
+                    "verdict": "pass",
+                    "reasoning": "ok",
+                },
+                "advisory": {
+                    "verifier_id": "44444444-4444-4444-4444-444444444444",
+                    "verifier_version": 1,
+                    "verifier_run_id": "55555555-5555-5555-5555-555555555555",
+                    "verdict": "pass",
+                    "reasoning": "ok",
+                },
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        app, ["workflows", "check-safety", f"{workflow_id}@3", "--version", "5", "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    assert route.call_count == 1
+    params = dict(route.calls.last.request.url.params)
+    assert params == {"version": "5"}
+
+
+@respx.mock
+def test_workflows_check_safety_escapes_rich_markup_in_reasoning(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """Server-controlled ``reasoning`` text must not be parsed as Rich markup."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    workflow_uuid = "11111111-1111-1111-1111-111111111111"
+    hostile = "Contains [bold red]injected[/bold red] markup tags."
+    respx.post(f"{SERVER}/v1/workflows/{workflow_uuid}/safety-check").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "resource_type": "workflow",
+                "resource_id": workflow_uuid,
+                "resource_version": 1,
+                "status": "clean",
+                "block": {
+                    "verifier_id": "22222222-2222-2222-2222-222222222222",
+                    "verifier_version": 1,
+                    "verdict": "pass",
+                    "reasoning": hostile,
+                },
+                "advisory": {
+                    "verifier_id": "44444444-4444-4444-4444-444444444444",
+                    "verifier_version": 1,
+                    "verdict": "pass",
+                    "reasoning": "ok",
+                },
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "check-safety", workflow_uuid])
+    assert result.exit_code == 0, result.output
+    # The literal hostile text must appear verbatim; if Rich parsed the
+    # `[bold red]` tags as markup the substring would have been stripped.
+    assert "[bold red]injected[/bold red]" in result.output
+
+
+@respx.mock
+def test_workflows_check_safety_handles_null_verifier_id_on_error(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """An ``error`` placeholder side from the server has null verifier_id and version."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    workflow_uuid = "11111111-1111-1111-1111-111111111111"
+    respx.post(f"{SERVER}/v1/workflows/{workflow_uuid}/safety-check").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "resource_type": "workflow",
+                "resource_id": workflow_uuid,
+                "resource_version": 1,
+                "status": "clean",
+                "block": {
+                    "verifier_id": "22222222-2222-2222-2222-222222222222",
+                    "verifier_version": 1,
+                    "verifier_run_id": "33333333-3333-3333-3333-333333333333",
+                    "verdict": "pass",
+                    "reasoning": "ok",
+                },
+                "advisory": {
+                    "verifier_id": None,
+                    "verifier_version": None,
+                    "verifier_run_id": None,
+                    "verdict": "error",
+                    "reasoning": "advisory judge unavailable",
+                },
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "check-safety", workflow_uuid])
+    assert result.exit_code == 0, result.output
+    assert "error" in result.output
+    assert "advisory judge unavailable" in result.output
+    assert "verifier_id=unknown" in result.output

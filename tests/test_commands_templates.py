@@ -836,3 +836,112 @@ def test_templates_list_table_shows_safety_column(
     assert "Safety" in result.output
     assert "verified" in result.output
     assert "advisory" in result.output
+
+
+def _safety_check_payload(*, status: str, advisory_verdict: str) -> dict:
+    return {
+        "resource_type": "template",
+        "resource_id": "11111111-1111-1111-1111-111111111111",
+        "resource_version": 4,
+        "status": status,
+        "block": {
+            "verifier_id": "22222222-2222-2222-2222-222222222222",
+            "verifier_version": 2,
+            "verifier_run_id": "33333333-3333-3333-3333-333333333333",
+            "verdict": "pass",
+            "reasoning": "No prompt-injection patterns detected.",
+        },
+        "advisory": {
+            "verifier_id": "44444444-4444-4444-4444-444444444444",
+            "verifier_version": 1,
+            "verifier_run_id": "55555555-5555-5555-5555-555555555555",
+            "verdict": advisory_verdict,
+            "reasoning": (
+                "Workflow scope is well bounded."
+                if advisory_verdict == "pass"
+                else "Workflow scope is too broad."
+            ),
+        },
+    }
+
+
+@respx.mock
+def test_templates_check_safety_authenticated_sends_authorization(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    template_uuid = "11111111-1111-1111-1111-111111111111"
+    route = respx.post(f"{SERVER}/v1/templates/{template_uuid}/safety-check").mock(
+        return_value=httpx.Response(
+            200, json=_safety_check_payload(status="clean", advisory_verdict="pass")
+        ),
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "check-safety", template_uuid])
+    assert result.exit_code == 0, result.output
+    assert route.call_count == 1
+    assert route.calls.last.request.headers.get("Authorization") == "Bearer good_live_EXAMPLE"
+    assert "CLEAN" in result.output
+    assert "Workflow scope is well bounded." in result.output
+
+
+@respx.mock
+def test_templates_check_safety_anonymous_omits_authorization(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """``--anonymous`` drops the Authorization header even when an API key is on disk."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    template_uuid = "11111111-1111-1111-1111-111111111111"
+    route = respx.post(f"{SERVER}/v1/templates/{template_uuid}/safety-check").mock(
+        return_value=httpx.Response(
+            200, json=_safety_check_payload(status="flagged", advisory_verdict="fail")
+        ),
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        app, ["templates", "check-safety", template_uuid, "--anonymous", "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    assert route.call_count == 1
+    assert route.calls.last.request.headers.get("Authorization") is None
+    payload = json.loads(result.output)
+    assert payload["status"] == "flagged"
+    assert payload["advisory"]["verdict"] == "fail"
+
+
+@respx.mock
+def test_templates_check_safety_anonymous_works_without_credentials(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """``--anonymous`` succeeds with no credentials configured."""
+    _setup_no_creds(monkeypatch, tmp_config_paths)
+    template_uuid = "11111111-1111-1111-1111-111111111111"
+    route = respx.post(f"{SERVER}/v1/templates/{template_uuid}/safety-check").mock(
+        return_value=httpx.Response(
+            200, json=_safety_check_payload(status="clean", advisory_verdict="pass")
+        ),
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "check-safety", template_uuid, "--anonymous"])
+    assert result.exit_code == 0, result.output
+    assert route.call_count == 1
+    assert route.calls.last.request.headers.get("Authorization") is None
+
+
+@respx.mock
+def test_templates_check_safety_forwards_version_from_at_suffix(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    template_uuid = "11111111-1111-1111-1111-111111111111"
+    route = respx.post(f"{SERVER}/v1/templates/{template_uuid}/safety-check").mock(
+        return_value=httpx.Response(
+            200, json=_safety_check_payload(status="clean", advisory_verdict="pass")
+        ),
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "check-safety", f"{template_uuid}@v7"])
+    assert result.exit_code == 0, result.output
+    assert route.call_count == 1
+    params = dict(route.calls.last.request.url.params)
+    assert params == {"version": "7"}

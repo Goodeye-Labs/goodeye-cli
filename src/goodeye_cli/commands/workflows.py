@@ -10,6 +10,7 @@ from typing import Annotated, Any
 import typer
 import yaml
 from rich.console import Console
+from rich.markup import escape as rich_escape
 from rich.table import Table
 
 from goodeye_cli.client import GoodeyeClient
@@ -23,7 +24,7 @@ from goodeye_cli.output import (
     next_page_hint,
     resolve_output_mode,
 )
-from goodeye_cli.wire import WorkflowDetail
+from goodeye_cli.wire import SafetyCheckResult, WorkflowDetail
 
 _WORKFLOW_VERIFIER_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,127}$")
 
@@ -629,6 +630,110 @@ def leave(
     )
 
 
+def _split_version_suffix(value: str) -> tuple[str, int | None]:
+    """Strip an optional trailing ``@N`` or ``@vN`` version suffix.
+
+    Returns ``(identifier_without_suffix, version)``. ``@`` characters
+    inside the identifier (e.g. ``@handle/slug``) are preserved because
+    only the final segment after the last ``@`` is examined. A trailing
+    ``@<garbage>`` (non-numeric) is treated as user error: the caller
+    clearly meant to pin a version, so ``ValidationFailed`` is raised
+    instead of silently passing the unparsed string through to the
+    server (which would 404 with no useful signal).
+    """
+    if "@" not in value:
+        return value, None
+    head, _, tail = value.rpartition("@")
+    if not head or not tail:
+        return value, None
+    candidate = tail[1:] if tail.startswith("v") else tail
+    if not candidate.isdigit():
+        raise ValidationFailed(
+            slug="validation_error",
+            message=(
+                f"Version suffix '{tail}' is not a valid version number. "
+                "Use @N or @vN (e.g. my-workflow@3 or my-workflow@v3)."
+            ),
+        )
+    parsed = int(candidate)
+    if parsed < 1:
+        raise ValidationFailed(
+            slug="validation_error",
+            message=(
+                f"Version suffix '{tail}' is not a valid version number. "
+                "Use @N or @vN (e.g. my-workflow@3 or my-workflow@v3)."
+            ),
+        )
+    return head, parsed
+
+
+def _render_safety_check(result: SafetyCheckResult, console: Console) -> None:
+    """Pretty-print a safety-check result, color-coded by status."""
+    color = {
+        "clean": "green",
+        "flagged": "yellow",
+        "blocked": "red",
+        "error": "red",
+    }.get(result.status, "white")
+    console.print(
+        f"[bold {color}]{result.status.upper()}[/bold {color}] "
+        f"{result.resource_type} {result.resource_id} v{result.resource_version}"
+    )
+    for label, run in (("block", result.block), ("advisory", result.advisory)):
+        verdict_color = {
+            "pass": "green",
+            "fail": "red",
+            "error": "red",
+        }.get(run.verdict, "white")
+        verifier_id_text = run.verifier_id or "unknown"
+        version_text = f" v{run.verifier_version}" if run.verifier_version is not None else ""
+        run_id_text = f", verifier_run_id={run.verifier_run_id}" if run.verifier_run_id else ""
+        console.print(
+            f"  [{verdict_color}]{run.verdict}[/{verdict_color}] "
+            f"{label} (verifier_id={verifier_id_text}{version_text}{run_id_text})"
+        )
+        if run.reasoning:
+            # `reasoning` is server-controlled LLM-generated text. Escape so
+            # tags like `[bold]` or `[/red]` are not interpreted as Rich markup.
+            console.print(f"    {rich_escape(run.reasoning)}")
+
+
+@app.command("check-safety")
+def check_safety(
+    workflow_id: str = typer.Argument(
+        ...,
+        help=(
+            "Workflow UUID or slug, optionally pinned with ``@N`` or ``@vN`` "
+            "(e.g. my-workflow@3). The ``--version`` flag overrides any suffix."
+        ),
+    ),
+    version: int | None = typer.Option(
+        None,
+        "--version",
+        "-v",
+        help="Pin to a specific workflow version; overrides any ``@N`` suffix.",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Print JSON."),
+) -> None:
+    """Run the safety verifiers on a workflow you can see.
+
+    Auth required. Each call costs two metered verifier runs (one block,
+    one advisory). The verdicts are not persisted onto the workflow row;
+    re-run to re-check. Returns ``status=clean`` when both verifiers pass,
+    ``flagged`` when only the advisory fails, ``blocked`` when the block
+    verifier fails, and ``error`` when the block verifier errors.
+    """
+    console = Console()
+    parsed_id, parsed_version = _split_version_suffix(workflow_id)
+    effective_version = version if version is not None else parsed_version
+    with _client(require_auth=True) as client:
+        result = client.check_workflow_safety(parsed_id, version=effective_version)
+    if json_output:
+        typer.echo(result.model_dump_json(indent=2))
+        return
+    _render_safety_check(result, console)
+
+
 @app.command("transfer-ownership")
 def transfer_ownership(
     workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
@@ -655,6 +760,7 @@ def transfer_ownership(
 __all__ = [
     "_parse_front_matter",
     "app",
+    "check_safety",
     "delete",
     "get_cmd",
     "grant",
