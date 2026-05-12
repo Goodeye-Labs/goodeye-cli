@@ -534,6 +534,51 @@ def teach(
         sys.stdout.write("\n")
 
 
+@app.command("optimize")
+def optimize(
+    workflow_id: str = typer.Argument(..., help="Workflow UUID or name to optimize"),
+    max_iterations: int | None = typer.Option(
+        None,
+        "--max-iterations",
+        help=(
+            "Optimization loop budget. Defaults to 20 when omitted. "
+            "Accepted range 1 to 1000; the upper bound is a safety cap, "
+            "not a recommended setting (most runs converge well before that)."
+        ),
+        min=1,
+        max=1000,
+    ),
+) -> None:
+    """Fetch the optimize SKILL pack for an existing workflow.
+
+    The command returns the pack content; the agent (or you, working from
+    a script) follows the pack to run the optimization loop, then persists
+    the final version via:
+
+    \b
+        goodeye workflows publish - --name <name> --description <description>
+            --outcome <outcome> --source optimization
+            --expected-version-token <captured at stage 1>
+
+    only after explicit user approval. The loop never auto-saves.
+    """
+    stderr = Console(stderr=True)
+    with _client(require_auth=True) as client:
+        result = client.optimize_workflow(workflow_id, max_iterations=max_iterations)
+    stderr.print(f"[bold]workflow_id:[/bold] {result.workflow_id}")
+    stderr.print(f"[bold]max_iterations:[/bold] {result.max_iterations}")
+    # Stream skill_md raw to stdout so markdown link syntax (`[text](url)`) is
+    # not parsed as Rich markup. Reference files are appended as labeled
+    # sub-sections so a piped agent sees the full pack in order, matching the
+    # rendering used by `goodeye design`.
+    sys.stdout.write(result.skill_md.rstrip() + "\n")
+    if result.references:
+        sys.stdout.write("\n---\n\n# Reference files\n")
+        for path in sorted(result.references):
+            body = result.references[path]
+            sys.stdout.write(f"\n## {path}\n\n{body.rstrip()}\n")
+
+
 @app.command("delete")
 def delete(
     workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
@@ -768,6 +813,7 @@ __all__ = [
     "leave",
     "lineage",
     "list_cmd",
+    "optimize",
     "publish",
     "revoke_grant",
     "teach",
