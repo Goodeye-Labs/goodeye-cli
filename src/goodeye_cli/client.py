@@ -61,6 +61,7 @@ from goodeye_cli.wire import (
     WorkflowLeaveResult,
     WorkflowLineage,
     WorkflowList,
+    WorkflowOptimizeResult,
     WorkflowSaveResult,
     WorkflowSearchResponse,
     WorkflowTeachResult,
@@ -370,6 +371,25 @@ class GoodeyeClient:
     def teach_workflow(self, workflow_id: str) -> WorkflowTeachResult:
         response = self._request("POST", f"/v1/workflows/{workflow_id}/teach")
         return WorkflowTeachResult.model_validate(response.json())
+
+    def optimize_workflow(
+        self, workflow_id: str, *, max_iterations: int | None = None
+    ) -> WorkflowOptimizeResult:
+        """POST /v1/workflows/{id}/optimize with optional max_iterations.
+
+        Returns the SKILL pack (skill_md + references), the workflow id, and
+        the validated iteration cap. The server defaults max_iterations to 20
+        and accepts values from 1 to 1000.
+        """
+        params: dict[str, Any] = {}
+        if max_iterations is not None:
+            params["max_iterations"] = max_iterations
+        response = self._request(
+            "POST",
+            f"/v1/workflows/{workflow_id}/optimize",
+            params=params or None,
+        )
+        return WorkflowOptimizeResult.model_validate(response.json())
 
     def check_workflow_safety(
         self, workflow_id: str, *, version: int | None = None

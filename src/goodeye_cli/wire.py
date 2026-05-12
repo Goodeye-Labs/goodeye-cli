@@ -219,6 +219,13 @@ class WorkflowTeachResult(_WireBase):
     skill_md: str
 
 
+class WorkflowOptimizeResult(_WireBase):
+    workflow_id: str
+    skill_md: str
+    references: dict[str, str] = Field(default_factory=dict)
+    max_iterations: int
+
+
 class TemplateSummary(_WireBase):
     id: str
     slug: str
