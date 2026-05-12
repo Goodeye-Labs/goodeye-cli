@@ -685,11 +685,12 @@ def _render_safety_check(result: SafetyCheckResult, console: Console) -> None:
             "fail": "red",
             "error": "red",
         }.get(run.verdict, "white")
+        verifier_id_text = run.verifier_id or "unknown"
+        version_text = f" v{run.verifier_version}" if run.verifier_version is not None else ""
+        run_id_text = f", verifier_run_id={run.verifier_run_id}" if run.verifier_run_id else ""
         console.print(
             f"  [{verdict_color}]{run.verdict}[/{verdict_color}] "
-            f"{label} (verifier_id={run.verifier_id} v{run.verifier_version}"
-            + (f", verifier_run_id={run.verifier_run_id}" if run.verifier_run_id else "")
-            + ")"
+            f"{label} (verifier_id={verifier_id_text}{version_text}{run_id_text})"
         )
         if run.reasoning:
             # `reasoning` is server-controlled LLM-generated text. Escape so

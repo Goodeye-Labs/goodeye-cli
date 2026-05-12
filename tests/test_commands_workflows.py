@@ -1399,3 +1399,43 @@ def test_workflows_check_safety_escapes_rich_markup_in_reasoning(
     # The literal hostile text must appear verbatim; if Rich parsed the
     # `[bold red]` tags as markup the substring would have been stripped.
     assert "[bold red]injected[/bold red]" in result.output
+
+
+@respx.mock
+def test_workflows_check_safety_handles_null_verifier_id_on_error(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """An ``error`` placeholder side from the server has null verifier_id and version."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    workflow_uuid = "11111111-1111-1111-1111-111111111111"
+    respx.post(f"{SERVER}/v1/workflows/{workflow_uuid}/safety-check").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "resource_type": "workflow",
+                "resource_id": workflow_uuid,
+                "resource_version": 1,
+                "status": "clean",
+                "block": {
+                    "verifier_id": "22222222-2222-2222-2222-222222222222",
+                    "verifier_version": 1,
+                    "verifier_run_id": "33333333-3333-3333-3333-333333333333",
+                    "verdict": "pass",
+                    "reasoning": "ok",
+                },
+                "advisory": {
+                    "verifier_id": None,
+                    "verifier_version": None,
+                    "verifier_run_id": None,
+                    "verdict": "error",
+                    "reasoning": "advisory judge unavailable",
+                },
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "check-safety", workflow_uuid])
+    assert result.exit_code == 0, result.output
+    assert "error" in result.output
+    assert "advisory judge unavailable" in result.output
+    assert "verifier_id=unknown" in result.output

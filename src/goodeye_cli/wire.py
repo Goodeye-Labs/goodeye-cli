@@ -304,8 +304,8 @@ class TemplatePublishResult(_WireBase):
 class SafetyCheckVerifierRun(_WireBase):
     """One side (block or advisory) of a `safety-check` response."""
 
-    verifier_id: str
-    verifier_version: int
+    verifier_id: str | None = None
+    verifier_version: int | None = None
     verifier_run_id: str | None = None
     verdict: str
     reasoning: str | None = None
