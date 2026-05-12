@@ -50,7 +50,7 @@ def should_suppress_background_notice(args: Sequence[str], env: Mapping[str, str
         return True
 
     first_arg = args[0]
-    return first_arg in {"--version", "help", "update"}
+    return first_arg in {"--version", "help", "update", "upgrade"}
 
 
 def format_update_notice(result: UpdateCheckResult) -> str:

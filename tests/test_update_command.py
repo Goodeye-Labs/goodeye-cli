@@ -387,3 +387,32 @@ def test_update_invocation_suppresses_background_notice(
     assert result.exit_code == 0, result.output
     assert "goodeye 0.7.2 is available" not in result.stderr
     assert "goodeye 0.7.2 is available" not in result.stdout
+
+
+def test_upgrade_alias_dispatches_to_update(
+    tmp_config_paths: ConfigPaths,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_config_paths.config_dir.parent))
+    monkeypatch.setattr(
+        cmd_update_module,
+        "check_for_update",
+        lambda **_: UpdateCheckResult(
+            current_version="1.0.0",
+            latest_version="1.0.0",
+            update_available=False,
+        ),
+    )
+
+    result = CliRunner().invoke(app, ["upgrade"])
+
+    assert result.exit_code == 0, result.output
+    assert "up to date" in result.output.lower()
+
+
+def test_upgrade_alias_hidden_from_help() -> None:
+    result = CliRunner().invoke(app, ["--help"])
+
+    assert result.exit_code == 0, result.output
+    assert "update" in result.output
+    assert "upgrade" not in result.output

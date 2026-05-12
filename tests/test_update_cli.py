@@ -147,6 +147,7 @@ def test_format_update_notice_is_concise() -> None:
         (["whoami", "--help"], {}),
         (["update"], {}),
         (["update", "--check"], {}),
+        (["upgrade"], {}),
         (["whoami", "--json"], {}),
         (["--json", "whoami"], {}),
         (["logout"], {"CI": "1"}),
