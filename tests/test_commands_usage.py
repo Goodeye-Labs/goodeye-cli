@@ -31,54 +31,61 @@ def _env(monkeypatch, tmp_config_paths: ConfigPaths, *, api_key: str | None) -> 
 # ----- format_usage_summary unit tests -----
 
 
-def test_format_usage_summary_human() -> None:
-    body = {
+def _body(**overrides) -> dict:
+    base = {
         "tier": "hobby",
-        "period_start": "2026-04-14T00:00:00+00:00",
-        "period_end": "2026-05-14T00:00:00+00:00",
-        "granted_usd": "5.00",
-        "used_usd": "0.83",
-        "remaining_usd": "4.17",
+        "available_usd": "4.17",
+        "monthly_remaining_usd": "4.17",
+        "monthly_refill_usd": "5.00",
+        "monthly_refill_at": "2026-05-14T00:00:00+00:00",
+        "purchased_remaining_usd": "0.00",
         "unpaid_balance_usd": "0.00",
     }
-    out = format_usage_summary(body)
+    base.update(overrides)
+    return base
+
+
+def test_format_usage_summary_human() -> None:
+    out = format_usage_summary(_body())
     assert "hobby" in out
-    assert "04/14/2026" in out
-    assert "05/14/2026" in out
-    assert "$0.83" in out
-    assert "$4.17" in out
-    assert "$5.00" in out
-    # Unpaid line is suppressed when balance is zero.
+    assert "Available: $4.17" in out
+    assert "refills to $5.00 on 05/14/2026" in out
+    # Unpaid line suppressed when zero.
     assert "Unpaid" not in out
+    # No one-off credits line when zero.
+    assert "one-off" not in out
+
+
+def test_format_usage_summary_with_purchased() -> None:
+    out = format_usage_summary(
+        _body(
+            available_usd="54.17",
+            monthly_remaining_usd="4.17",
+            purchased_remaining_usd="50.00",
+        )
+    )
+    assert "Available: $54.17" in out
+    assert "$4.17 monthly (refills to $5.00 on 05/14/2026)" in out
+    assert "$50.00 one-off credits" in out
 
 
 def test_format_usage_summary_with_unpaid() -> None:
-    body = {
-        "tier": "pro",
-        "period_start": "2026-04-14T00:00:00+00:00",
-        "period_end": "2026-05-14T00:00:00+00:00",
-        "granted_usd": "20.00",
-        "used_usd": "21.50",
-        "remaining_usd": "0.00",
-        "unpaid_balance_usd": "1.50",
-    }
-    out = format_usage_summary(body)
+    out = format_usage_summary(
+        _body(
+            tier="pro",
+            available_usd="0.00",
+            monthly_remaining_usd="0.00",
+            monthly_refill_usd="20.00",
+            unpaid_balance_usd="1.50",
+        )
+    )
     assert "pro" in out
     assert "$1.50" in out
     assert "Unpaid" in out
 
 
 def test_format_usage_summary_no_em_dash() -> None:
-    body = {
-        "tier": "hobby",
-        "period_start": "2026-04-14T00:00:00+00:00",
-        "period_end": "2026-05-14T00:00:00+00:00",
-        "granted_usd": "5.00",
-        "used_usd": "0.83",
-        "remaining_usd": "4.17",
-        "unpaid_balance_usd": "0.00",
-    }
-    out = format_usage_summary(body)
+    out = format_usage_summary(_body())
     assert "—" not in out
 
 
@@ -88,26 +95,13 @@ def test_format_usage_summary_no_em_dash() -> None:
 @respx.mock
 def test_usage_command_human(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE")
-    respx.get(f"{SERVER}/v1/me/usage").mock(
-        return_value=httpx.Response(
-            200,
-            json={
-                "tier": "hobby",
-                "period_start": "2026-04-14T00:00:00+00:00",
-                "period_end": "2026-05-14T00:00:00+00:00",
-                "granted_usd": "5.00",
-                "used_usd": "0.83",
-                "remaining_usd": "4.17",
-                "unpaid_balance_usd": "0.00",
-            },
-        )
-    )
+    respx.get(f"{SERVER}/v1/me/usage").mock(return_value=httpx.Response(200, json=_body()))
     runner = CliRunner()
     result = runner.invoke(app, ["usage"])
     assert result.exit_code == 0, result.output
     assert "hobby" in result.output
-    assert "$0.83" in result.output
-    assert "$4.17" in result.output
+    assert "Available: $4.17" in result.output
+    assert "refills to $5.00" in result.output
 
 
 @respx.mock
@@ -116,15 +110,12 @@ def test_usage_command_json(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     respx.get(f"{SERVER}/v1/me/usage").mock(
         return_value=httpx.Response(
             200,
-            json={
-                "tier": "pro",
-                "period_start": "2026-04-14T00:00:00+00:00",
-                "period_end": "2026-05-14T00:00:00+00:00",
-                "granted_usd": "20.00",
-                "used_usd": "5.00",
-                "remaining_usd": "15.00",
-                "unpaid_balance_usd": "0.00",
-            },
+            json=_body(
+                tier="pro",
+                available_usd="15.00",
+                monthly_remaining_usd="15.00",
+                monthly_refill_usd="20.00",
+            ),
         )
     )
     runner = CliRunner()
@@ -134,7 +125,8 @@ def test_usage_command_json(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
 
     data = json.loads(result.output.strip().splitlines()[-1])
     assert data["tier"] == "pro"
-    assert data["used_usd"] == "5.00"
+    assert data["available_usd"] == "15.00"
+    assert data["monthly_refill_usd"] == "20.00"
 
 
 def test_usage_command_without_credentials_errors(

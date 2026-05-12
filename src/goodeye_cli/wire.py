@@ -32,18 +32,20 @@ class MeResponse(_WireBase):
 
 
 class UsageResponse(_WireBase):
-    """Monthly credit usage summary returned by GET /v1/me/usage.
+    """Spendable-balance summary returned by GET /v1/me/usage.
 
     Money-shaped fields are strings to preserve exact decimal values across
     the wire (callers parse them with ``Decimal`` or ``float`` as needed).
+    ``available_usd`` is what the caller can spend right now: monthly grant
+    plus any one-off purchased credits, minus carried-over unpaid balance.
     """
 
     tier: str
-    period_start: datetime
-    period_end: datetime
-    granted_usd: str
-    used_usd: str
-    remaining_usd: str
+    available_usd: str
+    monthly_remaining_usd: str
+    monthly_refill_usd: str
+    monthly_refill_at: datetime
+    purchased_remaining_usd: str
     unpaid_balance_usd: str
 
 

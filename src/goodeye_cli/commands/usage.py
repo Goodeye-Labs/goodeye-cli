@@ -24,19 +24,26 @@ def _coerce_usage(body: UsageResponse | dict[str, Any]) -> UsageResponse:
 def format_usage_summary(body: UsageResponse | dict[str, Any]) -> str:
     """Render the usage payload as a human-readable multi-line string.
 
-    The unpaid balance line is only shown when the value is positive.
+    The purchased-credits and unpaid-balance lines only render when their
+    values are positive.
     """
     usage = _coerce_usage(body)
-    period_start = usage.period_start.strftime("%m/%d/%Y")
-    period_end = usage.period_end.strftime("%m/%d/%Y")
+    refill_at = usage.monthly_refill_at.strftime("%m/%d/%Y")
+    has_purchased = float(usage.purchased_remaining_usd) > 0
     lines = [
         f"Tier: {usage.tier}",
-        f"Period: {period_start} to {period_end}",
-        f"Used:      ${usage.used_usd}",
-        f"Remaining: ${usage.remaining_usd} of ${usage.granted_usd}",
+        f"Available: ${usage.available_usd}",
     ]
+    if has_purchased:
+        lines.append(
+            f"  ${usage.monthly_remaining_usd} monthly "
+            f"(refills to ${usage.monthly_refill_usd} on {refill_at})"
+        )
+        lines.append(f"  ${usage.purchased_remaining_usd} one-off credits")
+    else:
+        lines.append(f"  refills to ${usage.monthly_refill_usd} on {refill_at}")
     if float(usage.unpaid_balance_usd) > 0:
-        lines.append(f"Unpaid:    ${usage.unpaid_balance_usd} (will be deducted from next grant)")
+        lines.append(f"Unpaid: ${usage.unpaid_balance_usd} (deducted from next grant)")
     return "\n".join(lines)
 
 
@@ -63,11 +70,11 @@ def usage(
     if json_output:
         payload = {
             "tier": result.tier,
-            "period_start": result.period_start.isoformat(),
-            "period_end": result.period_end.isoformat(),
-            "granted_usd": result.granted_usd,
-            "used_usd": result.used_usd,
-            "remaining_usd": result.remaining_usd,
+            "available_usd": result.available_usd,
+            "monthly_remaining_usd": result.monthly_remaining_usd,
+            "monthly_refill_usd": result.monthly_refill_usd,
+            "monthly_refill_at": result.monthly_refill_at.isoformat(),
+            "purchased_remaining_usd": result.purchased_remaining_usd,
             "unpaid_balance_usd": result.unpaid_balance_usd,
         }
         typer.echo(_json.dumps(payload))
