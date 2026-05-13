@@ -175,7 +175,7 @@ goodeye verifiers deploy - <<'EOF'
       "reasoning": "No reason stated."
     }
   ],
-  "model_settings": {"model": "openai/gpt-4o", "reasoning_effort": "medium"}
+  "model_settings": {"model": "openai/gpt-5.4", "reasoning_effort": "medium"}
 }
 EOF
 # Deployed refund-claim-supported v1 (verifier_id=..., version_token=...)
