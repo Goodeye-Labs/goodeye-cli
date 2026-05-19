@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,17 @@ from goodeye_cli.errors import ValidationFailed
 DEFAULT_SERVER = "https://api.goodeye.dev"
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 30.0
 VERIFIER_REQUEST_TIMEOUT_SECONDS = 300.0
+
+# One-shot migrator for stale ``server`` pins. Older installs of the CLI shipped
+# with ``api.goodeyelabs.com`` as the default and wrote it into
+# ``credentials.json`` at login time. The canonical host is now
+# ``api.goodeye.dev``; the legacy host still resolves during the REST migration
+# grace period but is deprecated. We rewrite the pin in place, idempotently,
+# whenever we see it, so users move off the legacy host without re-running
+# ``goodeye auth login``. Only the exact historical default migrates; any
+# custom ``server`` value (staging, a fork, ``localhost``) is left alone.
+# Delete this block once the legacy REST host is retired.
+_LEGACY_API_HOSTS: frozenset[str] = frozenset({"https://api.goodeyelabs.com"})
 
 
 @dataclass(frozen=True)
@@ -87,13 +99,43 @@ def _write_json_0600(path: Path, payload: dict[str, Any]) -> None:
     os.chmod(path, 0o600)
 
 
+def _migrate_legacy_server_pin(creds: dict[str, Any], credentials_file: Path) -> dict[str, Any]:
+    """Rewrite a stale ``server`` pin to the canonical host, in place.
+
+    No-op unless the pin matches an exact historical default (case-insensitive,
+    trailing slash stripped). On rewrite, persists the file with the same 0600
+    permissions ``save_credentials`` uses and announces the change on stderr.
+    Idempotent: the next read sees the new value and short-circuits.
+    """
+    raw = creds.get("server")
+    if not isinstance(raw, str):
+        return creds
+    normalized = raw.rstrip("/").lower()
+    if normalized not in _LEGACY_API_HOSTS:
+        return creds
+    migrated = dict(creds)
+    migrated["server"] = DEFAULT_SERVER
+    try:
+        _write_json_0600(credentials_file, migrated)
+    except OSError:
+        # File became unwritable between read and write (e.g., read-only mount).
+        # Don't fail the CLI invocation over a best-effort migration; the
+        # in-memory dict still carries the new value for this run.
+        return migrated
+    sys.stderr.write(f"goodeye: migrated CLI server pin {normalized} -> {DEFAULT_SERVER}\n")
+    return migrated
+
+
 def load_credentials(paths: ConfigPaths | None = None) -> dict[str, Any] | None:
     """Load ``credentials.json`` if present.
 
     Returns ``None`` when the file does not exist or is unreadable.
     """
     p = paths or get_config_paths()
-    return _load_json(p.credentials_file)
+    creds = _load_json(p.credentials_file)
+    if creds is None:
+        return None
+    return _migrate_legacy_server_pin(creds, p.credentials_file)
 
 
 def save_credentials(payload: dict[str, Any], paths: ConfigPaths | None = None) -> Path:

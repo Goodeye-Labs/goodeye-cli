@@ -117,6 +117,64 @@ def test_get_request_timeout_seconds_env_overrides_default() -> None:
     assert get_request_timeout_seconds(env, default=300.0) == 45.5
 
 
+def test_load_credentials_migrates_legacy_server_pin(
+    tmp_config_paths: ConfigPaths, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Old default ``api.goodeyelabs.com`` is rewritten to the canonical host."""
+    save_credentials(
+        {"api_key": "good_live_EXAMPLE", "server": "https://api.goodeyelabs.com"},
+        tmp_config_paths,
+    )
+    creds = load_credentials(tmp_config_paths)
+    assert creds is not None
+    assert creds["server"] == DEFAULT_SERVER
+    assert creds["api_key"] == "good_live_EXAMPLE"
+    # Notice goes to stderr; api_key never appears in the announcement.
+    captured = capsys.readouterr()
+    assert "api.goodeyelabs.com" in captured.err
+    assert DEFAULT_SERVER in captured.err
+    assert "good_live_EXAMPLE" not in captured.err
+    # The on-disk file was rewritten, not just the in-memory dict.
+    with tmp_config_paths.credentials_file.open() as fh:
+        on_disk = json.load(fh)
+    assert on_disk["server"] == DEFAULT_SERVER
+    # And it kept the 0600 mode that save_credentials sets.
+    mode = stat.S_IMODE(os.stat(tmp_config_paths.credentials_file).st_mode)
+    assert mode == 0o600
+
+
+def test_load_credentials_migration_handles_trailing_slash_and_case(
+    tmp_config_paths: ConfigPaths, capsys: pytest.CaptureFixture[str]
+) -> None:
+    save_credentials(
+        {"api_key": "k", "server": "HTTPS://API.GOODEYELABS.COM/"},
+        tmp_config_paths,
+    )
+    creds = load_credentials(tmp_config_paths)
+    assert creds is not None
+    assert creds["server"] == DEFAULT_SERVER
+    assert "migrated CLI server pin" in capsys.readouterr().err
+
+
+def test_load_credentials_migration_is_idempotent(
+    tmp_config_paths: ConfigPaths, capsys: pytest.CaptureFixture[str]
+) -> None:
+    save_credentials({"api_key": "k", "server": DEFAULT_SERVER}, tmp_config_paths)
+    load_credentials(tmp_config_paths)
+    assert capsys.readouterr().err == ""
+
+
+def test_load_credentials_leaves_custom_servers_alone(
+    tmp_config_paths: ConfigPaths, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Anything other than the historical default is treated as a deliberate override."""
+    save_credentials({"api_key": "k", "server": "http://localhost:8000"}, tmp_config_paths)
+    creds = load_credentials(tmp_config_paths)
+    assert creds is not None
+    assert creds["server"] == "http://localhost:8000"
+    assert capsys.readouterr().err == ""
+
+
 def test_version_fallback_reads_pyproject_version() -> None:
     """``importlib.metadata`` can be absent in some dev setups; fallback must match pyproject."""
     from goodeye_cli import _version_from_source_tree
