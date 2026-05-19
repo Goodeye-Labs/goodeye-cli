@@ -29,7 +29,7 @@ from typing import Any
 
 from goodeye_cli.errors import ValidationFailed
 
-DEFAULT_SERVER = "https://api.goodeyelabs.com"
+DEFAULT_SERVER = "https://api.goodeye.dev"
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 30.0
 VERIFIER_REQUEST_TIMEOUT_SECONDS = 300.0
 

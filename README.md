@@ -461,7 +461,7 @@ Credential files are created with mode `0600`.
 
 - `GOODEYE_SERVER` env var.
 - `server` field inside `credentials.json`.
-- Default: `https://api.goodeyelabs.com`.
+- Default: `https://api.goodeye.dev`.
 
 ## REST API, not the CLI
 
