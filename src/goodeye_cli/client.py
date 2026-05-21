@@ -65,6 +65,7 @@ from goodeye_cli.wire import (
     WorkflowSaveResult,
     WorkflowSearchResponse,
     WorkflowTeachResult,
+    WorkflowUndeleteResult,
 )
 
 
@@ -232,6 +233,7 @@ class GoodeyeClient:
         search: str | None = None,
         limit: int = 50,
         cursor: str | None = None,
+        include_deleted: bool = False,
     ) -> WorkflowList:
         params: dict[str, Any] = {"limit": limit}
         if filter_:
@@ -242,6 +244,8 @@ class GoodeyeClient:
             params["search"] = search
         if cursor:
             params["cursor"] = cursor
+        if include_deleted:
+            params["include_deleted"] = "true"
         response = self._request("GET", "/v1/workflows", params=params)
         return WorkflowList.model_validate(response.json())
 
@@ -322,6 +326,10 @@ class GoodeyeClient:
     def delete_workflow(self, workflow_id: str) -> WorkflowDeleteResult:
         response = self._request("DELETE", f"/v1/workflows/{workflow_id}")
         return WorkflowDeleteResult.model_validate(response.json())
+
+    def undelete_workflow(self, workflow_id: str) -> WorkflowUndeleteResult:
+        response = self._request("POST", f"/v1/workflows/{workflow_id}/undelete")
+        return WorkflowUndeleteResult.model_validate(response.json())
 
     def grant_workflow(
         self, workflow_id: str, grantee_email_or_at_team_handle: str, role: str

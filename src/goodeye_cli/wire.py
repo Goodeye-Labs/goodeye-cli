@@ -93,6 +93,10 @@ class WorkflowSummary(_WireBase):
     parent_template_version: int | None = None
     effective_role: str | None = None
     version_token: str | None = None
+    # ISO-8601 timestamp for soft-deleted rows, null for live rows. Only
+    # populated for the caller's own deleted workflows, surfaced when
+    # `list_workflows` is called with `include_deleted=true`.
+    deleted_at: datetime | None = None
 
 
 class WorkflowList(_WireBase):
@@ -200,6 +204,13 @@ class WorkflowDeleteResult(_WireBase):
     workflow_id: str
     name: str
     deleted: bool
+
+
+class WorkflowUndeleteResult(_WireBase):
+    workflow_id: str
+    name: str
+    deleted: bool
+    idempotent: bool = False
 
 
 class WorkflowLineage(_WireBase):

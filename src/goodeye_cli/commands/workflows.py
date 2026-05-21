@@ -64,6 +64,11 @@ def list_cmd(
     limit: int = typer.Option(25, "--limit", "-l", min=1, help="Max results per page."),
     cursor: str | None = typer.Option(None, "--cursor", help="Start listing from this cursor."),
     all_pages: bool = typer.Option(False, "--all", help="Follow cursors and combine all pages."),
+    include_deleted: bool = typer.Option(
+        False,
+        "--include-deleted",
+        help="Also list your own soft-deleted workflows (restore with `workflows undelete`).",
+    ),
 ) -> None:
     """List workflows you own."""
     console = Console()
@@ -76,6 +81,7 @@ def list_cmd(
                 search=search,
                 limit=limit,
                 cursor=page_cursor,
+                include_deleted=include_deleted,
             ),
             cursor=cursor,
             all_pages=all_pages,
@@ -91,11 +97,22 @@ def list_cmd(
     table.add_column("Version", justify="right")
     table.add_column("Fork of", no_wrap=True)
     table.add_column("Description")
+    # The deleted-at column is only meaningful (and only carries values)
+    # when the caller asked to include their soft-deleted workflows.
+    if include_deleted:
+        table.add_column("Deleted at", no_wrap=True)
     for item in items:
         fork_cell = ""
         if item.parent_template_id:
             fork_cell = f"tpl {item.parent_template_id[:8]}...@v{item.parent_template_version}"
-        table.add_row(item.id, item.name, str(item.current_version), fork_cell, item.description)
+        cells = [item.id, item.name, str(item.current_version), fork_cell, item.description]
+        if include_deleted:
+            cells.append(
+                f"[yellow]{item.deleted_at.isoformat()}[/yellow]"
+                if item.deleted_at is not None
+                else "[dim]live[/dim]"
+            )
+        table.add_row(*cells)
     if not items:
         console.print("[dim]No workflows matched.[/dim]")
     else:
@@ -597,6 +614,26 @@ def delete(
         console.print(f"[yellow]Not deleted[/yellow] {result.name}")
 
 
+@app.command("undelete")
+def undelete(
+    workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
+) -> None:
+    """Restore a soft-deleted workflow you own.
+
+    The inverse of ``goodeye workflows delete``. List your deleted
+    workflows first with ``goodeye workflows list --include-deleted``.
+
+    If a live workflow already holds the deleted workflow's name (slug),
+    the server reports a conflict: delete or rename that workflow first,
+    then retry.
+    """
+    console = Console()
+    with _client(require_auth=True) as client:
+        result = client.undelete_workflow(workflow_id)
+    suffix = " (idempotent)" if result.idempotent else ""
+    console.print(f"[green]Undeleted[/green] {result.name}.{suffix}")
+
+
 @app.command("grant")
 def grant(
     workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
@@ -818,4 +855,5 @@ __all__ = [
     "revoke_grant",
     "teach",
     "transfer_ownership",
+    "undelete",
 ]

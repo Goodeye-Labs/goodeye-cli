@@ -299,11 +299,13 @@ goodeye auth revoke-key <key-id-or-name>
     Revoke an API key. The key stops working immediately. The argument may
     be the ID shown by `auth list-keys` or a unique key name.
 
-goodeye workflows list [--filter mine|shared-with-me|all] [--tag TAG] [--search QUERY] [--limit N] [--cursor TOKEN] [--all] [--json|--table]
+goodeye workflows list [--filter mine|shared-with-me|all] [--tag TAG] [--search QUERY] [--limit N] [--cursor TOKEN] [--all] [--include-deleted] [--json|--table]
     List workflows you can access (owned + shared with you via grants). The
     ID column is accepted by `get`, `delete`, and grant commands. When signed
     in, you can also use your own workflow name (slug). Fetches one page by
     default; --all follows cursors and returns a combined items envelope.
+    Pass --include-deleted to also list your own soft-deleted workflows; the
+    table then adds a "Deleted at" column (restore with `workflows undelete`).
 
 goodeye workflows search <query> [--filter mine|shared-with-me|all] [--tag TAG] [--limit N] [--json|--table]
     LLM-ranked natural-language search over workflows you can access.
@@ -329,6 +331,11 @@ goodeye workflows publish <file.md|-> [--name NAME] [--description TEXT] [--outc
 
 goodeye workflows delete <id-or-name> [--yes]
     Delete a workflow you own.
+
+goodeye workflows undelete <id-or-name>
+    Restore a soft-deleted workflow you own (the inverse of `delete`). If a
+    live workflow already holds the deleted workflow's name, delete or
+    rename that one first, then retry.
 
 goodeye workflows teach <id-or-name> [--trigger-context JSON]
     Fetch the teach SKILL pack for an existing workflow. The pack is

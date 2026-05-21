@@ -89,7 +89,7 @@ def test_workflows_list_defaults_to_one_compact_json_page(
         '"description":"","outcome":"","tags":[],"updated_at":null,'
         '"owner_user_id":null,"parent_template_id":null,'
         '"parent_template_version":null,"effective_role":null,'
-        '"version_token":null}],"next_cursor":"c1"}\n'
+        '"version_token":null,"deleted_at":null}],"next_cursor":"c1"}\n'
     )
     params = dict(route.calls.last.request.url.params)
     assert params["filter"] == "all"
@@ -941,6 +941,155 @@ def test_workflows_delete_with_yes_flag(tmp_config_paths: ConfigPaths, monkeypat
     result = runner.invoke(app, ["workflows", "delete", "skl_01", "--yes"])
     assert result.exit_code == 0, result.output
     assert "Deleted" in result.output
+
+
+@respx.mock
+def test_workflows_undelete_success(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    route = respx.post(f"{SERVER}/v1/workflows/skl_01/undelete").mock(
+        return_value=httpx.Response(
+            200, json={"workflow_id": "skl_01", "name": "skl_01", "deleted": False}
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "undelete", "skl_01"])
+    assert result.exit_code == 0, result.output
+    assert route.call_count == 1
+    assert "Undeleted" in result.output
+    assert "skl_01" in result.output
+
+
+@respx.mock
+def test_workflows_undelete_idempotent_suffix(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.post(f"{SERVER}/v1/workflows/skl_01/undelete").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "workflow_id": "skl_01",
+                "name": "skl_01",
+                "deleted": False,
+                "idempotent": True,
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "undelete", "skl_01"])
+    assert result.exit_code == 0, result.output
+    assert "idempotent" in result.output
+
+
+@respx.mock
+def test_workflows_undelete_conflict_surfaces_message(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    from goodeye_cli.errors import Conflict
+
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.post(f"{SERVER}/v1/workflows/skl_01/undelete").mock(
+        return_value=httpx.Response(
+            409,
+            json={
+                "error": "conflict",
+                "message": (
+                    "A live workflow already holds the slug 'skl_01'. "
+                    "Delete or rename it first, then retry."
+                ),
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "undelete", "skl_01"])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, Conflict)
+    assert "Delete or rename it first" in str(result.exception)
+
+
+@respx.mock
+def test_workflows_undelete_not_found_errors(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    from goodeye_cli.errors import NotFound
+
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.post(f"{SERVER}/v1/workflows/skl_missing/undelete").mock(
+        return_value=httpx.Response(
+            404, json={"error": "not_found", "message": "Workflow not found."}
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "undelete", "skl_missing"])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, NotFound)
+
+
+@respx.mock
+def test_workflows_list_include_deleted_sends_param_and_marks_rows(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    route = respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "id": "skl_live",
+                        "name": "live-one",
+                        "current_version": 2,
+                        "description": "a live workflow",
+                        "deleted_at": None,
+                    },
+                    {
+                        "id": "skl_gone",
+                        "name": "gone-one",
+                        "current_version": 1,
+                        "description": "a deleted workflow",
+                        "deleted_at": "2026-05-01T12:00:00Z",
+                    },
+                ],
+                "next_cursor": None,
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        app, ["workflows", "list", "--filter", "mine", "--include-deleted", "--table"]
+    )
+    assert result.exit_code == 0, result.output
+    assert route.call_count == 1
+    assert dict(route.calls.last.request.url.params)["include_deleted"] == "true"
+    assert "Deleted at" in result.output
+    assert "2026-05-01" in result.output
+    assert "skl_live" in result.output
+    assert "skl_gone" in result.output
+
+
+@respx.mock
+def test_workflows_list_omits_deleted_column_by_default(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    route = respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "id": "skl_live",
+                        "name": "live-one",
+                        "current_version": 1,
+                        "description": "a live workflow",
+                        "deleted_at": None,
+                    }
+                ],
+                "next_cursor": None,
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "list", "--filter", "mine", "--table"])
+    assert result.exit_code == 0, result.output
+    assert "include_deleted" not in dict(route.calls.last.request.url.params)
+    assert "Deleted at" not in result.output
 
 
 @respx.mock
