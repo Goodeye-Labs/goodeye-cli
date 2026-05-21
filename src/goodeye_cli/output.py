@@ -88,12 +88,14 @@ def next_page_hint(
     next_cursor: str,
     limit: int,
     options: Sequence[tuple[str, str | None]] = (),
+    bool_flags: Sequence[str] = (),
     table: bool = True,
 ) -> str:
     parts = list(command)
     for flag, value in options:
         if value is not None and value != "":
             parts.extend([flag, value])
+    parts.extend(bool_flags)
     if table:
         parts.append("--table")
     parts.extend(["--limit", str(limit), "--cursor", next_cursor])

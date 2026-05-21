@@ -158,6 +158,37 @@ def test_workflows_list_table_prints_next_page_hint(
     assert "--filter all" in result.output
     assert "--tag ops" in result.output
     assert "--search triage" in result.output
+    # Without --include-deleted the hint must not suggest it.
+    assert "--include-deleted" not in result.output
+
+
+@respx.mock
+def test_workflows_list_next_page_hint_keeps_include_deleted(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    {"id": "skl_01", "name": "a", "visibility": "public", "current_version": 1}
+                ],
+                "next_cursor": "c1",
+            },
+        )
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["workflows", "list", "--filter", "all", "--include-deleted", "--table"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "--cursor c1" in result.output
+    # The next-page hint must carry --include-deleted so following it does not
+    # silently drop the deleted rows and the "Deleted at" column mid-pagination.
+    assert "--include-deleted" in result.output
 
 
 @respx.mock

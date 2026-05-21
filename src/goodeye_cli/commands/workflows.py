@@ -127,6 +127,7 @@ def list_cmd(
                 ("--tag", tag),
                 ("--search", search),
             ),
+            bool_flags=("--include-deleted",) if include_deleted else (),
         )
         console.print(f"[dim]{hint}[/dim]")
 
