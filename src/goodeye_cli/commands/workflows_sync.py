@@ -1,9 +1,10 @@
 """`goodeye workflows sync ...` subcommand group.
 
 This layer configures where the caller's registry workflows are mirrored
-locally. It exposes the ``target`` subcommands (add, list, remove) that
-read and write the local sync config. Pulling and pushing workflow bodies
-is handled by later layers and is not wired up here.
+locally and pulls workflow bodies down to those directories. It exposes the
+``target`` subcommands (add, list, remove) that read and write the local sync
+config, plus ``pull`` which writes registry workflows to disk and records what
+it wrote in the local index.
 """
 
 from __future__ import annotations
@@ -13,14 +14,27 @@ from rich.console import Console
 from rich.table import Table
 
 from goodeye_cli import sync
-from goodeye_cli.config import get_config_paths
-from goodeye_cli.errors import ValidationFailed
+from goodeye_cli.client import GoodeyeClient
+from goodeye_cli.config import get_api_key, get_config_paths, get_server
+from goodeye_cli.errors import AuthRequired, ValidationFailed
 from goodeye_cli.output import echo_json, items_envelope, resolve_output_mode
 
 app = typer.Typer(
     help="Sync workflows between the registry and local skill directories.",
     no_args_is_help=True,
 )
+
+
+def _client(*, require_auth: bool) -> GoodeyeClient:
+    api_key = get_api_key()
+    if require_auth and not api_key:
+        raise AuthRequired(
+            slug="auth_required",
+            message="Authentication required.",
+            hint="Run `goodeye login` or set GOODEYE_API_KEY.",
+        )
+    return GoodeyeClient(get_server(), api_key=api_key)
+
 
 target_app = typer.Typer(
     help="Configure local sync target directories.",
@@ -151,4 +165,71 @@ def target_remove(
         console.print(f"[yellow]No sync target[/yellow] found for {stored_path}")
 
 
-__all__ = ["app", "target_add", "target_app", "target_list", "target_remove"]
+_SKIPPED_ACTIONS = frozenset({"skipped-modified", "skipped-conflict"})
+
+
+@app.command("pull")
+def pull(
+    slugs: list[str] = typer.Argument(
+        None,
+        help="Workflow slugs to pull. Omit to pull everything in scope.",
+    ),
+    target: str | None = typer.Option(
+        None,
+        "--target",
+        help="Operate on a single configured target directory instead of all of them.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite local edits with the registry copy.",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Print results as JSON."),
+    table_output: bool = typer.Option(False, "--table", help="Print results as a table."),
+) -> None:
+    """Pull registry workflows down to the configured local directories.
+
+    Each in-scope workflow is written to <target>/<slug>/SKILL.md. A local file
+    that has been edited since the last pull is preserved unless --force is
+    given. Requires authentication.
+    """
+    mode = resolve_output_mode(json_output=json_output, table_output=table_output)
+    paths = get_config_paths()
+    config = sync.load_sync_config(paths)
+    state = sync.load_sync_state(paths)
+
+    with _client(require_auth=True) as client:
+        result = sync.pull(
+            client,
+            config,
+            state,
+            slugs=list(slugs or []),
+            target_path=target,
+            force=force,
+            paths=paths,
+        )
+
+    if mode == "json":
+        echo_json(items_envelope(result.items))
+        return
+
+    console = Console()
+    if not result.items:
+        console.print("[dim]No workflows in scope to pull.[/dim]")
+        return
+    table = Table(title="Pulled workflows")
+    table.add_column("Slug", no_wrap=True)
+    table.add_column("Target", no_wrap=True)
+    table.add_column("Action")
+    for item in result.items:
+        table.add_row(item.slug, item.target_path, item.action)
+    console.print(table)
+
+    if any(item.action in _SKIPPED_ACTIONS for item in result.items):
+        console.print(
+            "[yellow]Next:[/yellow] some workflows kept their local edits; "
+            "re-run with --force to overwrite them with the registry copy."
+        )
+
+
+__all__ = ["app", "pull", "target_add", "target_app", "target_list", "target_remove"]

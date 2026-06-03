@@ -13,16 +13,37 @@ machines or shared across accounts, and matches the form the presets use.
 
 from __future__ import annotations
 
+import fnmatch
+import hashlib
 import os
+import re
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from goodeye_cli.config import ConfigPaths, _load_json, _write_json_0600
-from goodeye_cli.errors import Conflict, ValidationFailed
+from goodeye_cli.errors import Conflict, NotFound, ValidationFailed
+
+if TYPE_CHECKING:
+    from goodeye_cli.client import GoodeyeClient
+    from goodeye_cli.wire import WorkflowSummary
 
 SyncScope = Literal["owned", "all", "selected"]
+
+# A workflow's registry name doubles as its on-disk slug and directory name.
+# We only materialize names that are safe filesystem path segments: lowercase
+# alphanumerics and hyphens, starting with an alphanumeric. A name that does
+# not match is skipped during a pull rather than written to disk.
+SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+
+# Per-target scope mapped to the server-side ``filter`` value for listing.
+# ``selected`` lists everything visible and then narrows locally by glob.
+_SCOPE_TO_FILTER: dict[SyncScope, str] = {
+    "owned": "mine",
+    "all": "all",
+    "selected": "all",
+}
 
 # The set form of ``SyncScope``, for runtime validation of user-supplied
 # values. Kept in sync with the ``Literal`` above by construction.
@@ -214,18 +235,403 @@ def list_targets(config: SyncConfig) -> list[SyncTarget]:
     return list(config.targets)
 
 
+# ----- sync-state index models -----
+
+
+class SyncVerifierBinding(_SyncBase):
+    """One verifier a synced workflow references, recorded in the index.
+
+    Mirrors the verifier reference carried on a workflow so a later push can
+    reattach the same bindings without re-deriving them from the body.
+    """
+
+    name: str
+    verifier_id: str
+    version: int | None = None
+
+
+class SyncEntry(_SyncBase):
+    """A single synced workflow tracked in the local index.
+
+    Identified by ``(slug, target_path)``: the same workflow may be mirrored
+    into more than one target. ``body_sha256`` is the hash of the body last
+    written to (or read from) disk, used to detect local edits on the next
+    pass. ``read_only`` records that the caller holds only a view grant, so
+    later pushes know not to attempt an upload.
+    """
+
+    workflow_id: str
+    slug: str
+    target_path: str
+    synced_version: int
+    version_token: str | None = None
+    body_sha256: str
+    verifier_bindings: list[SyncVerifierBinding] = Field(default_factory=list)
+    effective_role: str = "owner"
+    read_only: bool = False
+
+
+class SyncState(_SyncBase):
+    """The local sync index persisted to ``sync-state.json``.
+
+    Records what was last mirrored where, so subsequent pulls and pushes can
+    detect drift on either side. A pull persists this index even when it raises
+    partway through, so each ``SKILL.md`` already written has a matching entry;
+    re-running the pull reads the index back and resumes from where it left off
+    rather than re-pulling already-written workflows as untracked.
+    """
+
+    version: int = 1
+    identity: str | None = None
+    entries: list[SyncEntry] = Field(default_factory=list)
+
+
+def load_sync_state(paths: ConfigPaths) -> SyncState:
+    """Load the sync index, returning a default when the file is absent.
+
+    Raises ``ValidationFailed`` when the file exists but cannot be parsed.
+    """
+    if not paths.sync_state_file.exists():
+        return SyncState()
+    data = _load_json(paths.sync_state_file)
+    if data is None:
+        raise ValidationFailed(
+            slug="validation_error",
+            message=f"Could not parse sync index at {paths.sync_state_file}.",
+            hint="Fix the JSON by hand, or delete the file to re-sync from the registry.",
+        )
+    return SyncState.model_validate(data)
+
+
+def save_sync_state(state: SyncState, paths: ConfigPaths) -> Path:
+    """Persist the sync index to disk. Returns the path written."""
+    _write_json_0600(paths.sync_state_file, state.model_dump(mode="json"))
+    return paths.sync_state_file
+
+
+def body_sha256(body: str) -> str:
+    """Return the hex SHA-256 of a workflow body, encoded as UTF-8."""
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def find_entry(state: SyncState, *, slug: str, target_path: str) -> SyncEntry | None:
+    """Return the index entry for ``(slug, target_path)``, or None.
+
+    Matching is by slug and the normalized target path, so the same workflow in
+    two different targets stays distinct.
+    """
+    normalized = normalize_target_path(target_path)
+    for entry in state.entries:
+        if entry.slug == slug and normalize_target_path(entry.target_path) == normalized:
+            return entry
+    return None
+
+
+def upsert_entry(state: SyncState, entry: SyncEntry) -> None:
+    """Replace the matching ``(slug, target_path)`` entry, or append it.
+
+    Operates on the in-memory ``state`` so the caller controls when it is saved.
+    """
+    normalized = normalize_target_path(entry.target_path)
+    for index, existing in enumerate(state.entries):
+        if existing.slug == entry.slug and (
+            normalize_target_path(existing.target_path) == normalized
+        ):
+            state.entries[index] = entry
+            return
+    state.entries.append(entry)
+
+
+# ----- scope selection + change detection -----
+
+
+def scope_filter(scope: SyncScope) -> str:
+    """Map a target scope to the server-side ``list_workflows`` filter."""
+    return _SCOPE_TO_FILTER[scope]
+
+
+def select_for_target(
+    target: SyncTarget,
+    summaries: list[WorkflowSummary],
+    *,
+    slugs: list[str] | None = None,
+) -> list[WorkflowSummary]:
+    """Narrow listed workflows to those belonging to ``target``.
+
+    For ``selected`` targets, keep only summaries whose slug (the workflow
+    name) matches a configured glob pattern. For ``owned``/``all``, the server
+    filter already scoped the listing, so all returned rows belong here. When
+    explicit ``slugs`` are supplied (from ``pull`` arguments), intersect with
+    them as well.
+    """
+    chosen = list(summaries)
+    if target.scope == "selected":
+        patterns = target.selected
+        chosen = [s for s in chosen if any(fnmatch.fnmatch(s.name, p) for p in patterns)]
+    if slugs:
+        wanted = set(slugs)
+        chosen = [s for s in chosen if s.name in wanted]
+    return chosen
+
+
+def local_skill_path(target: SyncTarget, slug: str) -> Path:
+    """Return the absolute ``SKILL.md`` path for ``slug`` under ``target``."""
+    return expand_target_path(target.path) / slug / "SKILL.md"
+
+
+def read_local_body(target: SyncTarget, slug: str) -> str | None:
+    """Return the on-disk body for ``slug``, or None when no file exists."""
+    path = local_skill_path(target, slug)
+    if not path.exists():
+        return None
+    return path.read_text(encoding="utf-8")
+
+
+def is_modified_locally(entry: SyncEntry, body: str | None) -> bool:
+    """Return whether the local body differs from the recorded hash.
+
+    A missing body is not a local modification (there is nothing to lose).
+    """
+    if body is None:
+        return False
+    return body_sha256(body) != entry.body_sha256
+
+
+def server_moved(entry: SyncEntry, summary: WorkflowSummary) -> bool:
+    """Return whether the registry advanced past the recorded version.
+
+    Compares the recorded ``version_token`` against the summary's. When either
+    side lacks a token we treat it as moved so we re-fetch rather than risk
+    serving stale content.
+    """
+    if entry.version_token is None or summary.version_token is None:
+        return True
+    return entry.version_token != summary.version_token
+
+
+# ----- pull orchestration -----
+
+PullAction = Literal[
+    "pulled",
+    "up-to-date",
+    "skipped-modified",
+    "skipped-conflict",
+    "skipped-unsafe-name",
+]
+
+
+class PullItem(_SyncBase):
+    """One per-(slug, target) outcome from a pull pass."""
+
+    slug: str
+    target_path: str
+    action: PullAction
+    workflow_id: str | None = None
+
+
+class PullResult(_SyncBase):
+    """The full set of per-item outcomes from a pull pass."""
+
+    items: list[PullItem] = Field(default_factory=list)
+
+
+def _targets_to_process(config: SyncConfig, target_path: str | None) -> list[SyncTarget]:
+    """Resolve which configured targets a pull should operate on.
+
+    With no ``target_path`` this is every configured target (an empty list
+    when none are configured, which the caller reports as nothing in scope).
+    With one, it is the single target whose expanded path matches; an
+    unmatched path raises ``NotFound``.
+    """
+    if target_path is None:
+        return list(config.targets)
+    wanted = expand_target_path(target_path)
+    matches = [t for t in config.targets if expand_target_path(t.path) == wanted]
+    if not matches:
+        raise NotFound(
+            slug="not_found",
+            message=f"No sync target configured for {normalize_target_path(target_path)}.",
+            hint="List targets with `goodeye workflows sync target list`.",
+        )
+    return matches
+
+
+def _list_all_for_target(client: GoodeyeClient, target: SyncTarget) -> list[WorkflowSummary]:
+    """List every workflow visible to ``target``, following all pages."""
+    from goodeye_cli.output import fetch_pages
+
+    filter_ = scope_filter(target.scope)
+    items, _ = fetch_pages(
+        lambda page_cursor: client.list_workflows(filter_=filter_, cursor=page_cursor),
+        cursor=None,
+        all_pages=True,
+    )
+    return list(items)
+
+
+def _write_skill_file(path: Path, body: str) -> None:
+    """Write a workflow body to ``path`` with ordinary file permissions.
+
+    Unlike the index/config JSON, a ``SKILL.md`` is content the agent loads, so
+    it gets the user's normal umask rather than 0600.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+
+
+def pull(
+    client: GoodeyeClient,
+    config: SyncConfig,
+    state: SyncState,
+    *,
+    slugs: list[str],
+    target_path: str | None,
+    force: bool,
+    paths: ConfigPaths,
+) -> PullResult:
+    """Mirror registry workflows onto disk for the configured targets.
+
+    For each target, lists the workflows in scope, then for each one decides
+    whether to write it: an unchanged local copy is left alone, a locally
+    edited copy is preserved unless ``force`` is set, and anything else is
+    fetched and written verbatim. The index is updated in memory as each
+    workflow is written and persisted in a ``finally`` even if a later fetch
+    raises, so files written before a failure are tracked and a re-run resumes
+    from where it left off rather than re-pulling them as untracked.
+    """
+    result = PullResult()
+    targets = _targets_to_process(config, target_path)
+    slug_args = list(slugs)
+
+    try:
+        for target in targets:
+            summaries = _list_all_for_target(client, target)
+            selected = select_for_target(target, summaries, slugs=slug_args or None)
+            for summary in selected:
+                result.items.append(_pull_one(client, state, target, summary, force=force))
+    finally:
+        # Persist whatever the index accumulated, including on a mid-loop raise:
+        # any SKILL.md already written has a matching entry, so a re-run treats
+        # it as tracked instead of clobbering or duplicating it.
+        save_sync_state(state, paths)
+    return result
+
+
+def _pull_one(
+    client: GoodeyeClient,
+    state: SyncState,
+    target: SyncTarget,
+    summary: WorkflowSummary,
+    *,
+    force: bool,
+) -> PullItem:
+    """Pull a single workflow into one target and update the index in place."""
+    slug = summary.name
+    stored_target = normalize_target_path(target.path)
+    if not SLUG_RE.match(slug):
+        return PullItem(slug=slug, target_path=stored_target, action="skipped-unsafe-name")
+
+    entry = find_entry(state, slug=slug, target_path=target.path)
+    local_body = read_local_body(target, slug)
+
+    # Protect local edits. An entry whose disk copy diverged from the recorded
+    # hash, or an untracked pre-existing SKILL.md, is not overwritten unless the
+    # caller forces it. A conflict means both sides moved relative to a recorded
+    # sync point: a tracked entry whose local body diverged AND whose server
+    # token advanced. An untracked file has no recorded base, so it is reported
+    # as plain modified, never a conflict.
+    tracked_edit = entry is not None and is_modified_locally(entry, local_body)
+    untracked_present = entry is None and local_body is not None
+    if (tracked_edit or untracked_present) and not force:
+        is_conflict = entry is not None and tracked_edit and server_moved(entry, summary)
+        action: PullAction = "skipped-conflict" if is_conflict else "skipped-modified"
+        return PullItem(
+            slug=slug,
+            target_path=stored_target,
+            action=action,
+            workflow_id=summary.id,
+        )
+
+    # Already current: an entry exists, the server has not advanced, and the
+    # local file matches what we recorded. No fetch needed.
+    if (
+        entry is not None
+        and not server_moved(entry, summary)
+        and local_body is not None
+        and not is_modified_locally(entry, local_body)
+    ):
+        return PullItem(
+            slug=slug,
+            target_path=stored_target,
+            action="up-to-date",
+            workflow_id=summary.id,
+        )
+
+    detail = client.get_workflow(summary.id)
+    assert not isinstance(detail, str)  # JSON path: accept_markdown is False
+    path = local_skill_path(target, slug)
+    _write_skill_file(path, detail.body)
+
+    effective_role = detail.effective_role or summary.effective_role or "owner"
+    # Record the validated slug (the name we checked against SLUG_RE and used to
+    # build the file path), so the recorded slug can never diverge from the path
+    # on disk even if the detail payload reports a different name.
+    upsert_entry(
+        state,
+        SyncEntry(
+            workflow_id=detail.id,
+            slug=slug,
+            target_path=stored_target,
+            synced_version=detail.version,
+            version_token=detail.version_token,
+            body_sha256=body_sha256(detail.body),
+            verifier_bindings=[
+                SyncVerifierBinding(name=v.name, verifier_id=v.verifier_id, version=v.version)
+                for v in detail.verifiers
+            ],
+            effective_role=effective_role,
+            read_only=effective_role == "view",
+        ),
+    )
+    return PullItem(
+        slug=slug,
+        target_path=stored_target,
+        action="pulled",
+        workflow_id=detail.id,
+    )
+
+
 __all__ = [
     "PRESETS",
+    "SLUG_RE",
     "SYNC_SCOPES",
+    "PullAction",
+    "PullItem",
+    "PullResult",
     "SyncConfig",
+    "SyncEntry",
     "SyncScope",
+    "SyncState",
     "SyncTarget",
+    "SyncVerifierBinding",
     "add_target",
+    "body_sha256",
     "expand_target_path",
+    "find_entry",
+    "is_modified_locally",
     "list_targets",
     "load_sync_config",
+    "load_sync_state",
+    "local_skill_path",
     "normalize_target_path",
+    "pull",
+    "read_local_body",
     "remove_target",
     "resolve_preset",
     "save_sync_config",
+    "save_sync_state",
+    "scope_filter",
+    "select_for_target",
+    "server_moved",
+    "upsert_entry",
 ]
