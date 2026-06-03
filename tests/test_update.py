@@ -220,6 +220,8 @@ def test_background_check_returns_none_on_cache_write_failure(tmp_path: Path) ->
         credentials_file=config_dir / "credentials.json",
         config_file=config_dir / "config.json",
         update_check_file=config_dir / "update-check.json",
+        sync_file=config_dir / "sync.json",
+        sync_state_file=config_dir / "sync-state.json",
     )
 
     def respond(request: httpx.Request) -> httpx.Response:

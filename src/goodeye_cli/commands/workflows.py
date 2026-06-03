@@ -14,6 +14,7 @@ from rich.markup import escape as rich_escape
 from rich.table import Table
 
 from goodeye_cli.client import GoodeyeClient
+from goodeye_cli.commands import workflows_sync
 from goodeye_cli.commands.prompts import confirm_destructive
 from goodeye_cli.config import get_api_key, get_server
 from goodeye_cli.errors import AuthRequired, ValidationFailed
@@ -32,6 +33,7 @@ app = typer.Typer(
     help="Browse and manage the caller's private workflows.",
     no_args_is_help=True,
 )
+app.add_typer(workflows_sync.app, name="sync")
 
 
 def _client(*, require_auth: bool) -> GoodeyeClient:
