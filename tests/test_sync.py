@@ -2043,6 +2043,48 @@ def test_push_forbidden_is_reported_read_only(
 
 
 @respx.mock
+def test_push_validation_error_is_reported_skipped_invalid_not_aborting(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    # An entry with no recorded version token (allowed by the index model) makes
+    # the server reject the update as a validation error. That one body is
+    # reported as skipped-invalid; the rest of the push pass still runs.
+    _me_route()
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    _write_skill(target_dir, "alpha", _push_body(slug="alpha"))
+    _write_skill(target_dir, "beta", _push_body(slug="beta"))
+    bad = _modified_entry(target_dir, id_="skl_a", slug="alpha")
+    bad.version_token = None  # the model permits a null token
+    good = _modified_entry(target_dir, id_="skl_b", slug="beta", token="tok-1")
+    state = SyncState(entries=[bad, good])
+
+    def _save(request: httpx.Request) -> httpx.Response:
+        sent = json.loads(request.content)
+        if sent["expected_version_token"] is None:
+            return httpx.Response(
+                400,
+                json={
+                    "error": "validation_error",
+                    "message": "expected_version_token is required when updating an "
+                    "existing workflow",
+                },
+            )
+        return _save_response(workflow_id="skl_b", name="beta")
+
+    respx.post(f"{SERVER}/v1/workflows").mock(side_effect=_save)
+
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
+
+    by_slug = {i.slug: i for i in result.items}
+    assert by_slug["alpha"].action == "skipped-invalid"
+    assert by_slug["alpha"].detail is not None and "version_token" in by_slug["alpha"].detail
+    # The invalid entry did not abort the pass: the valid one still pushed.
+    assert by_slug["beta"].action == "pushed"
+
+
+@respx.mock
 def test_push_untracked_local_dir_is_flagged_with_no_save(
     tmp_path: Path, tmp_config_paths: ConfigPaths
 ) -> None:
@@ -2475,6 +2517,51 @@ def test_pull_does_not_materialize_deleted_workflow(
     assert result.items == []
     assert detail_route.call_count == 0
     assert not local_skill_dir(SyncTarget(path=str(target_dir), scope="owned"), "ghost").exists()
+
+
+@respx.mock
+def test_pull_reused_slug_does_not_mask_deletion(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    # The tracked workflow (skl_old) was deleted server-side and a different
+    # workflow (skl_new) was created under the same slug. The live set lists only
+    # the new id. Because the local copy was edited, the pull keeps it rather than
+    # rewriting the entry to the new id, so reconcile still sees the old id. The
+    # entry must be reconciled as gone: a reused slug must not keep the deleted
+    # workflow tracked.
+    _me_route()
+    target_dir = tmp_path / "skills"
+    target = SyncTarget(path=str(target_dir), scope="owned")
+    config = SyncConfig(targets=[target])
+    # Recorded base differs from the on-disk body, so the local copy reads as
+    # edited and is preserved (not re-pulled) on a non-forced pull.
+    _write_skill(target_dir, "gone", "locally edited body")
+    state = SyncState(
+        entries=[
+            _tracked_entry(target_dir, id_="skl_old", slug="gone", body="server body", token="t1")
+        ]
+    )
+    # The slug is live again, but under a brand-new id.
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response([_summary_dict(id_="skl_new", name="gone", token="t2")])
+    )
+
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = pull(
+            client,
+            config,
+            state,
+            slugs=[],
+            target_path=None,
+            force=False,
+            yes=True,  # non-interactive auto-approve removal
+            paths=tmp_config_paths,
+        )
+
+    actions = {(i.slug, i.action) for i in result.items}
+    # The edited local copy is reported as skipped (a conflict against the new id)
+    # and the deleted old id is reconciled rather than masked by the live slug.
+    assert ("gone", "deleted-local") in actions
 
 
 @respx.mock

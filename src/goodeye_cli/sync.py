@@ -645,7 +645,6 @@ def _reconcile_deletions(
     stored_target = normalize_target_path(target.path)
     wanted = set(slug_args)
     live_ids = {s.id for s in live}
-    live_slugs = {s.name for s in live}
 
     items: list[PullItem] = []
     surviving: list[SyncEntry] = []
@@ -659,7 +658,13 @@ def _reconcile_deletions(
         if wanted and entry.slug not in wanted:
             surviving.append(entry)
             continue
-        if entry.workflow_id in live_ids or entry.slug in live_slugs:
+        # Identity is the workflow id, not the slug: a slug can be reused after a
+        # delete, so a live workflow sharing this entry's slug but carrying a
+        # different id does not keep the tracked (now-deleted) workflow alive. A
+        # reused slug that the caller pulled into the index already rewrote this
+        # entry's id to the live one via `upsert_entry`; anything still pointing
+        # at an id absent from the live set is genuinely gone.
+        if entry.workflow_id in live_ids:
             surviving.append(entry)
             continue
 
@@ -1447,6 +1452,12 @@ def _push_candidate(
         # Belt and suspenders: the recorded role said writable but the server
         # rejected the write. Surface it as read-only with the server message.
         return base.model_copy(update={"action": "skipped-read-only", "detail": exc.message})
+    except ValidationFailed as exc:
+        # The server rejected this one body (e.g. a missing version token on an
+        # existing workflow, which the index model permits as None). Report it as
+        # one skipped item so the rest of the push pass still runs instead of
+        # aborting on the first invalid entry.
+        return base.model_copy(update={"action": "skipped-invalid", "detail": exc.message})
 
     entry.synced_version = save_result.version
     entry.version_token = save_result.version_token
