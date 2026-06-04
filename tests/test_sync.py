@@ -14,6 +14,7 @@ from goodeye_cli.config import ConfigPaths
 from goodeye_cli.errors import Conflict, NotFound, ServerError, ValidationFailed
 from goodeye_cli.sync import (
     PRESETS,
+    PushItem,
     SyncConfig,
     SyncEntry,
     SyncState,
@@ -30,6 +31,7 @@ from goodeye_cli.sync import (
     local_skill_path,
     normalize_target_path,
     pull,
+    push,
     read_local_body,
     remove_target,
     resolve_preset,
@@ -1559,3 +1561,525 @@ def test_status_distinct_scopes_list_separately(
     assert all_route.call_count == 1
     assert {i.slug for i in result.items} == {"mine-flow", "shared-flow"}
     assert all(i.state == "clean" for i in result.items)
+
+
+# ----- push engine -----
+
+
+def _push_body(
+    *,
+    slug: str,
+    description: str = "Draft a postmortem from an incident transcript.",
+    outcome: str = "Reduce mean-time-to-postmortem from days to hours.",
+    tags: list[str] | None = None,
+    name: str | None = None,
+    identity_key: str = "name",
+    extra_body: str = "do the work",
+) -> str:
+    """Build a workflow body with front-matter for a push test.
+
+    The identity line uses ``identity_key`` (``name`` by default, or ``slug``
+    to exercise the slug-key arm of the rename refusal). Its value defaults to
+    ``slug``; pass a different ``name`` to exercise the rename-refusal path.
+    Omit a field by passing an empty string to drop it from the front-matter
+    (used for the missing-required-field cases).
+    """
+    identity_value = name if name is not None else slug
+    lines = ["---", f"{identity_key}: {identity_value}"]
+    if description:
+        lines.append(f"description: {description}")
+    if outcome:
+        lines.append(f"outcome: {outcome}")
+    if tags is not None:
+        rendered = ", ".join(tags)
+        lines.append(f"tags: [{rendered}]")
+    lines.extend(["---", "", extra_body, ""])
+    return "\n".join(lines)
+
+
+def _save_response(
+    *,
+    workflow_id: str,
+    name: str,
+    version: int = 2,
+    token: str = "tok-2",
+    verifiers: list[dict] | None = None,
+) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "workflow_id": workflow_id,
+            "version": version,
+            "name": name,
+            "version_token": token,
+            "verifiers": verifiers or [],
+        },
+    )
+
+
+def _modified_entry(
+    target_dir: Path,
+    *,
+    id_: str,
+    slug: str,
+    token: str = "tok-1",
+    role: str = "owner",
+    verifiers: list[SyncVerifierBinding] | None = None,
+) -> SyncEntry:
+    """An index entry recording a hash that no on-disk edit will match.
+
+    The recorded ``body_sha256`` is for a placeholder body, so any real local
+    body written by a test reads as modified and becomes a push candidate.
+    """
+    return SyncEntry(
+        workflow_id=id_,
+        slug=slug,
+        target_path=normalize_target_path(str(target_dir)),
+        synced_version=1,
+        version_token=token,
+        body_sha256=body_sha256(f"recorded-base-{slug}"),
+        verifier_bindings=verifiers or [],
+        effective_role=role,
+        read_only=role == "view",
+    )
+
+
+@respx.mock
+def test_push_uploads_modified_entry_and_updates_index(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    body = _push_body(slug="incident-postmortem", tags=["sre", "postmortem"])
+    _write_skill(target_dir, "incident-postmortem", body)
+    state = SyncState(
+        entries=[
+            _modified_entry(
+                target_dir,
+                id_="skl_01",
+                slug="incident-postmortem",
+                token="tok-1",
+                verifiers=[SyncVerifierBinding(name="tone", verifier_id="vrf_1", version=3)],
+            )
+        ]
+    )
+
+    # Listing or fetching during a push is a bug: route only POST /v1/workflows.
+    list_route = respx.get(f"{SERVER}/v1/workflows")
+    detail_route = respx.get(f"{SERVER}/v1/workflows/skl_01")
+    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=_save_response(
+            workflow_id="skl_01",
+            name="incident-postmortem",
+            version=2,
+            token="tok-2",
+            verifiers=[{"name": "tone", "verifier_id": "vrf_1", "version": 3}],
+        )
+    )
+
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = push(
+            client,
+            config,
+            state,
+            slugs=[],
+            target_path=None,
+            paths=tmp_config_paths,
+        )
+
+    # No listing or per-workflow fetch happened.
+    assert list_route.call_count == 0
+    assert detail_route.call_count == 0
+    assert save_route.call_count == 1
+
+    sent = json.loads(save_route.calls[0].request.content)
+    assert sent["name"] == "incident-postmortem"  # identity is the slug
+    assert sent["body"] == body  # full local body, verbatim
+    assert sent["description"] == "Draft a postmortem from an incident transcript."
+    assert sent["outcome"] == "Reduce mean-time-to-postmortem from days to hours."
+    assert sent["tags"] == ["sre", "postmortem"]
+    assert sent["expected_version_token"] == "tok-1"
+    assert sent["source"] == "manual"
+    # The version pin on the recorded binding is preserved in the outgoing payload.
+    assert sent["verifiers"] == [{"name": "tone", "verifier_id": "vrf_1", "version": 3}]
+
+    assert [(i.slug, i.action) for i in result.items] == [("incident-postmortem", "pushed")]
+
+    reloaded = load_sync_state(tmp_config_paths)
+    entry = reloaded.entries[0]
+    assert entry.synced_version == 2
+    assert entry.version_token == "tok-2"
+    assert entry.body_sha256 == body_sha256(body)
+    assert entry.verifier_bindings == [
+        SyncVerifierBinding(name="tone", verifier_id="vrf_1", version=3)
+    ]
+
+
+@respx.mock
+def test_push_omits_version_for_unpinned_binding(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    body = _push_body(slug="alpha")
+    _write_skill(target_dir, "alpha", body)
+    state = SyncState(
+        entries=[
+            _modified_entry(
+                target_dir,
+                id_="skl_a",
+                slug="alpha",
+                verifiers=[SyncVerifierBinding(name="tone", verifier_id="vrf_1", version=None)],
+            )
+        ]
+    )
+    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=_save_response(workflow_id="skl_a", name="alpha")
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
+    sent = json.loads(save_route.calls[0].request.content)
+    # An unpinned binding carries no version key (it is not sent as null).
+    assert sent["verifiers"] == [{"name": "tone", "verifier_id": "vrf_1"}]
+
+
+@respx.mock
+def test_push_edited_metadata_reaches_request(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    # The user's edited front-matter wins: changed description/outcome/tags are
+    # what reach the registry, not the values recorded at the last sync.
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    body = _push_body(
+        slug="alpha",
+        description="A freshly edited description.",
+        outcome="A freshly edited outcome.",
+        tags=["edited"],
+    )
+    _write_skill(target_dir, "alpha", body)
+    state = SyncState(entries=[_modified_entry(target_dir, id_="skl_a", slug="alpha")])
+    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=_save_response(workflow_id="skl_a", name="alpha")
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
+    sent = json.loads(save_route.calls[0].request.content)
+    assert sent["description"] == "A freshly edited description."
+    assert sent["outcome"] == "A freshly edited outcome."
+    assert sent["tags"] == ["edited"]
+
+
+@respx.mock
+def test_push_conflict_leaves_entry_unchanged(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    body = _push_body(slug="alpha")
+    _write_skill(target_dir, "alpha", body)
+    state = SyncState(entries=[_modified_entry(target_dir, id_="skl_a", slug="alpha", token="t1")])
+    recorded_hash = state.entries[0].body_sha256
+
+    respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            409,
+            json={"error": "conflict", "message": "version token mismatch"},
+        )
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
+
+    item = result.items[0]
+    assert item.action == "conflict"
+    assert item.detail is not None and "pull" in item.detail
+
+    reloaded = load_sync_state(tmp_config_paths)
+    entry = reloaded.entries[0]
+    # Untouched: same token and the original recorded hash, not the local one.
+    assert entry.version_token == "t1"
+    assert entry.synced_version == 1
+    assert entry.body_sha256 == recorded_hash
+
+
+@respx.mock
+def test_push_unmodified_entry_emits_nothing(tmp_path: Path, tmp_config_paths: ConfigPaths) -> None:
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    body = _push_body(slug="alpha")
+    _write_skill(target_dir, "alpha", body)
+    # The recorded hash matches the on-disk body, so there is nothing to push.
+    state = SyncState(
+        entries=[_tracked_entry(target_dir, id_="skl_a", slug="alpha", body=body, token="t1")]
+    )
+    save_route = respx.post(f"{SERVER}/v1/workflows")
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
+    assert result.items == []
+    assert save_route.call_count == 0
+
+
+@respx.mock
+def test_push_missing_local_file_emits_nothing(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    # A tracked entry with no SKILL.md on disk is not a push candidate.
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    state = SyncState(entries=[_modified_entry(target_dir, id_="skl_a", slug="alpha")])
+    save_route = respx.post(f"{SERVER}/v1/workflows")
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
+    assert result.items == []
+    assert save_route.call_count == 0
+
+
+@respx.mock
+def test_push_read_only_entry_is_skipped_with_no_save(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="all")])
+    body = _push_body(slug="shared-doc")
+    _write_skill(target_dir, "shared-doc", body)
+    state = SyncState(
+        entries=[_modified_entry(target_dir, id_="skl_v", slug="shared-doc", role="view")]
+    )
+    save_route = respx.post(f"{SERVER}/v1/workflows")
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
+    item = result.items[0]
+    assert item.action == "skipped-read-only"
+    assert item.detail is not None and "view grant" in item.detail
+    # A view-role entry never reaches the registry.
+    assert save_route.call_count == 0
+
+
+@respx.mock
+def test_push_rename_in_front_matter_is_skipped_invalid(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    # The on-disk slug is "alpha" but the edited front-matter renames to "beta".
+    body = _push_body(slug="alpha", name="beta")
+    _write_skill(target_dir, "alpha", body)
+    state = SyncState(entries=[_modified_entry(target_dir, id_="skl_a", slug="alpha")])
+    save_route = respx.post(f"{SERVER}/v1/workflows")
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
+    item = result.items[0]
+    assert item.action == "skipped-invalid"
+    assert item.detail is not None and "Renaming is not supported" in item.detail
+    assert save_route.call_count == 0
+
+
+@respx.mock
+def test_push_slug_rename_in_front_matter_is_skipped_invalid(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    # The on-disk slug is "alpha" but the edited front-matter carries a `slug:`
+    # key renaming to "beta". `slug:` is the more likely real-world key, since it
+    # matches the directory-name convention; the rename refusal covers it too.
+    body = _push_body(slug="alpha", name="beta", identity_key="slug")
+    _write_skill(target_dir, "alpha", body)
+    state = SyncState(entries=[_modified_entry(target_dir, id_="skl_a", slug="alpha")])
+    save_route = respx.post(f"{SERVER}/v1/workflows")
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
+    item = result.items[0]
+    assert item.action == "skipped-invalid"
+    assert item.detail is not None and "Renaming is not supported" in item.detail
+    assert "`slug`" in item.detail  # the message names the offending key
+    assert save_route.call_count == 0
+
+
+@respx.mock
+def test_push_missing_required_outcome_is_skipped_invalid(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    # An empty outcome drops the key from the front-matter entirely.
+    body = _push_body(slug="alpha", outcome="")
+    _write_skill(target_dir, "alpha", body)
+    state = SyncState(entries=[_modified_entry(target_dir, id_="skl_a", slug="alpha")])
+    save_route = respx.post(f"{SERVER}/v1/workflows")
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
+    item = result.items[0]
+    assert item.action == "skipped-invalid"
+    assert item.detail is not None and "outcome" in item.detail
+    assert save_route.call_count == 0
+
+
+@respx.mock
+def test_push_forbidden_is_reported_read_only(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    # The recorded role said writable, but the server rejects the write.
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    body = _push_body(slug="alpha")
+    _write_skill(target_dir, "alpha", body)
+    state = SyncState(entries=[_modified_entry(target_dir, id_="skl_a", slug="alpha")])
+    respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            403,
+            json={"error": "forbidden", "message": "insufficient role to write"},
+        )
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
+    item = result.items[0]
+    assert item.action == "skipped-read-only"
+    assert item.detail == "insufficient role to write"
+
+
+@respx.mock
+def test_push_untracked_local_dir_is_flagged_with_no_save(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    # A local directory the index does not track.
+    _write_skill(target_dir, "brand-new", _push_body(slug="brand-new"))
+    state = SyncState()
+    save_route = respx.post(f"{SERVER}/v1/workflows")
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
+    item = result.items[0]
+    assert item.slug == "brand-new"
+    assert item.action == "untracked"
+    assert item.detail is not None and "publish" in item.detail
+    # Push never creates a new workflow.
+    assert save_route.call_count == 0
+
+
+@respx.mock
+def test_push_target_option_scopes_to_one(tmp_path: Path, tmp_config_paths: ConfigPaths) -> None:
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    config = SyncConfig(
+        targets=[
+            SyncTarget(path=str(first), scope="owned"),
+            SyncTarget(path=str(second), scope="owned"),
+        ]
+    )
+    _write_skill(first, "alpha", _push_body(slug="alpha"))
+    _write_skill(second, "beta", _push_body(slug="beta"))
+    state = SyncState(
+        entries=[
+            _modified_entry(first, id_="skl_a", slug="alpha"),
+            _modified_entry(second, id_="skl_b", slug="beta"),
+        ]
+    )
+    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=_save_response(workflow_id="skl_b", name="beta")
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = push(
+            client, config, state, slugs=[], target_path=str(second), paths=tmp_config_paths
+        )
+    # Only the second target's entry was pushed.
+    assert [(i.slug, i.action) for i in result.items] == [("beta", "pushed")]
+    assert save_route.call_count == 1
+    sent = json.loads(save_route.calls[0].request.content)
+    assert sent["name"] == "beta"
+
+
+@respx.mock
+def test_push_positional_slug_narrowing(tmp_path: Path, tmp_config_paths: ConfigPaths) -> None:
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    _write_skill(target_dir, "alpha", _push_body(slug="alpha"))
+    _write_skill(target_dir, "beta", _push_body(slug="beta"))
+    state = SyncState(
+        entries=[
+            _modified_entry(target_dir, id_="skl_a", slug="alpha"),
+            _modified_entry(target_dir, id_="skl_b", slug="beta"),
+        ]
+    )
+    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=_save_response(workflow_id="skl_a", name="alpha")
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = push(
+            client, config, state, slugs=["alpha"], target_path=None, paths=tmp_config_paths
+        )
+    assert [(i.slug, i.action) for i in result.items] == [("alpha", "pushed")]
+    assert save_route.call_count == 1
+    sent = json.loads(save_route.calls[0].request.content)
+    assert sent["name"] == "alpha"
+
+
+@respx.mock
+def test_push_selected_target_applies_globs(tmp_path: Path, tmp_config_paths: ConfigPaths) -> None:
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(
+        targets=[SyncTarget(path=str(target_dir), scope="selected", selected=["refunds-*"])]
+    )
+    _write_skill(target_dir, "refunds-flow", _push_body(slug="refunds-flow"))
+    _write_skill(target_dir, "unrelated", _push_body(slug="unrelated"))
+    state = SyncState(
+        entries=[
+            _modified_entry(target_dir, id_="skl_r", slug="refunds-flow"),
+            _modified_entry(target_dir, id_="skl_u", slug="unrelated"),
+        ]
+    )
+    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=_save_response(workflow_id="skl_r", name="refunds-flow")
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
+    # Only the in-glob entry is pushed; the out-of-glob one is ignored entirely.
+    assert [(i.slug, i.action) for i in result.items] == [("refunds-flow", "pushed")]
+    assert save_route.call_count == 1
+
+
+@respx.mock
+def test_push_persists_index_when_a_save_raises_midway(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    # The first entry pushes cleanly; the second raises a non-conflict server
+    # error. The finally block must still persist the first entry's new state.
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    _write_skill(target_dir, "alpha", _push_body(slug="alpha"))
+    _write_skill(target_dir, "beta", _push_body(slug="beta"))
+    state = SyncState(
+        entries=[
+            _modified_entry(target_dir, id_="skl_a", slug="alpha", token="t-a"),
+            _modified_entry(target_dir, id_="skl_b", slug="beta", token="t-b"),
+        ]
+    )
+
+    def _save(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        if payload["name"] == "alpha":
+            return _save_response(workflow_id="skl_a", name="alpha", token="tok-a2")
+        return httpx.Response(500, json={"error": "internal_error", "message": "boom"})
+
+    respx.post(f"{SERVER}/v1/workflows").mock(side_effect=_save)
+
+    with (
+        GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client,
+        pytest.raises(ServerError),
+    ):
+        push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
+
+    # The index was persisted in the finally: alpha advanced, beta did not.
+    persisted = load_sync_state(tmp_config_paths)
+    by_slug = {e.slug: e for e in persisted.entries}
+    assert by_slug["alpha"].version_token == "tok-a2"
+    assert by_slug["beta"].version_token == "t-b"
+
+
+def test_push_item_model_is_constructible() -> None:
+    # The per-item shape carries an optional human-readable detail.
+    item = PushItem(slug="alpha", target_path="~/skills", action="pushed")
+    assert item.detail is None
+    flagged = PushItem(slug="beta", target_path="~/skills", action="conflict", detail="pull first")
+    assert flagged.detail == "pull first"

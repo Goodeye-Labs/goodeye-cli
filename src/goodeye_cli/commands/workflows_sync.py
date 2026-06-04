@@ -303,9 +303,95 @@ def status(
         console.print(f"[yellow]Next:[/yellow] {'; '.join(hints)}.")
 
 
+def _push_hints(items: list[sync.PushItem]) -> list[str]:
+    """Build neutral next-step hints for a push pass.
+
+    A conflict points the caller at the existing ``pull`` and ``status``
+    commands. An untracked local directory points at ``workflows publish``,
+    the only path that creates a new registry workflow. Every command named
+    here exists today.
+    """
+    hints: list[str] = []
+    conflicts = sum(1 for i in items if i.action == "conflict")
+    untracked = sum(1 for i in items if i.action == "untracked")
+    if conflicts:
+        hints.append(
+            f"{conflicts} workflow(s) conflict; run `goodeye workflows sync pull` "
+            "to merge then push again (check `goodeye workflows sync status` first)"
+        )
+    if untracked:
+        hints.append(
+            f"{untracked} local workflow(s) are not in the registry; create them "
+            "with `goodeye workflows publish`"
+        )
+    return hints
+
+
+@app.command("push")
+def push(
+    slugs: list[str] = typer.Argument(
+        None,
+        help="Workflow slugs to push. Omit to push every locally edited workflow in scope.",
+    ),
+    target: str | None = typer.Option(
+        None,
+        "--target",
+        help="Operate on a single configured target directory instead of all of them.",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Print results as JSON."),
+    table_output: bool = typer.Option(False, "--table", help="Print results as a table."),
+) -> None:
+    """Push locally edited workflows back to the registry.
+
+    Only workflows whose on-disk SKILL.md differs from the last sync are sent.
+    Each upload is optimistic-locked: if the registry moved since the last sync,
+    the workflow is reported as a conflict and left untouched, and you reconcile
+    with `goodeye workflows sync pull` before pushing again. Renaming through
+    push is not supported (the directory name is the workflow identity), and a
+    workflow you hold only a view grant on is never uploaded. Requires
+    authentication.
+    """
+    mode = resolve_output_mode(json_output=json_output, table_output=table_output)
+    paths = get_config_paths()
+    config = sync.load_sync_config(paths)
+    state = sync.load_sync_state(paths)
+
+    with _client(require_auth=True) as client:
+        result = sync.push(
+            client,
+            config,
+            state,
+            slugs=list(slugs or []),
+            target_path=target,
+            paths=paths,
+        )
+
+    if mode == "json":
+        echo_json(items_envelope(result.items))
+        return
+
+    console = Console()
+    if not result.items:
+        console.print("[dim]No locally edited workflows to push.[/dim]")
+        return
+    table = Table(title="Pushed workflows")
+    table.add_column("Slug", no_wrap=True)
+    table.add_column("Target", no_wrap=True)
+    table.add_column("Action")
+    table.add_column("Detail")
+    for item in result.items:
+        table.add_row(item.slug, item.target_path, item.action, item.detail or "")
+    console.print(table)
+
+    hints = _push_hints(result.items)
+    if hints:
+        console.print(f"[yellow]Next:[/yellow] {'; '.join(hints)}.")
+
+
 __all__ = [
     "app",
     "pull",
+    "push",
     "status",
     "target_add",
     "target_app",

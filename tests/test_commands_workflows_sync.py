@@ -519,3 +519,207 @@ def test_status_no_targets_renders_empty(tmp_config_paths: ConfigPaths, monkeypa
     result = runner.invoke(app, ["workflows", "sync", "status", "--table"])
     assert result.exit_code == 0, result.output
     assert "No workflows in scope" in result.output
+
+
+# ----- push -----
+
+
+def _push_body(
+    *,
+    slug: str,
+    description: str = "Draft a postmortem from an incident transcript.",
+    outcome: str = "Reduce mean-time-to-postmortem from days to hours.",
+) -> str:
+    """A workflow body with front-matter whose name matches its slug."""
+    return (
+        "---\n"
+        f"name: {slug}\n"
+        f"description: {description}\n"
+        f"outcome: {outcome}\n"
+        "---\n\n"
+        "do the work\n"
+    )
+
+
+def _seed_modified_entry(
+    tmp_config_paths: ConfigPaths,
+    *,
+    target_dir: Path,
+    workflow_id: str,
+    slug: str,
+    body: str,
+    token: str = "tok",
+    role: str = "owner",
+) -> None:
+    """Write a SKILL.md and a tracked entry whose recorded hash will not match.
+
+    The entry records a placeholder hash, so the on-disk ``body`` reads as
+    modified and becomes a push candidate.
+    """
+    from goodeye_cli import sync
+
+    skill = target_dir / slug / "SKILL.md"
+    skill.parent.mkdir(parents=True, exist_ok=True)
+    skill.write_text(body, encoding="utf-8")
+    state = sync.load_sync_state(tmp_config_paths)
+    sync.upsert_entry(
+        state,
+        sync.SyncEntry(
+            workflow_id=workflow_id,
+            slug=slug,
+            target_path=sync.normalize_target_path(str(target_dir)),
+            synced_version=1,
+            version_token=token,
+            body_sha256=sync.body_sha256(f"recorded-base-{slug}"),
+            effective_role=role,
+            read_only=role == "view",
+        ),
+    )
+    sync.save_sync_state(state, tmp_config_paths)
+
+
+def _save_response(*, workflow_id: str, name: str) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "workflow_id": workflow_id,
+            "version": 2,
+            "name": name,
+            "version_token": "tok-2",
+            "verifiers": [],
+        },
+    )
+
+
+def test_push_requires_auth(tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path) -> None:
+    _redirect_config(monkeypatch, tmp_config_paths)
+    monkeypatch.delenv("GOODEYE_API_KEY", raising=False)
+    _seed_target(monkeypatch, tmp_config_paths, str(tmp_path / "skills"))
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "sync", "push"])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, AuthRequired)
+
+
+@respx.mock
+def test_push_json_default_shape(
+    tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
+) -> None:
+    _setup_auth(monkeypatch, tmp_config_paths)
+    target_dir = tmp_path / "skills"
+    _seed_target(monkeypatch, tmp_config_paths, str(target_dir))
+    _seed_modified_entry(
+        tmp_config_paths,
+        target_dir=target_dir,
+        workflow_id="skl_01",
+        slug="alpha",
+        body=_push_body(slug="alpha"),
+    )
+    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=_save_response(workflow_id="skl_01", name="alpha")
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "sync", "push"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    item = payload["items"][0]
+    assert item["slug"] == "alpha"
+    assert item["action"] == "pushed"
+    assert item["workflow_id"] == "skl_01"
+    assert save_route.call_count == 1
+
+
+@respx.mock
+def test_push_table_mode(tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path) -> None:
+    _setup_auth(monkeypatch, tmp_config_paths)
+    monkeypatch.setenv("COLUMNS", "200")
+    target_dir = tmp_path / "skills"
+    _seed_target(monkeypatch, tmp_config_paths, str(target_dir))
+    _seed_modified_entry(
+        tmp_config_paths,
+        target_dir=target_dir,
+        workflow_id="skl_01",
+        slug="alpha",
+        body=_push_body(slug="alpha"),
+    )
+    respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=_save_response(workflow_id="skl_01", name="alpha")
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "sync", "push", "--table"])
+    assert result.exit_code == 0, result.output
+    assert "Pushed workflows" in result.output
+    assert "alpha" in result.output
+    assert "pushed" in result.output
+
+
+@respx.mock
+def test_push_table_conflict_hint(
+    tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
+) -> None:
+    _setup_auth(monkeypatch, tmp_config_paths)
+    monkeypatch.setenv("COLUMNS", "200")
+    target_dir = tmp_path / "skills"
+    _seed_target(monkeypatch, tmp_config_paths, str(target_dir))
+    _seed_modified_entry(
+        tmp_config_paths,
+        target_dir=target_dir,
+        workflow_id="skl_01",
+        slug="alpha",
+        body=_push_body(slug="alpha"),
+    )
+    respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            409, json={"error": "conflict", "message": "version token mismatch"}
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "sync", "push", "--table"])
+    assert result.exit_code == 0, result.output
+    assert "conflict" in result.output
+    assert "Next:" in result.output
+    # The hint references only commands that exist now.
+    assert "goodeye workflows sync pull" in result.output
+    assert "goodeye workflows sync status" in result.output
+
+
+@respx.mock
+def test_push_target_option_scopes_to_one(
+    tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
+) -> None:
+    _setup_auth(monkeypatch, tmp_config_paths)
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    _seed_target(monkeypatch, tmp_config_paths, str(first))
+    _seed_target(monkeypatch, tmp_config_paths, str(second))
+    _seed_modified_entry(
+        tmp_config_paths,
+        target_dir=first,
+        workflow_id="skl_a",
+        slug="alpha",
+        body=_push_body(slug="alpha"),
+    )
+    _seed_modified_entry(
+        tmp_config_paths,
+        target_dir=second,
+        workflow_id="skl_b",
+        slug="beta",
+        body=_push_body(slug="beta"),
+    )
+    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=_save_response(workflow_id="skl_b", name="beta")
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "sync", "push", "--target", str(second)])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert [i["slug"] for i in payload["items"]] == ["beta"]
+    assert save_route.call_count == 1
+
+
+def test_push_no_targets_renders_empty(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _setup_auth(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "sync", "push", "--table"])
+    assert result.exit_code == 0, result.output
+    assert "No locally edited workflows to push" in result.output

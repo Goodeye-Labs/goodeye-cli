@@ -18,12 +18,18 @@ import hashlib
 import os
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from goodeye_cli.config import ConfigPaths, _load_json, _write_json_0600
-from goodeye_cli.errors import Conflict, NotFound, ValidationFailed
+from goodeye_cli.errors import Conflict, Forbidden, NotFound, ValidationFailed
+from goodeye_cli.frontmatter import (
+    coerce_outcome,
+    coerce_required_text,
+    coerce_tags,
+    parse_front_matter,
+)
 
 if TYPE_CHECKING:
     from goodeye_cli.client import GoodeyeClient
@@ -811,6 +817,260 @@ def _status_for_target(
     return items
 
 
+# ----- push orchestration -----
+
+# A workflow's registry identity is its name, which equals its on-disk slug.
+# Front-matter that carries one of these keys with a different value is a rename
+# attempt, which push refuses: renaming is not supported through sync.
+_IDENTITY_KEYS = ("name", "slug")
+
+# What a single push attempt did for one tracked entry (or untracked local dir).
+# ``pushed`` uploaded a local edit; ``conflict`` means the registry moved since
+# the last sync and the caller must pull first; ``skipped-read-only`` means the
+# caller holds only a view grant; ``skipped-invalid`` means the edited body's
+# metadata was rejected locally before any upload; ``untracked`` flags a local
+# directory the registry does not track, which push never creates.
+PushAction = Literal[
+    "pushed",
+    "conflict",
+    "skipped-read-only",
+    "skipped-invalid",
+    "untracked",
+]
+
+
+class PushItem(_SyncBase):
+    """One per-(slug, target) outcome from a push pass.
+
+    ``detail`` carries a human-readable reason for the non-``pushed`` actions
+    (the validation message, the rename refusal, the pull-first hint, or the
+    publish hint), and is None for a clean ``pushed``.
+    """
+
+    slug: str
+    workflow_id: str | None = None
+    target_path: str
+    action: PushAction
+    detail: str | None = None
+
+
+class PushResult(_SyncBase):
+    """The full set of per-item outcomes from a push pass."""
+
+    items: list[PushItem] = Field(default_factory=list)
+
+
+def _verifier_payload(entry: SyncEntry) -> list[dict[str, Any]]:
+    """Build the save-payload verifier bindings from an index entry.
+
+    Mirrors the publish path's binding shape (``name`` + ``verifier_id``) and
+    additionally preserves a pinned ``version`` when the recorded binding has
+    one, so a push never drops a version pin the workflow carried.
+    """
+    payload: list[dict[str, Any]] = []
+    for binding in entry.verifier_bindings:
+        row: dict[str, Any] = {"name": binding.name, "verifier_id": binding.verifier_id}
+        if binding.version is not None:
+            row["version"] = binding.version
+        payload.append(row)
+    return payload
+
+
+def _push_metadata(body: str, slug: str) -> tuple[str, str, list[str]] | str:
+    """Derive (description, outcome, tags) from an edited body's front-matter.
+
+    Returns the validated metadata tuple, or a human-readable error string when
+    the body attempts a rename or omits a required facet. The caller turns an
+    error string into a ``skipped-invalid`` item; the registry is never reached
+    for these local failures.
+    """
+    front_matter, _stripped = parse_front_matter(body)
+    for key in _IDENTITY_KEYS:
+        edited_identity = front_matter.get(key)
+        if isinstance(edited_identity, str) and edited_identity.strip() != slug:
+            return (
+                "Renaming is not supported through sync push: the directory name "
+                f"({slug!r}) is the workflow identity. Revert the front-matter "
+                f"`{key}` or rename the directory and publish a new workflow."
+            )
+
+    try:
+        description = coerce_required_text(
+            front_matter.get("description"),
+            field_name="description",
+            missing_message="Missing `description` in the workflow front-matter.",
+        )
+        outcome = coerce_outcome(front_matter.get("outcome"))
+        # Push cannot clear tags: an absent/empty `tags:` coerces to [], and
+        # save_workflow drops a falsy tags value rather than emptying the list,
+        # so removing the line leaves the registry tags untouched (same as publish).
+        tags = coerce_tags(front_matter.get("tags"))
+    except ValidationFailed as exc:
+        return exc.message
+    if outcome is None:
+        return "Missing `outcome` in the workflow front-matter."
+    return description, outcome, tags
+
+
+def push(
+    client: GoodeyeClient,
+    config: SyncConfig,
+    state: SyncState,
+    *,
+    slugs: list[str],
+    target_path: str | None,
+    paths: ConfigPaths,
+) -> PushResult:
+    """Upload locally edited workflows back to the registry, optimistic-locked.
+
+    Detection of what to push is purely local: a tracked entry whose on-disk
+    body hash differs from the recorded one is a candidate. No listing or fetch
+    is performed; whether the registry moved underneath is resolved by the
+    server, which returns a conflict when the recorded version token is stale.
+    A read-only (view-grant) entry is never uploaded, a front-matter rename is
+    refused, and a missing required facet fails locally before any round-trip.
+    The index is persisted once in a ``finally`` so a mid-loop failure still
+    records every entry already pushed, and a re-run resumes cleanly.
+    """
+    result = PushResult()
+    targets = _targets_to_process(config, target_path)
+    slug_args = set(slugs)
+
+    try:
+        for target in targets:
+            result.items.extend(_push_for_target(client, state, target, slug_args=slug_args))
+    finally:
+        # Persist whatever the index accumulated, including on a mid-loop raise:
+        # every entry already pushed has its new version/token/hash recorded, so
+        # a re-run does not re-upload it as still-modified.
+        save_sync_state(state, paths)
+    return result
+
+
+def _push_for_target(
+    client: GoodeyeClient,
+    state: SyncState,
+    target: SyncTarget,
+    *,
+    slug_args: set[str],
+) -> list[PushItem]:
+    """Push every modified tracked entry for one target and flag untracked dirs."""
+    stored_target = normalize_target_path(target.path)
+    items: list[PushItem] = []
+
+    tracked_slugs: set[str] = set()
+    for entry in state.entries:
+        if normalize_target_path(entry.target_path) != stored_target:
+            continue
+        # Gate on the same scope predicate as pull/status: a `selected` target
+        # only pushes slugs matching its globs.
+        if not slug_in_target_scope(target, entry.slug):
+            continue
+        tracked_slugs.add(entry.slug)
+        if slug_args and entry.slug not in slug_args:
+            continue
+        item = _push_one(client, entry, target=target)
+        if item is not None:
+            items.append(item)
+
+    for slug in untracked_local_slugs(target):
+        if slug in tracked_slugs:
+            continue
+        if not slug_in_target_scope(target, slug):
+            continue
+        if slug_args and slug not in slug_args:
+            continue
+        items.append(
+            PushItem(
+                slug=slug,
+                workflow_id=None,
+                target_path=stored_target,
+                action="untracked",
+                detail=(
+                    "This local directory is not tracked by the registry. Create it "
+                    "with `goodeye workflows publish` rather than sync push."
+                ),
+            )
+        )
+    return items
+
+
+def _push_one(
+    client: GoodeyeClient,
+    entry: SyncEntry,
+    *,
+    target: SyncTarget,
+) -> PushItem | None:
+    """Push a single tracked entry, mutating it in place on success.
+
+    Returns None when there is nothing to push (no local file, or the local body
+    matches the recorded hash). Otherwise returns the per-item outcome.
+    """
+    stored_target = normalize_target_path(target.path)
+    local_body = read_local_body(target, entry.slug)
+    if local_body is None or not is_modified_locally(entry, local_body):
+        return None
+
+    base = PushItem(
+        slug=entry.slug,
+        workflow_id=entry.workflow_id,
+        target_path=stored_target,
+        action="pushed",
+    )
+
+    if entry.read_only:
+        return base.model_copy(
+            update={
+                "action": "skipped-read-only",
+                "detail": (
+                    "You hold only a view grant on this workflow, so local edits "
+                    "cannot be pushed back."
+                ),
+            }
+        )
+
+    metadata = _push_metadata(local_body, entry.slug)
+    if isinstance(metadata, str):
+        return base.model_copy(update={"action": "skipped-invalid", "detail": metadata})
+    description, outcome, tags = metadata
+
+    try:
+        save_result = client.save_workflow(
+            name=entry.slug,
+            description=description,
+            body=local_body,
+            outcome=outcome,
+            tags=tags,
+            expected_version_token=entry.version_token,
+            source="manual",
+            verifiers=_verifier_payload(entry),
+        )
+    except Conflict:
+        return base.model_copy(
+            update={
+                "action": "conflict",
+                "detail": (
+                    "The registry moved since the last sync. Run "
+                    "`goodeye workflows sync pull` to merge (or `pull --force` to "
+                    "discard local edits), then push again."
+                ),
+            }
+        )
+    except Forbidden as exc:
+        # Belt and suspenders: the recorded role said writable but the server
+        # rejected the write. Surface it as read-only with the server message.
+        return base.model_copy(update={"action": "skipped-read-only", "detail": exc.message})
+
+    entry.synced_version = save_result.version
+    entry.version_token = save_result.version_token
+    entry.body_sha256 = body_sha256(local_body)
+    entry.verifier_bindings = [
+        SyncVerifierBinding(name=v.name, verifier_id=v.verifier_id, version=v.version)
+        for v in save_result.verifiers
+    ]
+    return base.model_copy(update={"workflow_id": save_result.workflow_id})
+
+
 __all__ = [
     "PRESETS",
     "SLUG_RE",
@@ -818,6 +1078,9 @@ __all__ = [
     "PullAction",
     "PullItem",
     "PullResult",
+    "PushAction",
+    "PushItem",
+    "PushResult",
     "StatusItem",
     "StatusResult",
     "SyncConfig",
