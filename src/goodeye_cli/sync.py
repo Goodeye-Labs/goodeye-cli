@@ -615,7 +615,7 @@ def pull(
             for summary in selected:
                 result.items.append(_pull_one(client, state, target, summary, force=force))
             result.items.extend(
-                _reconcile_deletions(state, target, live, slug_args=slug_args, yes=yes)
+                _reconcile_deletions(state, target, live, slug_args=slug_args, force=force, yes=yes)
             )
     finally:
         # Persist whatever the index accumulated, including on a mid-loop raise:
@@ -631,6 +631,7 @@ def _reconcile_deletions(
     live: list[WorkflowSummary],
     *,
     slug_args: list[str],
+    force: bool,
     yes: bool,
 ) -> list[PullItem]:
     """Remove local copies of tracked workflows that are gone server-side.
@@ -641,6 +642,14 @@ def _reconcile_deletions(
     removed and its index entry dropped (``deleted-local``); without it the
     entry is reported as ``deleted-on-server`` and left intact. An out-of-scope
     entry for a ``selected`` target is simply not in scope and is never pruned.
+
+    Un-pushed local edits are never silently discarded. A gone-server-side entry
+    whose on-disk body diverged from the recorded hash is preserved (reported
+    ``deleted-on-server``) unless ``force`` is set, mirroring how ``_pull_one``
+    refuses to overwrite a locally edited file without ``--force``. Without this
+    guard, ``confirm_destructive`` auto-approves on a non-TTY (the agent path),
+    so an agent run would otherwise delete a vanished workflow's directory along
+    with edits that were never pushed.
     """
     stored_target = normalize_target_path(target.path)
     wanted = set(slug_args)
@@ -666,6 +675,25 @@ def _reconcile_deletions(
         # at an id absent from the live set is genuinely gone.
         if entry.workflow_id in live_ids:
             surviving.append(entry)
+            continue
+
+        # Protect un-pushed local edits. If the on-disk body diverged from the
+        # recorded hash, removal would discard work the registry never received,
+        # and the deleted workflow cannot be re-pulled to recover it. Keep it and
+        # report `deleted-on-server` unless the caller forced the pull. This is
+        # the same `--force` gate `_pull_one` applies to a locally edited file,
+        # and it is what stops a non-TTY agent run (where `confirm_destructive`
+        # auto-approves) from silently destroying local edits.
+        if not force and is_modified_locally(entry, read_local_body(target, entry.slug)):
+            surviving.append(entry)
+            items.append(
+                PullItem(
+                    slug=entry.slug,
+                    target_path=stored_target,
+                    action="deleted-on-server",
+                    workflow_id=entry.workflow_id,
+                )
+            )
             continue
 
         confirmed = confirm_destructive(

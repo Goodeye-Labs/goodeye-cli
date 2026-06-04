@@ -102,22 +102,7 @@ def _sync_root(
         echo_json(items_envelope(result.items))
         return
 
-    console = Console()
-    if not result.items:
-        console.print("[dim]No workflows in scope.[/dim]")
-        return
-    table = Table(title="Sync status")
-    table.add_column("Slug", no_wrap=True)
-    table.add_column("Target", no_wrap=True)
-    table.add_column("State")
-    table.add_column("Next action")
-    for item in result.items:
-        table.add_row(item.slug, item.target_path, item.state, item.next_action)
-    console.print(table)
-
-    hints = _status_hints(result.items)
-    if hints:
-        console.print(f"[yellow]Next:[/yellow] {'; '.join(hints)}.")
+    _render_status(result)
 
 
 target_app = typer.Typer(
@@ -256,9 +241,10 @@ def _pull_hints(items: list[sync.PullItem]) -> list[str]:
     """Build neutral next-step hints for a pull pass.
 
     Workflows that kept local edits point at ``--force``. A workflow gone from
-    the registry but kept on disk (the caller declined removal) points at the
-    same pull with ``--yes`` to remove it without prompting. Every command named
-    here exists today.
+    the registry but kept on disk points at the same pull to remove it: ``--yes``
+    when the caller merely declined the prompt, ``--force`` when the local copy
+    has un-pushed edits the pull preserved (``--yes`` alone will not discard
+    those). Every command named here exists today.
     """
     hints: list[str] = []
     if any(item.action in _SKIPPED_ACTIONS for item in items):
@@ -270,7 +256,8 @@ def _pull_hints(items: list[sync.PullItem]) -> list[str]:
     if gone:
         hints.append(
             f"{gone} workflow(s) are gone from the registry but kept on disk; re-run "
-            "`goodeye workflows sync pull --yes` to remove their local copies"
+            "`goodeye workflows sync pull --yes` to remove their local copies "
+            "(use --force if they have local edits)"
         )
     return hints
 
@@ -346,6 +333,31 @@ def pull(
         console.print(f"[yellow]Next:[/yellow] {'; '.join(hints)}.")
 
 
+def _render_status(result: sync.StatusResult) -> None:
+    """Print a status pass as a table plus next-step hints.
+
+    Shared by the bare `sync` command (which pulls then shows status) and the
+    `status` subcommand so the two render an identical view. Only the rich/table
+    path: callers handle the `--json` branch before invoking this.
+    """
+    console = Console()
+    if not result.items:
+        console.print("[dim]No workflows in scope.[/dim]")
+        return
+    table = Table(title="Sync status")
+    table.add_column("Slug", no_wrap=True)
+    table.add_column("Target", no_wrap=True)
+    table.add_column("State")
+    table.add_column("Next action")
+    for item in result.items:
+        table.add_row(item.slug, item.target_path, item.state, item.next_action)
+    console.print(table)
+
+    hints = _status_hints(result.items)
+    if hints:
+        console.print(f"[yellow]Next:[/yellow] {'; '.join(hints)}.")
+
+
 def _status_hints(items: list[sync.StatusItem]) -> list[str]:
     """Build neutral next-step hints that name only commands that exist now.
 
@@ -415,22 +427,7 @@ def status(
         echo_json(items_envelope(result.items))
         return
 
-    console = Console()
-    if not result.items:
-        console.print("[dim]No workflows in scope.[/dim]")
-        return
-    table = Table(title="Sync status")
-    table.add_column("Slug", no_wrap=True)
-    table.add_column("Target", no_wrap=True)
-    table.add_column("State")
-    table.add_column("Next action")
-    for item in result.items:
-        table.add_row(item.slug, item.target_path, item.state, item.next_action)
-    console.print(table)
-
-    hints = _status_hints(result.items)
-    if hints:
-        console.print(f"[yellow]Next:[/yellow] {'; '.join(hints)}.")
+    _render_status(result)
 
 
 def _push_hints(items: list[sync.PushItem]) -> list[str]:

@@ -2455,6 +2455,85 @@ def test_pull_keeps_local_copy_of_deleted_workflow_when_declined(
 
 
 @respx.mock
+def test_pull_keeps_edited_local_copy_of_deleted_workflow_without_force(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    # A server-deleted workflow whose on-disk body has un-pushed edits must not be
+    # silently removed by a non-TTY agent run (where confirm_destructive
+    # auto-approves) or by --yes. The edits cannot be re-pulled, so reconcile
+    # keeps the copy and reports deleted-on-server unless --force is given.
+    _me_route()
+    target_dir = tmp_path / "skills"
+    target = SyncTarget(path=str(target_dir), scope="owned")
+    config = SyncConfig(targets=[target])
+    # On-disk body diverges from the recorded base, so the entry reads as edited.
+    _write_skill(target_dir, "gone", "locally edited body")
+    state = SyncState(
+        entries=[_tracked_entry(target_dir, id_="skl_gone", slug="gone", body="server body")]
+    )
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response(
+            [_summary_dict(id_="skl_gone", name="gone", deleted_at="2026-01-01T00:00:00Z")]
+        )
+    )
+
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = pull(
+            client,
+            config,
+            state,
+            slugs=[],
+            target_path=None,
+            force=False,
+            yes=True,  # would auto-approve removal, but edits are protected
+            paths=tmp_config_paths,
+        )
+
+    assert [(i.slug, i.action) for i in result.items] == [("gone", "deleted-on-server")]
+    # The edited copy and its tracking entry both survive.
+    assert local_skill_path(target, "gone").read_text(encoding="utf-8") == "locally edited body"
+    assert [e.slug for e in load_sync_state(tmp_config_paths).entries] == ["gone"]
+
+
+@respx.mock
+def test_pull_force_removes_edited_local_copy_of_deleted_workflow(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    # --force is the explicit opt-in to discard local edits, so it removes even an
+    # edited copy of a server-deleted workflow (after the confirm, which --yes
+    # auto-approves).
+    _me_route()
+    target_dir = tmp_path / "skills"
+    target = SyncTarget(path=str(target_dir), scope="owned")
+    config = SyncConfig(targets=[target])
+    _write_skill(target_dir, "gone", "locally edited body")
+    state = SyncState(
+        entries=[_tracked_entry(target_dir, id_="skl_gone", slug="gone", body="server body")]
+    )
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response(
+            [_summary_dict(id_="skl_gone", name="gone", deleted_at="2026-01-01T00:00:00Z")]
+        )
+    )
+
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = pull(
+            client,
+            config,
+            state,
+            slugs=[],
+            target_path=None,
+            force=True,
+            yes=True,
+            paths=tmp_config_paths,
+        )
+
+    assert [(i.slug, i.action) for i in result.items] == [("gone", "deleted-local")]
+    assert not local_skill_dir(target, "gone").exists()
+    assert load_sync_state(tmp_config_paths).entries == []
+
+
+@respx.mock
 def test_pull_treats_entirely_absent_entry_as_gone(
     tmp_path: Path, tmp_config_paths: ConfigPaths
 ) -> None:
@@ -2528,7 +2607,8 @@ def test_pull_reused_slug_does_not_mask_deletion(
     # the new id. Because the local copy was edited, the pull keeps it rather than
     # rewriting the entry to the new id, so reconcile still sees the old id. The
     # entry must be reconciled as gone: a reused slug must not keep the deleted
-    # workflow tracked.
+    # workflow tracked. The edited local copy is preserved (not silently deleted)
+    # because reconcile never discards un-pushed edits on a non-forced pull.
     _me_route()
     target_dir = tmp_path / "skills"
     target = SyncTarget(path=str(target_dir), scope="owned")
@@ -2559,9 +2639,16 @@ def test_pull_reused_slug_does_not_mask_deletion(
         )
 
     actions = {(i.slug, i.action) for i in result.items}
-    # The edited local copy is reported as skipped (a conflict against the new id)
-    # and the deleted old id is reconciled rather than masked by the live slug.
-    assert ("gone", "deleted-local") in actions
+    # The deleted old id is reconciled rather than masked by the live slug, but
+    # because the local copy was edited it is kept on disk (deleted-on-server),
+    # not removed: a reused slug does not keep it tracked, yet edits are not lost.
+    assert ("gone", "deleted-on-server") in actions
+    assert local_skill_path(target, "gone").read_text(encoding="utf-8") == "locally edited body"
+    # The entry survives so the kept edits stay tracked; it still points at the
+    # deleted old id, not the reused live id.
+    persisted = load_sync_state(tmp_config_paths)
+    gone_entries = [e for e in persisted.entries if e.slug == "gone"]
+    assert [e.workflow_id for e in gone_entries] == ["skl_old"]
 
 
 @respx.mock
