@@ -94,11 +94,11 @@ class SyncConfig(_SyncBase):
     """The full local sync configuration persisted to ``sync.json``."""
 
     version: int = 1
-    # Stable identifier for the authenticated principal that owns this config.
-    # The registry exposes only email and handle (no opaque user id), so later
-    # server-touching operations stamp this with the principal's email on first
-    # use. It stays None until then; configuring a target is a purely local
-    # action and never reaches out to the registry.
+    # Reserved for a future per-config principal binding; currently unused. The
+    # identity guard stamps and checks SyncState.identity (the index), not this
+    # field, so configuring a target stays a purely local action that never
+    # reaches out to the registry. Kept here so the persisted schema is stable
+    # if a config-level binding is added later.
     identity: str | None = None
     targets: list[SyncTarget] = Field(default_factory=list)
 

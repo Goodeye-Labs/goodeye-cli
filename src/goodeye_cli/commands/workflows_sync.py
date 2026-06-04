@@ -47,12 +47,18 @@ def _sync_root(
     force: bool = typer.Option(
         False,
         "--force",
-        help="Overwrite local edits with the registry copy during the pull.",
+        help=(
+            "Overwrite local edits with the registry copy during the pull. "
+            "Applies to the bare command's pull; ignored when a subcommand is given."
+        ),
     ),
     yes: bool = typer.Option(
         False,
         "--yes",
-        help="Skip the confirmation prompt before removing a deleted workflow's local copy.",
+        help=(
+            "Skip the confirmation prompt before removing a deleted workflow's local copy. "
+            "Applies to the bare command's pull; ignored when a subcommand is given."
+        ),
     ),
     json_output: bool = typer.Option(False, "--json", help="Print the status summary as JSON."),
     table_output: bool = typer.Option(
@@ -64,8 +70,9 @@ def _sync_root(
     Run with no subcommand, this brings the local mirror up to date (the same
     work as `goodeye workflows sync pull`) and then prints where each workflow
     stands afterward (the same view as `goodeye workflows sync status`). Pass a
-    subcommand (`target`, `pull`, `status`, `push`) to run just that step.
-    Requires authentication.
+    subcommand (`target`, `pull`, `status`, `push`) to run just that step. The
+    `--force` and `--yes` options apply to the pull the bare command runs; they
+    are ignored when a subcommand is invoked. Requires authentication.
     """
     if ctx.invoked_subcommand is not None:
         return
@@ -342,23 +349,39 @@ def pull(
 def _status_hints(items: list[sync.StatusItem]) -> list[str]:
     """Build neutral next-step hints that name only commands that exist now.
 
-    ``behind-server`` workflows can be reconciled with the existing ``pull``
-    command, so that hint is concrete. Local edits, conflicts, and untracked
-    directories are reported as counts without pointing at a command, since the
-    command that would reconcile them is not part of this release.
+    Each hint points at the command that reconciles that state, and every
+    command named here exists today. ``behind-server`` workflows update with
+    ``pull``. ``modified-local`` workflows upload with ``push`` (their
+    ``next_action`` is ``push``). ``conflict`` workflows moved on both sides, so
+    they point at ``pull`` first to merge, then ``status`` to recheck before a
+    later push (their ``next_action`` is ``resolve``); they are never sent
+    straight to push. ``untracked`` local directories become registry workflows
+    through ``workflows publish``.
     """
     hints: list[str] = []
     behind = sum(1 for i in items if i.state == "behind-server")
-    edited = sum(1 for i in items if i.state in {"modified-local", "conflict"})
+    modified = sum(1 for i in items if i.state == "modified-local")
+    conflicted = sum(1 for i in items if i.state == "conflict")
     untracked = sum(1 for i in items if i.state == "untracked")
     if behind:
         hints.append(
             f"run `goodeye workflows sync pull` to update {behind} behind-server workflow(s)"
         )
-    if edited:
-        hints.append(f"{edited} workflow(s) have local edits")
+    if modified:
+        hints.append(
+            f"{modified} workflow(s) have local edits; run `goodeye workflows sync push` "
+            "to upload them"
+        )
+    if conflicted:
+        hints.append(
+            f"{conflicted} workflow(s) moved on both sides; run `goodeye workflows sync pull` "
+            "to merge, then `goodeye workflows sync status` before pushing"
+        )
     if untracked:
-        hints.append(f"{untracked} local workflow(s) are not yet in the registry")
+        hints.append(
+            f"{untracked} local workflow(s) are not yet in the registry; create them "
+            "with `goodeye workflows publish`"
+        )
     return hints
 
 

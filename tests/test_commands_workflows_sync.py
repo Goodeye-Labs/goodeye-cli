@@ -533,6 +533,77 @@ def test_status_table_mode(tmp_config_paths: ConfigPaths, monkeypatch, tmp_path:
 
 
 @respx.mock
+def test_status_table_modified_local_hint_points_at_push(
+    tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
+) -> None:
+    _setup_auth(monkeypatch, tmp_config_paths)
+    _me_route()
+    monkeypatch.setenv("COLUMNS", "200")
+    target_dir = tmp_path / "skills"
+    _seed_target(monkeypatch, tmp_config_paths, str(target_dir))
+    _seed_index_entry(
+        tmp_config_paths,
+        target_dir=target_dir,
+        workflow_id="skl_01",
+        slug="alpha",
+        body="server body",
+        token="tok",
+        version=4,
+    )
+    # Disk diverges from the recorded hash, but the server token is unchanged:
+    # modified-local -> push.
+    (target_dir / "alpha" / "SKILL.md").write_text("locally edited", encoding="utf-8")
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response(
+            [{"id": "skl_01", "name": "alpha", "current_version": 4, "version_token": "tok"}]
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "sync", "status", "--table"])
+    assert result.exit_code == 0, result.output
+    assert "modified-local" in result.output
+    # The hint names the push command that ships in this feature.
+    assert "Next:" in result.output
+    assert "goodeye workflows sync push" in result.output
+
+
+@respx.mock
+def test_status_table_conflict_hint_points_at_pull_not_push(
+    tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
+) -> None:
+    _setup_auth(monkeypatch, tmp_config_paths)
+    _me_route()
+    monkeypatch.setenv("COLUMNS", "200")
+    target_dir = tmp_path / "skills"
+    _seed_target(monkeypatch, tmp_config_paths, str(target_dir))
+    _seed_index_entry(
+        tmp_config_paths,
+        target_dir=target_dir,
+        workflow_id="skl_01",
+        slug="alpha",
+        body="server body",
+        token="t1",
+        version=4,
+    )
+    # Both sides moved: disk diverges from the recorded hash AND the server
+    # token advanced past the recorded one -> conflict (next_action resolve).
+    (target_dir / "alpha" / "SKILL.md").write_text("locally edited", encoding="utf-8")
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response(
+            [{"id": "skl_01", "name": "alpha", "current_version": 5, "version_token": "t2"}]
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "sync", "status", "--table"])
+    assert result.exit_code == 0, result.output
+    assert "conflict" in result.output
+    # A conflict reconciles via pull/resolve, not a straight push.
+    assert "Next:" in result.output
+    assert "goodeye workflows sync pull" in result.output
+    assert "goodeye workflows sync push" not in result.output
+
+
+@respx.mock
 def test_status_no_targets_renders_empty(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_auth(monkeypatch, tmp_config_paths)
     _me_route()
