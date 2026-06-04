@@ -350,6 +350,21 @@ def scope_filter(scope: SyncScope) -> str:
     return _SCOPE_TO_FILTER[scope]
 
 
+def slug_in_target_scope(target: SyncTarget, slug: str) -> bool:
+    """Return whether ``slug`` falls within ``target``'s scope.
+
+    For ``owned``/``all`` targets the server filter already scoped membership,
+    so every slug belongs (True). For ``selected`` targets a slug belongs only
+    when it matches one of the configured glob patterns. Used to keep the
+    listing-narrowing, the tracked-entry classification, and the untracked-dir
+    scan all gated on the same scope predicate, so a slug outside a ``selected``
+    target's globs is consistently ignored rather than mis-reported.
+    """
+    if target.scope != "selected":
+        return True
+    return any(fnmatch.fnmatch(slug, p) for p in target.selected)
+
+
 def select_for_target(
     target: SyncTarget,
     summaries: list[WorkflowSummary],
@@ -364,10 +379,7 @@ def select_for_target(
     explicit ``slugs`` are supplied (from ``pull`` arguments), intersect with
     them as well.
     """
-    chosen = list(summaries)
-    if target.scope == "selected":
-        patterns = target.selected
-        chosen = [s for s in chosen if any(fnmatch.fnmatch(s.name, p) for p in patterns)]
+    chosen = [s for s in summaries if slug_in_target_scope(target, s.name)]
     if slugs:
         wanted = set(slugs)
         chosen = [s for s in chosen if s.name in wanted]
@@ -456,13 +468,24 @@ def _targets_to_process(config: SyncConfig, target_path: str | None) -> list[Syn
     return matches
 
 
-def _list_all_for_target(client: GoodeyeClient, target: SyncTarget) -> list[WorkflowSummary]:
-    """List every workflow visible to ``target``, following all pages."""
+def _list_all_for_target(
+    client: GoodeyeClient,
+    target: SyncTarget,
+    *,
+    include_deleted: bool = False,
+) -> list[WorkflowSummary]:
+    """List every workflow visible to ``target``, following all pages.
+
+    ``include_deleted`` surfaces the caller's own soft-deleted workflows so a
+    fetch-free pass can spot a tracked workflow that was deleted server-side.
+    """
     from goodeye_cli.output import fetch_pages
 
     filter_ = scope_filter(target.scope)
     items, _ = fetch_pages(
-        lambda page_cursor: client.list_workflows(filter_=filter_, cursor=page_cursor),
+        lambda page_cursor: client.list_workflows(
+            filter_=filter_, cursor=page_cursor, include_deleted=include_deleted
+        ),
         cursor=None,
         all_pages=True,
     )
@@ -601,6 +624,193 @@ def _pull_one(
     )
 
 
+# ----- status reporting -----
+
+# The states a tracked or local workflow can be in, and the action the caller
+# would take to reconcile each. ``status`` only reports these; it never writes
+# the index or any SKILL.md, and it never fetches a workflow body.
+SyncStatusState = Literal[
+    "clean",
+    "modified-local",
+    "behind-server",
+    "conflict",
+    "deleted-on-server",
+    "untracked",
+]
+SyncNextAction = Literal["none", "push", "pull", "resolve", "publish"]
+
+
+class StatusItem(_SyncBase):
+    """One per-(slug, target) drift classification from a status pass.
+
+    ``synced_version`` is the version last recorded in the local index (None for
+    an untracked local directory). ``server_version`` is the registry's
+    ``current_version`` for the workflow, the live version a pull would
+    materialize (None when the workflow is gone server-side or untracked); it is
+    not the detail-only ``version`` field.
+    ``read_only`` carries through whether the caller holds only a view grant, so
+    a locally edited but unpushable workflow reports ``next_action`` ``none``.
+    """
+
+    slug: str
+    workflow_id: str | None = None
+    target_path: str
+    state: SyncStatusState
+    read_only: bool = False
+    synced_version: int | None = None
+    server_version: int | None = None
+    next_action: SyncNextAction
+
+
+class StatusResult(_SyncBase):
+    """The full set of per-item classifications from a status pass."""
+
+    items: list[StatusItem] = Field(default_factory=list)
+
+
+def untracked_local_slugs(target: SyncTarget) -> list[str]:
+    """Return slugs of immediate child dirs under ``target`` holding a SKILL.md.
+
+    Scans a single level of ``<target>/<slug>/SKILL.md`` and returns the slug of
+    each child directory that contains a ``SKILL.md``. A target directory that
+    does not exist yields an empty list. The caller filters these against the
+    index to find local directories the registry does not yet track.
+    """
+    base = expand_target_path(target.path)
+    if not base.is_dir():
+        return []
+    slugs: list[str] = []
+    for child in base.iterdir():
+        if child.is_dir() and (child / "SKILL.md").is_file():
+            slugs.append(child.name)
+    return sorted(slugs)
+
+
+def _classify_tracked(
+    entry: SyncEntry,
+    summary: WorkflowSummary | None,
+    *,
+    target: SyncTarget,
+) -> StatusItem:
+    """Classify one tracked index entry against its live summary (if any).
+
+    Reads only the local body hash and the summary's ``version_token``: no body
+    is fetched. A summary that is absent or carries a ``deleted_at`` means the
+    workflow is gone server-side.
+    """
+    stored_target = normalize_target_path(target.path)
+    read_only = entry.effective_role == "view"
+    base = StatusItem(
+        slug=entry.slug,
+        workflow_id=entry.workflow_id,
+        target_path=stored_target,
+        state="clean",
+        read_only=read_only,
+        synced_version=entry.synced_version,
+        server_version=None,
+        next_action="none",
+    )
+
+    if summary is None or summary.deleted_at is not None:
+        return base.model_copy(update={"state": "deleted-on-server", "next_action": "resolve"})
+
+    base = base.model_copy(update={"server_version": summary.current_version})
+    local_body = read_local_body(target, entry.slug)
+    modified = is_modified_locally(entry, local_body)
+    moved = server_moved(entry, summary)
+
+    if modified and moved:
+        return base.model_copy(update={"state": "conflict", "next_action": "resolve"})
+    if modified:
+        # A read-only workflow can be edited on disk but the edits cannot be
+        # pushed back, so there is no action to recommend.
+        action: SyncNextAction = "none" if read_only else "push"
+        return base.model_copy(update={"state": "modified-local", "next_action": action})
+    if moved:
+        return base.model_copy(update={"state": "behind-server", "next_action": "pull"})
+    return base
+
+
+def status(
+    client: GoodeyeClient,
+    config: SyncConfig,
+    state: SyncState,
+    *,
+    target_path: str | None,
+) -> StatusResult:
+    """Report drift between the registry and the local mirror, without writing.
+
+    For each target in scope this does a single listing pass (following all
+    pages, with the caller's soft-deleted workflows included so deletion is
+    detectable fetch-free), then classifies each tracked index entry by
+    comparing recorded version tokens and the local body hash. It never fetches
+    a workflow body and never writes the index or any SKILL.md. Local
+    directories that hold a SKILL.md but have no index entry are reported as
+    untracked.
+    """
+    result = StatusResult()
+    targets = _targets_to_process(config, target_path)
+    # Cache the listing per server-filter string so targets sharing a scope do
+    # not each re-list. The filter already encodes the scope (owned vs all).
+    listings: dict[str, list[WorkflowSummary]] = {}
+
+    for target in targets:
+        filter_ = scope_filter(target.scope)
+        summaries = listings.get(filter_)
+        if summaries is None:
+            summaries = _list_all_for_target(client, target, include_deleted=True)
+            listings[filter_] = summaries
+        result.items.extend(_status_for_target(target, summaries, state))
+    return result
+
+
+def _status_for_target(
+    target: SyncTarget,
+    summaries: list[WorkflowSummary],
+    state: SyncState,
+) -> list[StatusItem]:
+    """Classify every tracked entry and untracked local dir for one target."""
+    # Narrow a `selected` target to its globs; owned/all already match the
+    # server filter, so this is a passthrough for them.
+    in_scope = select_for_target(target, summaries)
+    by_id = {s.id: s for s in in_scope}
+    stored_target = normalize_target_path(target.path)
+
+    items: list[StatusItem] = []
+    tracked_slugs: set[str] = set()
+    for entry in state.entries:
+        if normalize_target_path(entry.target_path) != stored_target:
+            continue
+        # Gate tracked classification on the same scope predicate as the
+        # listing: a `selected` target whose globs were narrowed after a pull
+        # would otherwise find no summary for an out-of-glob slug in the
+        # narrowed listing and mis-report a still-live workflow as deleted.
+        if not slug_in_target_scope(target, entry.slug):
+            continue
+        tracked_slugs.add(entry.slug)
+        summary = by_id.get(entry.workflow_id)
+        items.append(_classify_tracked(entry, summary, target=target))
+
+    for slug in untracked_local_slugs(target):
+        if slug in tracked_slugs:
+            continue
+        # Same scope gate on the untracked scan, so an out-of-glob local dir is
+        # not reported as untracked for a `selected` target it does not belong
+        # to. Keeps the tracked and untracked paths consistent.
+        if not slug_in_target_scope(target, slug):
+            continue
+        items.append(
+            StatusItem(
+                slug=slug,
+                workflow_id=None,
+                target_path=stored_target,
+                state="untracked",
+                next_action="publish",
+            )
+        )
+    return items
+
+
 __all__ = [
     "PRESETS",
     "SLUG_RE",
@@ -608,10 +818,14 @@ __all__ = [
     "PullAction",
     "PullItem",
     "PullResult",
+    "StatusItem",
+    "StatusResult",
     "SyncConfig",
     "SyncEntry",
+    "SyncNextAction",
     "SyncScope",
     "SyncState",
+    "SyncStatusState",
     "SyncTarget",
     "SyncVerifierBinding",
     "add_target",
@@ -633,5 +847,8 @@ __all__ = [
     "scope_filter",
     "select_for_target",
     "server_moved",
+    "slug_in_target_scope",
+    "status",
+    "untracked_local_slugs",
     "upsert_entry",
 ]

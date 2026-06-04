@@ -38,6 +38,9 @@ from goodeye_cli.sync import (
     scope_filter,
     select_for_target,
     server_moved,
+    slug_in_target_scope,
+    status,
+    untracked_local_slugs,
     upsert_entry,
 )
 from goodeye_cli.wire import WorkflowSummary
@@ -973,3 +976,586 @@ def test_pull_target_path_selects_single_target(
     assert list_route.call_count == 1
     assert (second / "alpha" / "SKILL.md").exists()
     assert not (first / "alpha").exists()
+
+
+# ----- status engine -----
+
+
+def _write_skill(target_dir: Path, slug: str, body: str) -> Path:
+    """Write ``<target_dir>/<slug>/SKILL.md`` with ``body`` and return its path."""
+    skill = target_dir / slug / "SKILL.md"
+    skill.parent.mkdir(parents=True, exist_ok=True)
+    skill.write_text(body, encoding="utf-8")
+    return skill
+
+
+def _summary_dict(
+    *,
+    id_: str,
+    name: str,
+    token: str = "tok",
+    version: int = 1,
+    role: str = "owner",
+    deleted_at: str | None = None,
+) -> dict:
+    payload: dict = {
+        "id": id_,
+        "name": name,
+        "current_version": version,
+        "version_token": token,
+        "effective_role": role,
+    }
+    if deleted_at is not None:
+        payload["deleted_at"] = deleted_at
+    return payload
+
+
+def _tracked_entry(
+    target_dir: Path,
+    *,
+    id_: str,
+    slug: str,
+    body: str,
+    token: str = "tok",
+    version: int = 1,
+    role: str = "owner",
+) -> SyncEntry:
+    """Build an index entry whose recorded hash matches ``body``."""
+    return SyncEntry(
+        workflow_id=id_,
+        slug=slug,
+        target_path=normalize_target_path(str(target_dir)),
+        synced_version=version,
+        version_token=token,
+        body_sha256=body_sha256(body),
+        effective_role=role,
+        read_only=role == "view",
+    )
+
+
+def test_untracked_local_slugs_lists_skill_dirs(tmp_path: Path) -> None:
+    target = SyncTarget(path=str(tmp_path), scope="owned")
+    _write_skill(tmp_path, "alpha", "a")
+    _write_skill(tmp_path, "beta", "b")
+    # A bare directory with no SKILL.md is not a workflow dir.
+    (tmp_path / "scratch").mkdir()
+    # A stray top-level file is ignored.
+    (tmp_path / "README.md").write_text("x", encoding="utf-8")
+    assert untracked_local_slugs(target) == ["alpha", "beta"]
+
+
+def test_untracked_local_slugs_empty_when_dir_missing(tmp_path: Path) -> None:
+    target = SyncTarget(path=str(tmp_path / "absent"), scope="owned")
+    assert untracked_local_slugs(target) == []
+
+
+@respx.mock
+def test_status_clean(tmp_path: Path, tmp_config_paths: ConfigPaths) -> None:
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    body = "server body"
+    _write_skill(target_dir, "alpha", body)
+    state = SyncState(
+        entries=[_tracked_entry(target_dir, id_="skl_a", slug="alpha", body=body, token="t1")]
+    )
+
+    list_route = respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response([_summary_dict(id_="skl_a", name="alpha", token="t1")])
+    )
+    detail_route = respx.get(f"{SERVER}/v1/workflows/skl_a").mock(
+        return_value=_detail_response(id_="skl_a", name="alpha", body=body)
+    )
+
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = status(client, config, state, target_path=None)
+
+    assert len(result.items) == 1
+    item = result.items[0]
+    assert item.slug == "alpha"
+    assert item.state == "clean"
+    assert item.next_action == "none"
+    assert item.synced_version == 1
+    assert item.server_version == 1
+    assert item.read_only is False
+    assert detail_route.call_count == 0  # no body fetch
+    assert list_route.call_count == 1
+
+
+@respx.mock
+def test_status_modified_local(tmp_path: Path, tmp_config_paths: ConfigPaths) -> None:
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    # Recorded hash is the server body; the file on disk diverges.
+    _write_skill(target_dir, "alpha", "locally edited")
+    state = SyncState(
+        entries=[
+            _tracked_entry(target_dir, id_="skl_a", slug="alpha", body="server body", token="t1")
+        ]
+    )
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response(
+            [_summary_dict(id_="skl_a", name="alpha", token="t1", version=4)]
+        )
+    )
+    detail_route = respx.get(f"{SERVER}/v1/workflows/skl_a").mock(
+        return_value=_detail_response(id_="skl_a", name="alpha", body="x")
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = status(client, config, state, target_path=None)
+    item = result.items[0]
+    assert item.state == "modified-local"
+    assert item.next_action == "push"
+    assert item.synced_version == 1
+    assert item.server_version == 4
+    assert item.read_only is False
+    assert detail_route.call_count == 0
+
+
+@respx.mock
+def test_status_modified_local_read_only_has_no_action(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="all")])
+    _write_skill(target_dir, "shared", "locally edited")
+    state = SyncState(
+        entries=[
+            _tracked_entry(
+                target_dir, id_="skl_s", slug="shared", body="server body", token="t1", role="view"
+            )
+        ]
+    )
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response(
+            [_summary_dict(id_="skl_s", name="shared", token="t1", role="view")]
+        )
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = status(client, config, state, target_path=None)
+    item = result.items[0]
+    # A read-only workflow can be edited on disk but the edits cannot be pushed,
+    # so the state is still modified-local but there is no recommended action.
+    assert item.state == "modified-local"
+    assert item.read_only is True
+    assert item.next_action == "none"
+
+
+@respx.mock
+def test_status_behind_server(tmp_path: Path, tmp_config_paths: ConfigPaths) -> None:
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    body = "server body"
+    _write_skill(target_dir, "alpha", body)
+    state = SyncState(
+        entries=[_tracked_entry(target_dir, id_="skl_a", slug="alpha", body=body, token="t1")]
+    )
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response(
+            [_summary_dict(id_="skl_a", name="alpha", token="t2", version=2)]
+        )
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = status(client, config, state, target_path=None)
+    item = result.items[0]
+    assert item.state == "behind-server"
+    assert item.next_action == "pull"
+    assert item.synced_version == 1
+    assert item.server_version == 2
+
+
+@respx.mock
+def test_status_behind_server_when_local_file_missing(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    # A tracked entry whose SKILL.md was removed is treated as not locally
+    # edited (nothing to push), so a moved server classifies it as behind-server.
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    state = SyncState(
+        entries=[
+            _tracked_entry(target_dir, id_="skl_a", slug="alpha", body="server body", token="t1")
+        ]
+    )
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response(
+            [_summary_dict(id_="skl_a", name="alpha", token="t2", version=2)]
+        )
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = status(client, config, state, target_path=None)
+    item = result.items[0]
+    assert item.state == "behind-server"
+    assert item.next_action == "pull"
+
+
+@respx.mock
+def test_status_conflict(tmp_path: Path, tmp_config_paths: ConfigPaths) -> None:
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    # Both sides moved: file diverged from the recorded hash AND the token moved.
+    _write_skill(target_dir, "alpha", "locally edited")
+    state = SyncState(
+        entries=[
+            _tracked_entry(target_dir, id_="skl_a", slug="alpha", body="server body", token="t1")
+        ]
+    )
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response(
+            [_summary_dict(id_="skl_a", name="alpha", token="t2", version=3)]
+        )
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = status(client, config, state, target_path=None)
+    item = result.items[0]
+    assert item.state == "conflict"
+    assert item.next_action == "resolve"
+    assert item.synced_version == 1
+    assert item.server_version == 3
+
+
+@respx.mock
+def test_status_deleted_on_server_via_deleted_at(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    body = "server body"
+    _write_skill(target_dir, "alpha", body)
+    state = SyncState(
+        entries=[_tracked_entry(target_dir, id_="skl_a", slug="alpha", body=body, token="t1")]
+    )
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response(
+            [
+                _summary_dict(
+                    id_="skl_a", name="alpha", token="t1", deleted_at="2026-06-01T00:00:00Z"
+                )
+            ]
+        )
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = status(client, config, state, target_path=None)
+    item = result.items[0]
+    assert item.state == "deleted-on-server"
+    assert item.next_action == "resolve"
+    # The server version is left unset for a gone workflow.
+    assert item.server_version is None
+    assert item.synced_version == 1
+
+
+@respx.mock
+def test_status_deleted_on_server_via_absent_summary(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    # A tracked workflow that does not appear in the listing at all (e.g. a
+    # revoked share) is treated the same as deleted.
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="all")])
+    body = "server body"
+    _write_skill(target_dir, "gone", body)
+    state = SyncState(
+        entries=[_tracked_entry(target_dir, id_="skl_g", slug="gone", body=body, token="t1")]
+    )
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response([_summary_dict(id_="skl_other", name="other", token="t1")])
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = status(client, config, state, target_path=None)
+    item = result.items[0]
+    assert item.slug == "gone"
+    assert item.state == "deleted-on-server"
+    assert item.next_action == "resolve"
+    assert item.server_version is None
+
+
+@respx.mock
+def test_status_untracked_local_dir(tmp_path: Path, tmp_config_paths: ConfigPaths) -> None:
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    # A local dir with a SKILL.md and no index entry is untracked.
+    _write_skill(target_dir, "draft", "local draft")
+    respx.get(f"{SERVER}/v1/workflows").mock(return_value=_list_response([]))
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = status(client, config, SyncState(), target_path=None)
+    item = result.items[0]
+    assert item.slug == "draft"
+    assert item.state == "untracked"
+    assert item.next_action == "publish"
+    assert item.workflow_id is None
+    assert item.synced_version is None
+    assert item.server_version is None
+
+
+@respx.mock
+def test_status_does_not_write_index_or_files(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    skill = _write_skill(target_dir, "alpha", "locally edited")
+    state = SyncState(
+        entries=[
+            _tracked_entry(target_dir, id_="skl_a", slug="alpha", body="server body", token="t1")
+        ]
+    )
+    save_sync_state(state, tmp_config_paths)
+    index_before = tmp_config_paths.sync_state_file.read_text(encoding="utf-8")
+
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response(
+            [_summary_dict(id_="skl_a", name="alpha", token="t2", version=2)]
+        )
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        status(client, config, state, target_path=None)
+
+    # The index file and the on-disk SKILL.md are byte-for-byte unchanged.
+    assert tmp_config_paths.sync_state_file.read_text(encoding="utf-8") == index_before
+    assert skill.read_text(encoding="utf-8") == "locally edited"
+
+
+@respx.mock
+def test_status_selected_scope_applies_globs(tmp_path: Path, tmp_config_paths: ConfigPaths) -> None:
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(
+        targets=[SyncTarget(path=str(target_dir), scope="selected", selected=["refunds-*"])]
+    )
+    body = "server body"
+    _write_skill(target_dir, "refunds-flow", body)
+    state = SyncState(
+        entries=[
+            _tracked_entry(target_dir, id_="skl_r", slug="refunds-flow", body=body, token="t1")
+        ]
+    )
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response(
+            [
+                _summary_dict(id_="skl_r", name="refunds-flow", token="t1"),
+                _summary_dict(id_="skl_o", name="onboarding", token="t1"),
+            ]
+        )
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = status(client, config, state, target_path=None)
+    # Only the glob-matching workflow is in scope and classified.
+    assert [i.slug for i in result.items] == ["refunds-flow"]
+    assert result.items[0].state == "clean"
+
+
+@respx.mock
+def test_status_target_path_selects_single_target(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    config = SyncConfig(
+        targets=[
+            SyncTarget(path=str(first), scope="owned"),
+            SyncTarget(path=str(second), scope="owned"),
+        ]
+    )
+    body = "server body"
+    _write_skill(second, "beta", body)
+    state = SyncState(
+        entries=[_tracked_entry(second, id_="skl_b", slug="beta", body=body, token="t1")]
+    )
+    list_route = respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response([_summary_dict(id_="skl_b", name="beta", token="t1")])
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = status(client, config, state, target_path=str(second))
+    # Only the requested target was listed and classified.
+    assert list_route.call_count == 1
+    assert [i.slug for i in result.items] == ["beta"]
+    assert result.items[0].target_path == normalize_target_path(str(second))
+
+
+@respx.mock
+def test_status_unknown_target_path_raises_not_found(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    config = SyncConfig(targets=[SyncTarget(path=str(tmp_path / "a"), scope="owned")])
+    with (
+        GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client,
+        pytest.raises(NotFound),
+    ):
+        status(client, config, SyncState(), target_path=str(tmp_path / "nope"))
+
+
+@respx.mock
+def test_status_caches_listing_across_shared_scope(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    # Two targets sharing the same scope (and thus server filter) reuse one
+    # listing call rather than re-listing per target.
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    config = SyncConfig(
+        targets=[
+            SyncTarget(path=str(first), scope="owned"),
+            SyncTarget(path=str(second), scope="owned"),
+        ]
+    )
+    list_route = respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response([_summary_dict(id_="skl_a", name="alpha", token="t1")])
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        status(client, config, SyncState(), target_path=None)
+    assert list_route.call_count == 1
+
+
+def test_slug_in_target_scope_owned_and_all_accept_everything() -> None:
+    # Owned/all targets are server-filtered, so every slug is in scope.
+    for scope in ("owned", "all"):
+        target = SyncTarget(path="~/skills", scope=scope)  # type: ignore[arg-type]
+        assert slug_in_target_scope(target, "anything") is True
+        assert slug_in_target_scope(target, "refunds-flow") is True
+
+
+def test_slug_in_target_scope_selected_matches_globs() -> None:
+    target = SyncTarget(path="~/skills", scope="selected", selected=["refunds-*", "exact"])
+    assert slug_in_target_scope(target, "refunds-flow") is True
+    assert slug_in_target_scope(target, "exact") is True
+    assert slug_in_target_scope(target, "onboarding") is False
+    # An empty pattern list matches nothing.
+    empty = SyncTarget(path="~/skills", scope="selected", selected=[])
+    assert slug_in_target_scope(empty, "refunds-flow") is False
+
+
+@respx.mock
+def test_status_selected_out_of_glob_tracked_entry_is_omitted(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    # A tracked index entry whose slug falls outside the target's current globs
+    # is not classified at all (not reported deleted-on-server), even though the
+    # workflow is still live server-side. This guards the case where a user
+    # narrows --only after pulling.
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(
+        targets=[SyncTarget(path=str(target_dir), scope="selected", selected=["refunds-*"])]
+    )
+    body = "server body"
+    _write_skill(target_dir, "refunds-flow", body)
+    state = SyncState(
+        entries=[
+            _tracked_entry(target_dir, id_="skl_r", slug="refunds-flow", body=body, token="t1"),
+            # Tracked from an earlier, wider glob; now out of scope but still live.
+            _tracked_entry(target_dir, id_="skl_o", slug="onboarding", body=body, token="t1"),
+        ]
+    )
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response(
+            [
+                _summary_dict(id_="skl_r", name="refunds-flow", token="t1"),
+                _summary_dict(id_="skl_o", name="onboarding", token="t1"),
+            ]
+        )
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = status(client, config, state, target_path=None)
+    # Only the in-glob entry is reported; the out-of-glob one is omitted, not
+    # mis-classified as deleted-on-server.
+    assert [i.slug for i in result.items] == ["refunds-flow"]
+    assert result.items[0].state == "clean"
+    assert "deleted-on-server" not in {i.state for i in result.items}
+
+
+@respx.mock
+def test_status_selected_out_of_glob_untracked_dir_is_omitted(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    # An untracked local dir whose slug is outside the target's globs is not
+    # reported as untracked: the untracked scan honors the same scope gate as
+    # the tracked classification.
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(
+        targets=[SyncTarget(path=str(target_dir), scope="selected", selected=["refunds-*"])]
+    )
+    _write_skill(target_dir, "refunds-draft", "in-scope draft")
+    _write_skill(target_dir, "onboarding", "out-of-scope draft")
+    respx.get(f"{SERVER}/v1/workflows").mock(return_value=_list_response([]))
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = status(client, config, SyncState(), target_path=None)
+    # Only the in-glob local dir is reported untracked; the other is omitted.
+    assert [i.slug for i in result.items] == ["refunds-draft"]
+    assert result.items[0].state == "untracked"
+
+
+@respx.mock
+def test_status_per_target_isolation_tracked_vs_untracked(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    # The same slug is tracked under target A but only present as an untracked
+    # local dir under target B in a single run. A reports it clean; B reports it
+    # untracked. Per-target index matching keeps the two from bleeding together.
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    config = SyncConfig(
+        targets=[
+            SyncTarget(path=str(first), scope="owned"),
+            SyncTarget(path=str(second), scope="owned"),
+        ]
+    )
+    body = "server body"
+    _write_skill(first, "shared", body)
+    _write_skill(second, "shared", body)
+    state = SyncState(
+        # Tracked only under the first target.
+        entries=[_tracked_entry(first, id_="skl_s", slug="shared", body=body, token="t1")]
+    )
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response([_summary_dict(id_="skl_s", name="shared", token="t1")])
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = status(client, config, state, target_path=None)
+
+    by_target = {(i.target_path, i.slug): i for i in result.items}
+    first_item = by_target[(normalize_target_path(str(first)), "shared")]
+    second_item = by_target[(normalize_target_path(str(second)), "shared")]
+    assert first_item.state == "clean"
+    assert second_item.state == "untracked"
+    assert second_item.next_action == "publish"
+
+
+@respx.mock
+def test_status_distinct_scopes_list_separately(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    # Two targets with DIFFERENT scopes map to different server filters, so the
+    # listing endpoint is hit once per filter (two distinct listings), and items
+    # from both targets appear. This is the opposite direction from the
+    # shared-scope cache test.
+    owned_dir = tmp_path / "owned"
+    all_dir = tmp_path / "all"
+    config = SyncConfig(
+        targets=[
+            SyncTarget(path=str(owned_dir), scope="owned"),
+            SyncTarget(path=str(all_dir), scope="all"),
+        ]
+    )
+    body = "server body"
+    _write_skill(owned_dir, "mine-flow", body)
+    _write_skill(all_dir, "shared-flow", body)
+    state = SyncState(
+        entries=[
+            _tracked_entry(owned_dir, id_="skl_m", slug="mine-flow", body=body, token="t1"),
+            _tracked_entry(all_dir, id_="skl_x", slug="shared-flow", body=body, token="t1"),
+        ]
+    )
+
+    # scope "owned" -> filter "mine"; scope "all" -> filter "all".
+    mine_route = respx.get(f"{SERVER}/v1/workflows", params__contains={"filter": "mine"}).mock(
+        return_value=_list_response([_summary_dict(id_="skl_m", name="mine-flow", token="t1")])
+    )
+    all_route = respx.get(f"{SERVER}/v1/workflows", params__contains={"filter": "all"}).mock(
+        return_value=_list_response([_summary_dict(id_="skl_x", name="shared-flow", token="t1")])
+    )
+
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = status(client, config, state, target_path=None)
+
+    # Two distinct server filters mean two listing calls, not a collapsed cache.
+    assert mine_route.call_count == 1
+    assert all_route.call_count == 1
+    assert {i.slug for i in result.items} == {"mine-flow", "shared-flow"}
+    assert all(i.state == "clean" for i in result.items)

@@ -232,4 +232,83 @@ def pull(
         )
 
 
-__all__ = ["app", "pull", "target_add", "target_app", "target_list", "target_remove"]
+def _status_hints(items: list[sync.StatusItem]) -> list[str]:
+    """Build neutral next-step hints that name only commands that exist now.
+
+    ``behind-server`` workflows can be reconciled with the existing ``pull``
+    command, so that hint is concrete. Local edits, conflicts, and untracked
+    directories are reported as counts without pointing at a command, since the
+    command that would reconcile them is not part of this release.
+    """
+    hints: list[str] = []
+    behind = sum(1 for i in items if i.state == "behind-server")
+    edited = sum(1 for i in items if i.state in {"modified-local", "conflict"})
+    untracked = sum(1 for i in items if i.state == "untracked")
+    if behind:
+        hints.append(
+            f"run `goodeye workflows sync pull` to update {behind} behind-server workflow(s)"
+        )
+    if edited:
+        hints.append(f"{edited} workflow(s) have local edits")
+    if untracked:
+        hints.append(f"{untracked} local workflow(s) are not yet in the registry")
+    return hints
+
+
+@app.command("status")
+def status(
+    target: str | None = typer.Option(
+        None,
+        "--target",
+        help="Report on a single configured target directory instead of all of them.",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Print results as JSON."),
+    table_output: bool = typer.Option(False, "--table", help="Print results as a table."),
+) -> None:
+    """Report drift between the registry and the local skill directories.
+
+    For each in-scope workflow this compares what the registry reports against
+    what was last mirrored locally and what is on disk, classifying each one as
+    clean, edited locally, behind the registry, conflicted, deleted upstream, or
+    a local directory the registry does not track yet. It reads only: nothing is
+    fetched, written, or changed. Requires authentication.
+    """
+    mode = resolve_output_mode(json_output=json_output, table_output=table_output)
+    paths = get_config_paths()
+    config = sync.load_sync_config(paths)
+    state = sync.load_sync_state(paths)
+
+    with _client(require_auth=True) as client:
+        result = sync.status(client, config, state, target_path=target)
+
+    if mode == "json":
+        echo_json(items_envelope(result.items))
+        return
+
+    console = Console()
+    if not result.items:
+        console.print("[dim]No workflows in scope.[/dim]")
+        return
+    table = Table(title="Sync status")
+    table.add_column("Slug", no_wrap=True)
+    table.add_column("Target", no_wrap=True)
+    table.add_column("State")
+    table.add_column("Next action")
+    for item in result.items:
+        table.add_row(item.slug, item.target_path, item.state, item.next_action)
+    console.print(table)
+
+    hints = _status_hints(result.items)
+    if hints:
+        console.print(f"[yellow]Next:[/yellow] {'; '.join(hints)}.")
+
+
+__all__ = [
+    "app",
+    "pull",
+    "status",
+    "target_add",
+    "target_app",
+    "target_list",
+    "target_remove",
+]

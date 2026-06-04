@@ -384,3 +384,138 @@ def test_pull_no_targets_renders_empty(tmp_config_paths: ConfigPaths, monkeypatc
     result = runner.invoke(app, ["workflows", "sync", "pull", "--table"])
     assert result.exit_code == 0, result.output
     assert "No workflows in scope" in result.output
+
+
+# ----- status -----
+
+
+def _seed_index_entry(
+    tmp_config_paths: ConfigPaths,
+    *,
+    target_dir: Path,
+    workflow_id: str,
+    slug: str,
+    body: str,
+    token: str = "tok",
+    version: int = 1,
+) -> None:
+    """Write a SKILL.md plus a matching index entry recording its hash."""
+    from goodeye_cli import sync
+
+    skill = target_dir / slug / "SKILL.md"
+    skill.parent.mkdir(parents=True, exist_ok=True)
+    skill.write_text(body, encoding="utf-8")
+    state = sync.load_sync_state(tmp_config_paths)
+    sync.upsert_entry(
+        state,
+        sync.SyncEntry(
+            workflow_id=workflow_id,
+            slug=slug,
+            target_path=sync.normalize_target_path(str(target_dir)),
+            synced_version=version,
+            version_token=token,
+            body_sha256=sync.body_sha256(body),
+        ),
+    )
+    sync.save_sync_state(state, tmp_config_paths)
+
+
+def test_status_requires_auth(tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path) -> None:
+    _redirect_config(monkeypatch, tmp_config_paths)
+    monkeypatch.delenv("GOODEYE_API_KEY", raising=False)
+    _seed_target(monkeypatch, tmp_config_paths, str(tmp_path / "skills"))
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "sync", "status"])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, AuthRequired)
+
+
+@respx.mock
+def test_status_json_default_shape(
+    tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
+) -> None:
+    _setup_auth(monkeypatch, tmp_config_paths)
+    target_dir = tmp_path / "skills"
+    _seed_target(monkeypatch, tmp_config_paths, str(target_dir))
+    # A tracked entry whose disk copy diverges from the recorded hash.
+    _seed_index_entry(
+        tmp_config_paths,
+        target_dir=target_dir,
+        workflow_id="skl_01",
+        slug="alpha",
+        body="server body",
+        token="tok",
+        version=4,
+    )
+    (target_dir / "alpha" / "SKILL.md").write_text("locally edited", encoding="utf-8")
+
+    list_route = respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response(
+            [
+                {
+                    "id": "skl_01",
+                    "name": "alpha",
+                    "current_version": 4,
+                    "version_token": "tok",
+                }
+            ]
+        )
+    )
+    # Registered only to prove status never fetches a body.
+    detail_route = respx.get(f"{SERVER}/v1/workflows/skl_01").mock(
+        return_value=_detail_response(id_="skl_01", name="alpha", body="x")
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "sync", "status"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    item = payload["items"][0]
+    assert item["slug"] == "alpha"
+    assert item["workflow_id"] == "skl_01"
+    assert item["state"] == "modified-local"
+    assert item["next_action"] == "push"
+    assert item["read_only"] is False
+    assert item["synced_version"] == 4
+    assert item["server_version"] == 4
+    assert list_route.call_count == 1
+    assert detail_route.call_count == 0
+
+
+@respx.mock
+def test_status_table_mode(tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path) -> None:
+    _setup_auth(monkeypatch, tmp_config_paths)
+    monkeypatch.setenv("COLUMNS", "200")
+    target_dir = tmp_path / "skills"
+    _seed_target(monkeypatch, tmp_config_paths, str(target_dir))
+    _seed_index_entry(
+        tmp_config_paths,
+        target_dir=target_dir,
+        workflow_id="skl_01",
+        slug="alpha",
+        body="server body",
+        token="t1",
+    )
+    # Server token advanced past the recorded one: behind-server -> pull.
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response(
+            [{"id": "skl_01", "name": "alpha", "current_version": 2, "version_token": "t2"}]
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "sync", "status", "--table"])
+    assert result.exit_code == 0, result.output
+    assert "Sync status" in result.output
+    assert "alpha" in result.output
+    assert "behind-server" in result.output
+    # The next-step hint names only a command that exists now.
+    assert "Next:" in result.output
+    assert "goodeye workflows sync pull" in result.output
+
+
+def test_status_no_targets_renders_empty(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _setup_auth(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "sync", "status", "--table"])
+    assert result.exit_code == 0, result.output
+    assert "No workflows in scope" in result.output
