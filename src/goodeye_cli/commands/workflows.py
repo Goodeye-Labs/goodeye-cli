@@ -5,18 +5,25 @@ from __future__ import annotations
 import re
 import sys
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated
 
 import typer
-import yaml
 from rich.console import Console
 from rich.markup import escape as rich_escape
 from rich.table import Table
 
 from goodeye_cli.client import GoodeyeClient
+from goodeye_cli.commands import workflows_sync
 from goodeye_cli.commands.prompts import confirm_destructive
 from goodeye_cli.config import get_api_key, get_server
 from goodeye_cli.errors import AuthRequired, ValidationFailed
+from goodeye_cli.frontmatter import (
+    coerce_outcome,
+    coerce_required_text,
+    coerce_tags,
+    extract_discovery_facets,
+    parse_front_matter,
+)
 from goodeye_cli.output import (
     echo_json,
     fetch_pages,
@@ -32,6 +39,7 @@ app = typer.Typer(
     help="Browse and manage the caller's private workflows.",
     no_args_is_help=True,
 )
+app.add_typer(workflows_sync.app, name="sync")
 
 
 def _client(*, require_auth: bool) -> GoodeyeClient:
@@ -219,75 +227,15 @@ def get_cmd(
         sys.stdout.write("\n# End of Goodeye workflow.\n")
 
 
-def _parse_front_matter(source: str) -> tuple[dict[str, Any], str]:
-    """Extract a YAML front-matter block from a markdown source.
-
-    Front-matter is recognised when the file begins with ``---`` on its own line
-    and a matching terminator ``---`` appears later. Everything between is parsed
-    as YAML. Everything after the terminator is the body.
-
-    Returns ``({}, source)`` if no front-matter is present.
-    """
-    lines = source.splitlines(keepends=True)
-    if not lines or lines[0].rstrip() != "---":
-        return {}, source
-    for idx in range(1, len(lines)):
-        if lines[idx].rstrip() == "---":
-            yaml_text = "".join(lines[1:idx])
-            body = "".join(lines[idx + 1 :])
-            if body.startswith("\n"):
-                body = body[1:]
-            parsed = yaml.safe_load(yaml_text) or {}
-            if not isinstance(parsed, dict):
-                raise ValidationFailed(
-                    slug="validation_error",
-                    message="YAML front-matter must be a mapping.",
-                )
-            return parsed, body
-    return {}, source
-
-
-def _coerce_required_text(raw: Any, *, field_name: str, missing_message: str) -> str:
-    if raw is None:
-        raise ValidationFailed(
-            slug="validation_error",
-            message=missing_message,
-        )
-    if isinstance(raw, str) and raw.strip():
-        return raw
-    raise ValidationFailed(
-        slug="validation_error",
-        message=f"`{field_name}` must be a non-empty string.",
-    )
-
-
-def _coerce_outcome(raw: Any) -> str | None:
-    if raw is None:
-        return None
-    if isinstance(raw, str) and raw.strip():
-        return raw
-    raise ValidationFailed(
-        slug="validation_error",
-        message="`outcome` must be a non-empty string.",
-    )
-
-
-def _coerce_tags(raw: Any) -> list[str]:
-    if raw is None:
-        return []
-    if isinstance(raw, list):
-        return [str(t) for t in raw]
-    raise ValidationFailed(
-        slug="validation_error",
-        message="`tags` must be a list of strings.",
-    )
-
-
-def _extract_discovery_facets(front_matter: dict[str, Any]) -> tuple[str | None, list[str]]:
-    """Pull supported discovery facets from top-level front matter."""
-    outcome = _coerce_outcome(front_matter.get("outcome"))
-    tags = _coerce_tags(front_matter.get("tags"))
-    return outcome, tags
+# Front-matter parsing and metadata coercion live in the neutral
+# ``goodeye_cli.frontmatter`` module so the sync engine can reuse them without
+# importing this command module (which would create a cycle). These private
+# aliases keep the existing call sites and tests working unchanged.
+_parse_front_matter = parse_front_matter
+_coerce_required_text = coerce_required_text
+_coerce_outcome = coerce_outcome
+_coerce_tags = coerce_tags
+_extract_discovery_facets = extract_discovery_facets
 
 
 def _parse_workflow_verifier_flags(values: list[str]) -> list[dict[str, str]]:

@@ -19,6 +19,8 @@ def tmp_config_paths(tmp_path: Path) -> ConfigPaths:
         credentials_file=config_dir / "credentials.json",
         config_file=config_dir / "config.json",
         update_check_file=config_dir / "update-check.json",
+        sync_file=config_dir / "sync.json",
+        sync_state_file=config_dir / "sync-state.json",
     )
 
 

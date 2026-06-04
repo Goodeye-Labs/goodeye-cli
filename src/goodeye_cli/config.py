@@ -54,6 +54,8 @@ class ConfigPaths:
     credentials_file: Path
     config_file: Path
     update_check_file: Path
+    sync_file: Path
+    sync_state_file: Path
 
 
 def get_config_paths(env: dict[str, str] | None = None) -> ConfigPaths:
@@ -71,6 +73,8 @@ def get_config_paths(env: dict[str, str] | None = None) -> ConfigPaths:
         credentials_file=config_dir / "credentials.json",
         config_file=config_dir / "config.json",
         update_check_file=config_dir / "update-check.json",
+        sync_file=config_dir / "sync.json",
+        sync_state_file=config_dir / "sync-state.json",
     )
 
 

@@ -360,6 +360,45 @@ goodeye workflows leave <id-or-name> [--yes]
 goodeye workflows transfer-ownership <id-or-name> <new-owner>
     Transfer a workflow you own to another user.
 
+goodeye workflows sync [--target DIR] [--force] [--yes] [--json|--table]
+    Pull every configured target, then print where each workflow stands.
+    Equivalent to running `sync pull` followed by `sync status`. --force and
+    --yes apply to that pull; they are ignored when a subcommand is given.
+
+goodeye workflows sync target add <DIR> [--scope owned|all|selected] [--only GLOB] [--json|--table]
+goodeye workflows sync target add --preset claude|agents|cursor [--scope owned|all|selected] [--only GLOB]
+    Add a local directory to mirror workflows into. Give a path or a --preset
+    (claude, agents, or cursor), not both. --scope picks which workflows land
+    here: owned (the default), all (everything you can access), or selected
+    (only the slugs or globs given with repeated --only). Local-only step; it
+    does not contact the registry.
+
+goodeye workflows sync target list [--json|--table]
+    List the configured local sync targets with their scope.
+
+goodeye workflows sync target remove <DIR>
+    Remove a configured local sync target by its directory.
+
+goodeye workflows sync pull [SLUG...] [--target DIR] [--force] [--yes] [--json|--table]
+    Pull registry workflows down to the configured directories, each written
+    to <target>/<slug>/SKILL.md. Omit slugs to pull everything in scope. A
+    locally edited file is preserved unless --force overwrites it. A workflow
+    deleted on the registry has its local copy removed after a confirmation
+    prompt (--yes skips it); this only ever touches local files.
+
+goodeye workflows sync status [--target DIR] [--json|--table]
+    Report drift between the registry and the local directories without
+    fetching or writing anything: each workflow is classified clean, edited
+    locally, behind the registry, conflicted, deleted upstream, or an
+    untracked local directory, with the next step to reconcile it.
+
+goodeye workflows sync push [SLUG...] [--target DIR] [--json|--table]
+    Upload locally edited workflows back to the registry. Only files that
+    differ from the last sync are sent, and each upload is checked against the
+    registry's current version: if it moved since the last sync, that workflow
+    is reported as a conflict and left untouched (reconcile with `sync pull`
+    first). Omit slugs to push every locally edited workflow in scope.
+
 goodeye templates list [--filter all|mine] [--search QUERY] [--limit N] [--cursor TOKEN] [--all] [--json|--table]
     Browse the public template catalog. Anonymous reads allowed. Fetches one
     page by default; --all follows cursors and returns a combined items

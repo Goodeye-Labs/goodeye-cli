@@ -1,27 +1,13 @@
-"""Shared prompt helpers for destructive CLI commands.
+"""Compatibility re-export of the destructive-action prompt helper.
 
-The CLI is consumed by both humans at a TTY and AI agents driving it
-headlessly. Interactive ``typer.confirm`` prompts hang an agent waiting on
-stdin, so destructive actions auto-approve when stdin is not a TTY (the
-standard ``git`` / ``gh`` / ``npm`` pattern). Humans at a real terminal
-still see the safety prompt unless they pass ``--yes``.
+The implementation moved to the package-top-level ``goodeye_cli.prompts`` so
+engine modules (like ``sync``) can import it without the commands package
+reaching back into itself. This module re-exports it so existing call sites
+under ``commands/`` keep importing from here unchanged.
 """
 
 from __future__ import annotations
 
-import sys
+from goodeye_cli.prompts import confirm_destructive
 
-import typer
-
-
-def confirm_destructive(message: str, *, yes: bool) -> bool:
-    """Return ``True`` when the destructive action should proceed.
-
-    Skips the prompt when ``yes`` is set or when stdin is not a TTY so
-    agents and CI invocations never block on input. At an interactive
-    terminal, defers to ``typer.confirm`` with a no-default so a stray
-    Enter does not approve.
-    """
-    if yes or not sys.stdin.isatty():
-        return True
-    return typer.confirm(message, default=False)
+__all__ = ["confirm_destructive"]
