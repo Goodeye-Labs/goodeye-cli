@@ -21,7 +21,7 @@ from goodeye_cli.output import echo_json, items_envelope, resolve_output_mode
 
 app = typer.Typer(
     help="Sync workflows between the registry and local skill directories.",
-    no_args_is_help=True,
+    invoke_without_command=True,
 )
 
 
@@ -34,6 +34,83 @@ def _client(*, require_auth: bool) -> GoodeyeClient:
             hint="Run `goodeye login` or set GOODEYE_API_KEY.",
         )
     return GoodeyeClient(get_server(), api_key=api_key)
+
+
+@app.callback(invoke_without_command=True)
+def _sync_root(
+    ctx: typer.Context,
+    target: str | None = typer.Option(
+        None,
+        "--target",
+        help="Operate on a single configured target directory instead of all of them.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite local edits with the registry copy during the pull.",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        help="Skip the confirmation prompt before removing a deleted workflow's local copy.",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Print the status summary as JSON."),
+    table_output: bool = typer.Option(
+        False, "--table", help="Print the status summary as a table."
+    ),
+) -> None:
+    """Pull every configured target, then show the resulting status.
+
+    Run with no subcommand, this brings the local mirror up to date (the same
+    work as `goodeye workflows sync pull`) and then prints where each workflow
+    stands afterward (the same view as `goodeye workflows sync status`). Pass a
+    subcommand (`target`, `pull`, `status`, `push`) to run just that step.
+    Requires authentication.
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+
+    mode = resolve_output_mode(json_output=json_output, table_output=table_output)
+    paths = get_config_paths()
+    config = sync.load_sync_config(paths)
+    state = sync.load_sync_state(paths)
+
+    with _client(require_auth=True) as client:
+        sync.pull(
+            client,
+            config,
+            state,
+            slugs=[],
+            target_path=target,
+            force=force,
+            yes=yes,
+            paths=paths,
+        )
+        # Reload the index the pull just persisted so the status pass sees the
+        # post-pull state (entries it materialized, dropped, or converged).
+        post_pull_state = sync.load_sync_state(paths)
+        result = sync.status(client, config, post_pull_state, target_path=target)
+
+    if mode == "json":
+        echo_json(items_envelope(result.items))
+        return
+
+    console = Console()
+    if not result.items:
+        console.print("[dim]No workflows in scope.[/dim]")
+        return
+    table = Table(title="Sync status")
+    table.add_column("Slug", no_wrap=True)
+    table.add_column("Target", no_wrap=True)
+    table.add_column("State")
+    table.add_column("Next action")
+    for item in result.items:
+        table.add_row(item.slug, item.target_path, item.state, item.next_action)
+    console.print(table)
+
+    hints = _status_hints(result.items)
+    if hints:
+        console.print(f"[yellow]Next:[/yellow] {'; '.join(hints)}.")
 
 
 target_app = typer.Typer(
@@ -168,6 +245,29 @@ def target_remove(
 _SKIPPED_ACTIONS = frozenset({"skipped-modified", "skipped-conflict"})
 
 
+def _pull_hints(items: list[sync.PullItem]) -> list[str]:
+    """Build neutral next-step hints for a pull pass.
+
+    Workflows that kept local edits point at ``--force``. A workflow gone from
+    the registry but kept on disk (the caller declined removal) points at the
+    same pull with ``--yes`` to remove it without prompting. Every command named
+    here exists today.
+    """
+    hints: list[str] = []
+    if any(item.action in _SKIPPED_ACTIONS for item in items):
+        hints.append(
+            "some workflows kept their local edits; re-run with --force to overwrite "
+            "them with the registry copy"
+        )
+    gone = sum(1 for item in items if item.action == "deleted-on-server")
+    if gone:
+        hints.append(
+            f"{gone} workflow(s) are gone from the registry but kept on disk; re-run "
+            "`goodeye workflows sync pull --yes` to remove their local copies"
+        )
+    return hints
+
+
 @app.command("pull")
 def pull(
     slugs: list[str] = typer.Argument(
@@ -184,6 +284,11 @@ def pull(
         "--force",
         help="Overwrite local edits with the registry copy.",
     ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        help="Skip the confirmation prompt before removing a deleted workflow's local copy.",
+    ),
     json_output: bool = typer.Option(False, "--json", help="Print results as JSON."),
     table_output: bool = typer.Option(False, "--table", help="Print results as a table."),
 ) -> None:
@@ -191,7 +296,10 @@ def pull(
 
     Each in-scope workflow is written to <target>/<slug>/SKILL.md. A local file
     that has been edited since the last pull is preserved unless --force is
-    given. Requires authentication.
+    given. A workflow that has been deleted on the registry has its local copy
+    removed after a confirmation prompt (--yes skips the prompt); this only ever
+    removes the local directory and never deletes anything on the registry.
+    Requires authentication.
     """
     mode = resolve_output_mode(json_output=json_output, table_output=table_output)
     paths = get_config_paths()
@@ -206,6 +314,7 @@ def pull(
             slugs=list(slugs or []),
             target_path=target,
             force=force,
+            yes=yes,
             paths=paths,
         )
 
@@ -225,11 +334,9 @@ def pull(
         table.add_row(item.slug, item.target_path, item.action)
     console.print(table)
 
-    if any(item.action in _SKIPPED_ACTIONS for item in result.items):
-        console.print(
-            "[yellow]Next:[/yellow] some workflows kept their local edits; "
-            "re-run with --force to overwrite them with the registry copy."
-        )
+    hints = _pull_hints(result.items)
+    if hints:
+        console.print(f"[yellow]Next:[/yellow] {'; '.join(hints)}.")
 
 
 def _status_hints(items: list[sync.StatusItem]) -> list[str]:
@@ -307,17 +414,26 @@ def _push_hints(items: list[sync.PushItem]) -> list[str]:
     """Build neutral next-step hints for a push pass.
 
     A conflict points the caller at the existing ``pull`` and ``status``
-    commands. An untracked local directory points at ``workflows publish``,
-    the only path that creates a new registry workflow. Every command named
-    here exists today.
+    commands. A diverged workflow points at ``--target`` to pick the copy to
+    keep. An untracked local directory points at ``workflows publish``, the only
+    path that creates a new registry workflow. Every command named here exists
+    today. A ``converged`` sibling needs no hint: it is already reconciled.
     """
     hints: list[str] = []
     conflicts = sum(1 for i in items if i.action == "conflict")
+    # A workflow diverged across targets emits one item per copy; count the
+    # distinct workflows so the hint reads as one decision per workflow.
+    diverged = len({i.workflow_id for i in items if i.action == "diverged"})
     untracked = sum(1 for i in items if i.action == "untracked")
     if conflicts:
         hints.append(
             f"{conflicts} workflow(s) conflict; run `goodeye workflows sync pull` "
             "to merge then push again (check `goodeye workflows sync status` first)"
+        )
+    if diverged:
+        hints.append(
+            f"{diverged} workflow(s) were edited differently across targets; re-run "
+            "`goodeye workflows sync push --target <dir>` to pick the copy to keep"
         )
     if untracked:
         hints.append(

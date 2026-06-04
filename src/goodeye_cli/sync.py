@@ -17,6 +17,8 @@ import fnmatch
 import hashlib
 import os
 import re
+import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -30,6 +32,7 @@ from goodeye_cli.frontmatter import (
     coerce_tags,
     parse_front_matter,
 )
+from goodeye_cli.prompts import confirm_destructive
 
 if TYPE_CHECKING:
     from goodeye_cli.client import GoodeyeClient
@@ -320,6 +323,48 @@ def body_sha256(body: str) -> str:
     return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 
+# ----- identity guard -----
+
+
+def ensure_identity(client: GoodeyeClient, state: SyncState, *, allow_stamp: bool) -> bool:
+    """Guard the local mirror against being mixed across two accounts.
+
+    The local working copy belongs to one authenticated principal. This
+    resolves the current principal (by email) and compares it to the identity
+    last stamped on the index:
+
+    - Unstamped index: when ``allow_stamp`` is True, stamp the current email on
+      the state in place and return True (the caller's existing index save
+      persists it). When ``allow_stamp`` is False (read-only callers like
+      status), do nothing and return False, so a read pass never writes.
+    - Stamped to a different principal: raise ``Conflict`` before any work, so
+      one account's edits never land in another account's mirror.
+    - Stamped to the same principal: return False (nothing to persist).
+
+    Returns whether the state was mutated (a fresh stamp), so callers can tell a
+    first run from a steady-state one.
+    """
+    current = client.get_me().email
+    if state.identity is None:
+        if allow_stamp:
+            state.identity = current
+            return True
+        return False
+    if state.identity != current:
+        raise Conflict(
+            slug="conflict",
+            message=(
+                f"This local sync was set up for {state.identity}, but you are signed "
+                f"in as {current}. Refusing to mix two accounts' workflows."
+            ),
+            hint=(
+                "Sign in as the original account, or reset the local sync (remove the "
+                "sync config and index, then re-run) to start fresh under this account."
+            ),
+        )
+    return False
+
+
 def find_entry(state: SyncState, *, slug: str, target_path: str) -> SyncEntry | None:
     """Return the index entry for ``(slug, target_path)``, or None.
 
@@ -392,9 +437,14 @@ def select_for_target(
     return chosen
 
 
+def local_skill_dir(target: SyncTarget, slug: str) -> Path:
+    """Return the absolute ``<target>/<slug>/`` directory for ``slug``."""
+    return expand_target_path(target.path) / slug
+
+
 def local_skill_path(target: SyncTarget, slug: str) -> Path:
     """Return the absolute ``SKILL.md`` path for ``slug`` under ``target``."""
-    return expand_target_path(target.path) / slug / "SKILL.md"
+    return local_skill_dir(target, slug) / "SKILL.md"
 
 
 def read_local_body(target: SyncTarget, slug: str) -> str | None:
@@ -435,6 +485,8 @@ PullAction = Literal[
     "skipped-modified",
     "skipped-conflict",
     "skipped-unsafe-name",
+    "deleted-on-server",
+    "deleted-local",
 ]
 
 
@@ -508,6 +560,19 @@ def _write_skill_file(path: Path, body: str) -> None:
     path.write_text(body, encoding="utf-8")
 
 
+def _remove_skill_dir(target: SyncTarget, slug: str) -> None:
+    """Remove the whole ``<target>/<slug>/`` directory if it exists.
+
+    This is the only filesystem deletion sync performs, and it is purely local:
+    it never reaches the registry. A workflow gone server-side has its local
+    mirror removed only after the caller confirms; the directory and everything
+    under it (not just ``SKILL.md``) is taken with it.
+    """
+    directory = local_skill_dir(target, slug)
+    if directory.is_dir():
+        shutil.rmtree(directory)
+
+
 def pull(
     client: GoodeyeClient,
     config: SyncConfig,
@@ -516,6 +581,7 @@ def pull(
     slugs: list[str],
     target_path: str | None,
     force: bool,
+    yes: bool,
     paths: ConfigPaths,
 ) -> PullResult:
     """Mirror registry workflows onto disk for the configured targets.
@@ -523,27 +589,108 @@ def pull(
     For each target, lists the workflows in scope, then for each one decides
     whether to write it: an unchanged local copy is left alone, a locally
     edited copy is preserved unless ``force`` is set, and anything else is
-    fetched and written verbatim. The index is updated in memory as each
-    workflow is written and persisted in a ``finally`` even if a later fetch
-    raises, so files written before a failure are tracked and a re-run resumes
-    from where it left off rather than re-pulling them as untracked.
+    fetched and written verbatim. After materializing the live workflows, a
+    tracked entry whose workflow is gone server-side (soft-deleted or no longer
+    visible) has its local copy removed, but only with confirmation (``yes``
+    skips the prompt for agents and non-interactive callers); removing a local
+    directory never touches the registry. The index is updated in memory as
+    each workflow is written and persisted in a ``finally`` even if a later
+    fetch raises, so files written before a failure are tracked and a re-run
+    resumes from where it left off rather than re-pulling them as untracked.
     """
     result = PullResult()
+    # Guard before any work: a mismatched identity aborts here, and a first run
+    # stamps the principal on the state (persisted by the index save below).
+    ensure_identity(client, state, allow_stamp=True)
     targets = _targets_to_process(config, target_path)
     slug_args = list(slugs)
 
     try:
         for target in targets:
-            summaries = _list_all_for_target(client, target)
-            selected = select_for_target(target, summaries, slugs=slug_args or None)
+            # Include the caller's soft-deleted rows so a tracked workflow that
+            # was deleted server-side is detectable without an extra fetch.
+            summaries = _list_all_for_target(client, target, include_deleted=True)
+            live = [s for s in summaries if s.deleted_at is None]
+            selected = select_for_target(target, live, slugs=slug_args or None)
             for summary in selected:
                 result.items.append(_pull_one(client, state, target, summary, force=force))
+            result.items.extend(
+                _reconcile_deletions(state, target, live, slug_args=slug_args, yes=yes)
+            )
     finally:
         # Persist whatever the index accumulated, including on a mid-loop raise:
         # any SKILL.md already written has a matching entry, so a re-run treats
         # it as tracked instead of clobbering or duplicating it.
         save_sync_state(state, paths)
     return result
+
+
+def _reconcile_deletions(
+    state: SyncState,
+    target: SyncTarget,
+    live: list[WorkflowSummary],
+    *,
+    slug_args: list[str],
+    yes: bool,
+) -> list[PullItem]:
+    """Remove local copies of tracked workflows that are gone server-side.
+
+    A tracked entry for this target whose slug is in scope but whose workflow is
+    absent from the live set (soft-deleted, or no longer visible such as a
+    revoked share) is reconciled: with confirmation its local directory is
+    removed and its index entry dropped (``deleted-local``); without it the
+    entry is reported as ``deleted-on-server`` and left intact. An out-of-scope
+    entry for a ``selected`` target is simply not in scope and is never pruned.
+    """
+    stored_target = normalize_target_path(target.path)
+    wanted = set(slug_args)
+    live_ids = {s.id for s in live}
+    live_slugs = {s.name for s in live}
+
+    items: list[PullItem] = []
+    surviving: list[SyncEntry] = []
+    for entry in state.entries:
+        if normalize_target_path(entry.target_path) != stored_target:
+            surviving.append(entry)
+            continue
+        if not slug_in_target_scope(target, entry.slug):
+            surviving.append(entry)
+            continue
+        if wanted and entry.slug not in wanted:
+            surviving.append(entry)
+            continue
+        if entry.workflow_id in live_ids or entry.slug in live_slugs:
+            surviving.append(entry)
+            continue
+
+        confirmed = confirm_destructive(
+            f"Workflow {entry.slug!r} is gone from the registry. "
+            f"Remove its local copy under {stored_target}?",
+            yes=yes,
+        )
+        if confirmed:
+            _remove_skill_dir(target, entry.slug)
+            items.append(
+                PullItem(
+                    slug=entry.slug,
+                    target_path=stored_target,
+                    action="deleted-local",
+                    workflow_id=entry.workflow_id,
+                )
+            )
+            # Drop the entry by not carrying it into the surviving list.
+            continue
+        surviving.append(entry)
+        items.append(
+            PullItem(
+                slug=entry.slug,
+                target_path=stored_target,
+                action="deleted-on-server",
+                workflow_id=entry.workflow_id,
+            )
+        )
+    state.entries = surviving
+    return items
 
 
 def _pull_one(
@@ -755,6 +902,9 @@ def status(
     untracked.
     """
     result = StatusResult()
+    # Guard without writing: a mismatched identity aborts a read-only pass too,
+    # but an unstamped index is left untouched (no stamp on a read).
+    ensure_identity(client, state, allow_stamp=False)
     targets = _targets_to_process(config, target_path)
     # Cache the listing per server-filter string so targets sharing a scope do
     # not each re-list. The filter already encodes the scope (owned vs all).
@@ -829,14 +979,27 @@ _IDENTITY_KEYS = ("name", "slug")
 # the last sync and the caller must pull first; ``skipped-read-only`` means the
 # caller holds only a view grant; ``skipped-invalid`` means the edited body's
 # metadata was rejected locally before any upload; ``untracked`` flags a local
-# directory the registry does not track, which push never creates.
+# directory the registry does not track, which push never creates; ``converged``
+# means a sibling copy of a just-pushed workflow in another target was rewritten
+# to match (no second upload); ``diverged`` means the same workflow was edited
+# differently in two or more targets and every copy was refused pending the
+# caller picking a source with ``--target`` or reconciling the copies.
 PushAction = Literal[
     "pushed",
     "conflict",
     "skipped-read-only",
     "skipped-invalid",
     "untracked",
+    "converged",
+    "diverged",
 ]
+
+# The reason attached to a ``skipped-read-only`` push item. Shared so the
+# per-entry upload path and the up-front read-only split in a multi-target
+# group report the same message.
+_READ_ONLY_DETAIL = (
+    "You hold only a view grant on this workflow, so local edits cannot be pushed back."
+)
 
 
 class PushItem(_SyncBase):
@@ -912,6 +1075,22 @@ def _push_metadata(body: str, slug: str) -> tuple[str, str, list[str]] | str:
     return description, outcome, tags
 
 
+@dataclass
+class _PushCandidate:
+    """One modified-local tracked entry queued for a push pass.
+
+    Bundles the entry with the target it lives in and the on-disk body that
+    differs from the recorded hash, so grouping across targets and the eventual
+    upload share the same pre-read body (no second disk read mid-pass). It holds
+    the live ``entry`` object from ``state.entries`` (by reference) so a push
+    mutates the index in place.
+    """
+
+    entry: SyncEntry
+    target: SyncTarget
+    body: str
+
+
 def push(
     client: GoodeyeClient,
     config: SyncConfig,
@@ -929,16 +1108,37 @@ def push(
     server, which returns a conflict when the recorded version token is stale.
     A read-only (view-grant) entry is never uploaded, a front-matter rename is
     refused, and a missing required facet fails locally before any round-trip.
+
+    When the same workflow is mirrored into more than one target and edited in
+    several of them, the copies are kept coherent: identical edits push once and
+    converge the siblings; differing edits are refused as ``diverged`` unless
+    the caller picks the source with ``--target``. After a successful upload the
+    other target copies of that workflow are rewritten to match (no second
+    upload) and reported as ``converged``.
+
     The index is persisted once in a ``finally`` so a mid-loop failure still
     records every entry already pushed, and a re-run resumes cleanly.
     """
     result = PushResult()
+    # Guard before any upload: a mismatched identity aborts here, and a first
+    # run stamps the principal on the state (persisted by the index save below).
+    ensure_identity(client, state, allow_stamp=True)
     targets = _targets_to_process(config, target_path)
     slug_args = set(slugs)
 
     try:
-        for target in targets:
-            result.items.extend(_push_for_target(client, state, target, slug_args=slug_args))
+        candidates = _collect_push_candidates(state, targets, slug_args=slug_args)
+        # Group the modified-local copies by workflow identity so a workflow
+        # mirrored into several targets is pushed once and its siblings kept
+        # coherent rather than racing each other to the registry.
+        by_workflow: dict[str, list[_PushCandidate]] = {}
+        for candidate in candidates:
+            by_workflow.setdefault(candidate.entry.workflow_id, []).append(candidate)
+        for group in by_workflow.values():
+            result.items.extend(
+                _push_workflow_group(client, state, config, group, scoped=target_path is not None)
+            )
+        result.items.extend(_untracked_push_items(state, targets, slug_args=slug_args))
     finally:
         # Persist whatever the index accumulated, including on a mid-loop raise:
         # every entry already pushed has its new version/token/hash recorded, so
@@ -947,70 +1147,265 @@ def push(
     return result
 
 
-def _push_for_target(
-    client: GoodeyeClient,
+def _collect_push_candidates(
     state: SyncState,
-    target: SyncTarget,
+    targets: list[SyncTarget],
     *,
     slug_args: set[str],
-) -> list[PushItem]:
-    """Push every modified tracked entry for one target and flag untracked dirs."""
-    stored_target = normalize_target_path(target.path)
-    items: list[PushItem] = []
+) -> list[_PushCandidate]:
+    """Gather every modified-local tracked entry across the processed targets.
 
-    tracked_slugs: set[str] = set()
+    An entry is a candidate when it lives in one of the targets, its slug is in
+    that target's scope and (if given) the slug args, and its on-disk body
+    differs from the recorded hash. Read-only and invalid entries are kept here:
+    they are classified per-entry at upload time, not silently dropped.
+    """
+    by_path = {normalize_target_path(t.path): t for t in targets}
+    candidates: list[_PushCandidate] = []
     for entry in state.entries:
-        if normalize_target_path(entry.target_path) != stored_target:
+        stored_target = normalize_target_path(entry.target_path)
+        target = by_path.get(stored_target)
+        if target is None:
             continue
-        # Gate on the same scope predicate as pull/status: a `selected` target
-        # only pushes slugs matching its globs.
         if not slug_in_target_scope(target, entry.slug):
             continue
-        tracked_slugs.add(entry.slug)
         if slug_args and entry.slug not in slug_args:
             continue
-        item = _push_one(client, entry, target=target)
-        if item is not None:
-            items.append(item)
+        local_body = read_local_body(target, entry.slug)
+        if local_body is None or not is_modified_locally(entry, local_body):
+            continue
+        candidates.append(_PushCandidate(entry=entry, target=target, body=local_body))
+    return candidates
 
-    for slug in untracked_local_slugs(target):
-        if slug in tracked_slugs:
+
+def _push_workflow_group(
+    client: GoodeyeClient,
+    state: SyncState,
+    config: SyncConfig,
+    group: list[_PushCandidate],
+    *,
+    scoped: bool,
+) -> list[PushItem]:
+    """Push one workflow's modified copies, keeping multi-target copies coherent.
+
+    A single modified copy pushes normally. Two or more identical copies push
+    once and converge the rest. Two or more differing copies are refused as
+    ``diverged`` when no ``--target`` narrowed the run; with a single processed
+    target the group already holds just that copy, so the user's pick resolves
+    the divergence and the siblings converge to it.
+
+    A read-only (view-grant) copy can never be uploaded, so it is reported
+    ``skipped-read-only`` up front and removed from the writable set before the
+    divergence test. Without this, a view-grant workflow mirrored into two
+    targets and edited differently would be mis-reported as ``diverged`` (a
+    state that asks the caller to pick a copy to push) when neither copy is
+    pushable at all.
+    """
+    items: list[PushItem] = []
+    writable: list[_PushCandidate] = []
+    for candidate in group:
+        if candidate.entry.read_only:
+            items.append(_read_only_item(candidate))
+        else:
+            writable.append(candidate)
+    if not writable:
+        return items
+
+    if len(writable) > 1 and not scoped:
+        bodies = {c.body for c in writable}
+        if len(bodies) > 1:
+            items.extend(_diverged_item(c) for c in writable)
+            return items
+
+    # Either a lone candidate, identical copies, or a single scoped copy: push
+    # the first and converge any siblings to the just-pushed body.
+    source = writable[0]
+    item = _push_candidate(client, source.entry, target=source.target, body=source.body)
+    items.append(item)
+    if item.action != "pushed":
+        # An upload that did not land (conflict, read-only, invalid) leaves the
+        # siblings untouched; there is nothing coherent to converge them to.
+        return items
+    items.extend(_converge_siblings(state, config, source))
+    return items
+
+
+def _read_only_item(candidate: _PushCandidate) -> PushItem:
+    """Build the ``skipped-read-only`` item for one view-grant copy.
+
+    Reported up front for a read-only copy in a multi-target group so a
+    view-grant workflow mirrored into several targets never reaches the
+    divergence branch (it is not pushable, so there is no copy to pick).
+    """
+    return PushItem(
+        slug=candidate.entry.slug,
+        workflow_id=candidate.entry.workflow_id,
+        target_path=normalize_target_path(candidate.target.path),
+        action="skipped-read-only",
+        detail=_READ_ONLY_DETAIL,
+    )
+
+
+def _diverged_item(candidate: _PushCandidate) -> PushItem:
+    """Build the ``diverged`` item for one copy of a multi-target workflow."""
+    return PushItem(
+        slug=candidate.entry.slug,
+        workflow_id=candidate.entry.workflow_id,
+        target_path=normalize_target_path(candidate.target.path),
+        action="diverged",
+        detail=(
+            "This workflow was edited differently in more than one target. Pick the "
+            "copy to keep with `--target <dir>`, or reconcile the copies so they "
+            "match, then push again."
+        ),
+    )
+
+
+def _converge_siblings(
+    state: SyncState,
+    config: SyncConfig,
+    source: _PushCandidate,
+) -> list[PushItem]:
+    """Bring every other target copy of a just-pushed workflow into line with it.
+
+    For each sibling index entry (same workflow id, different target) the action
+    depends on the sibling's own on-disk state, so an un-pushed local edit in a
+    sibling is never silently destroyed:
+
+    - Local file missing: skipped silently. A directory the user deleted is not
+      resurrected.
+    - Modified locally and the local body differs from the pushed body: left
+      untouched and reported ``diverged``. The sibling holds a distinct local
+      edit that this push did not include; overwriting it would lose work.
+    - Modified locally but the local body already equals the pushed body: no
+      rewrite is needed; its index entry is advanced to clean and it reports
+      ``converged``.
+    - Clean (local body present and matching the recorded hash): rewritten to
+      the pushed body, its index entry advanced, and reported ``converged``.
+
+    Siblings are found from the full config so a ``--target`` run still
+    converges (or flags) targets outside the processed set. This per-sibling
+    safety net is in addition to the in-scope divergence detection that runs
+    before the push.
+    """
+    by_path = {normalize_target_path(t.path): t for t in config.targets}
+    source_target = normalize_target_path(source.target.path)
+    items: list[PushItem] = []
+    for entry in state.entries:
+        if entry is source.entry:
             continue
-        if not slug_in_target_scope(target, slug):
+        if entry.workflow_id != source.entry.workflow_id:
             continue
-        if slug_args and slug not in slug_args:
+        stored_target = normalize_target_path(entry.target_path)
+        if stored_target == source_target:
             continue
+        target = by_path.get(stored_target)
+        if target is None:
+            continue
+
+        local_body = read_local_body(target, entry.slug)
+        if local_body is None:
+            # The user deleted this sibling's directory. Do not recreate it.
+            continue
+
+        modified = is_modified_locally(entry, local_body)
+        if modified and local_body != source.body:
+            # A distinct un-pushed edit lives here. Refuse to clobber it; the
+            # caller reconciles it manually (e.g. push it from this target, or
+            # discard it). Its index entry is left untouched.
+            items.append(_diverged_sibling_item(entry, stored_target))
+            continue
+
+        if not modified:
+            # Clean sibling: rewrite its file to the pushed body.
+            _write_skill_file(local_skill_path(target, entry.slug), source.body)
+        # Either rewritten from clean, or already equal to the pushed body on
+        # disk; either way the recorded state advances to the pushed version so
+        # the sibling reads clean afterward with no second upload.
+        entry.synced_version = source.entry.synced_version
+        entry.version_token = source.entry.version_token
+        entry.body_sha256 = source.entry.body_sha256
+        entry.verifier_bindings = [b.model_copy() for b in source.entry.verifier_bindings]
         items.append(
             PushItem(
-                slug=slug,
-                workflow_id=None,
+                slug=entry.slug,
+                workflow_id=entry.workflow_id,
                 target_path=stored_target,
-                action="untracked",
-                detail=(
-                    "This local directory is not tracked by the registry. Create it "
-                    "with `goodeye workflows publish` rather than sync push."
-                ),
+                action="converged",
+                detail=f"Rewritten to match the copy pushed from {source_target}.",
             )
         )
     return items
 
 
-def _push_one(
+def _diverged_sibling_item(entry: SyncEntry, stored_target: str) -> PushItem:
+    """Build the ``diverged`` item for a sibling whose local edit was preserved.
+
+    Distinct from ``_diverged_item``: this is reported during convergence when a
+    sibling copy held its own un-pushed edit that the push did not include, so
+    its file and index entry were left exactly as they were.
+    """
+    return PushItem(
+        slug=entry.slug,
+        workflow_id=entry.workflow_id,
+        target_path=stored_target,
+        action="diverged",
+        detail=(
+            "A different local edit here was left untouched; reconcile it manually "
+            "(push it from this target, or discard it), then push again."
+        ),
+    )
+
+
+def _untracked_push_items(
+    state: SyncState,
+    targets: list[SyncTarget],
+    *,
+    slug_args: set[str],
+) -> list[PushItem]:
+    """Flag local directories with no index entry across the processed targets."""
+    items: list[PushItem] = []
+    for target in targets:
+        stored_target = normalize_target_path(target.path)
+        tracked = {
+            e.slug for e in state.entries if normalize_target_path(e.target_path) == stored_target
+        }
+        for slug in untracked_local_slugs(target):
+            if slug in tracked:
+                continue
+            if not slug_in_target_scope(target, slug):
+                continue
+            if slug_args and slug not in slug_args:
+                continue
+            items.append(
+                PushItem(
+                    slug=slug,
+                    workflow_id=None,
+                    target_path=stored_target,
+                    action="untracked",
+                    detail=(
+                        "This local directory is not tracked by the registry. Create it "
+                        "with `goodeye workflows publish` rather than sync push."
+                    ),
+                )
+            )
+    return items
+
+
+def _push_candidate(
     client: GoodeyeClient,
     entry: SyncEntry,
     *,
     target: SyncTarget,
-) -> PushItem | None:
-    """Push a single tracked entry, mutating it in place on success.
+    body: str,
+) -> PushItem:
+    """Upload one modified entry's body, mutating the entry in place on success.
 
-    Returns None when there is nothing to push (no local file, or the local body
-    matches the recorded hash). Otherwise returns the per-item outcome.
+    The body is the already-read on-disk content that differs from the recorded
+    hash, so this does not re-read disk. Returns the per-item outcome; a
+    non-``pushed`` action means nothing was uploaded.
     """
     stored_target = normalize_target_path(target.path)
-    local_body = read_local_body(target, entry.slug)
-    if local_body is None or not is_modified_locally(entry, local_body):
-        return None
-
     base = PushItem(
         slug=entry.slug,
         workflow_id=entry.workflow_id,
@@ -1019,17 +1414,9 @@ def _push_one(
     )
 
     if entry.read_only:
-        return base.model_copy(
-            update={
-                "action": "skipped-read-only",
-                "detail": (
-                    "You hold only a view grant on this workflow, so local edits "
-                    "cannot be pushed back."
-                ),
-            }
-        )
+        return base.model_copy(update={"action": "skipped-read-only", "detail": _READ_ONLY_DETAIL})
 
-    metadata = _push_metadata(local_body, entry.slug)
+    metadata = _push_metadata(body, entry.slug)
     if isinstance(metadata, str):
         return base.model_copy(update={"action": "skipped-invalid", "detail": metadata})
     description, outcome, tags = metadata
@@ -1038,7 +1425,7 @@ def _push_one(
         save_result = client.save_workflow(
             name=entry.slug,
             description=description,
-            body=local_body,
+            body=body,
             outcome=outcome,
             tags=tags,
             expected_version_token=entry.version_token,
@@ -1063,7 +1450,7 @@ def _push_one(
 
     entry.synced_version = save_result.version
     entry.version_token = save_result.version_token
-    entry.body_sha256 = body_sha256(local_body)
+    entry.body_sha256 = body_sha256(body)
     entry.verifier_bindings = [
         SyncVerifierBinding(name=v.name, verifier_id=v.verifier_id, version=v.version)
         for v in save_result.verifiers
@@ -1093,12 +1480,14 @@ __all__ = [
     "SyncVerifierBinding",
     "add_target",
     "body_sha256",
+    "ensure_identity",
     "expand_target_path",
     "find_entry",
     "is_modified_locally",
     "list_targets",
     "load_sync_config",
     "load_sync_state",
+    "local_skill_dir",
     "local_skill_path",
     "normalize_target_path",
     "pull",

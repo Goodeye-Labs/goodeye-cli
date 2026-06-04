@@ -38,6 +38,16 @@ def _seed_target(
     return json.loads(add.output)["path"]
 
 
+DEFAULT_EMAIL = "owner@example.com"
+
+
+def _me_route(email: str = DEFAULT_EMAIL) -> respx.Route:
+    """Register the GET /v1/me route the identity guard calls during sync."""
+    return respx.get(f"{SERVER}/v1/me").mock(
+        return_value=httpx.Response(200, json={"email": email})
+    )
+
+
 def _list_response(items: list[dict], next_cursor: str | None = None) -> httpx.Response:
     return httpx.Response(200, json={"items": items, "next_cursor": next_cursor})
 
@@ -255,6 +265,7 @@ def test_pull_json_default_shape(
     tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
 ) -> None:
     _setup_auth(monkeypatch, tmp_config_paths)
+    _me_route()
     target_dir = tmp_path / "skills"
     _seed_target(monkeypatch, tmp_config_paths, str(target_dir))
 
@@ -280,6 +291,7 @@ def test_pull_json_default_shape(
 @respx.mock
 def test_pull_table_mode(tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path) -> None:
     _setup_auth(monkeypatch, tmp_config_paths)
+    _me_route()
     # A wide terminal keeps Rich from truncating the slug/action cells.
     monkeypatch.setenv("COLUMNS", "200")
     target_dir = tmp_path / "skills"
@@ -305,6 +317,7 @@ def test_pull_table_hint_on_skipped(
     tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
 ) -> None:
     _setup_auth(monkeypatch, tmp_config_paths)
+    _me_route()
     # A wide terminal keeps Rich from truncating the action cell.
     monkeypatch.setenv("COLUMNS", "200")
     target_dir = tmp_path / "skills"
@@ -332,6 +345,7 @@ def test_pull_table_hint_on_skipped(
 @respx.mock
 def test_pull_force_overwrites(tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path) -> None:
     _setup_auth(monkeypatch, tmp_config_paths)
+    _me_route()
     target_dir = tmp_path / "skills"
     _seed_target(monkeypatch, tmp_config_paths, str(target_dir))
     skill = target_dir / "alpha" / "SKILL.md"
@@ -358,6 +372,7 @@ def test_pull_target_option_scopes_to_one(
     tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
 ) -> None:
     _setup_auth(monkeypatch, tmp_config_paths)
+    _me_route()
     first = tmp_path / "first"
     second = tmp_path / "second"
     _seed_target(monkeypatch, tmp_config_paths, str(first))
@@ -378,8 +393,10 @@ def test_pull_target_option_scopes_to_one(
     assert not (first / "alpha").exists()
 
 
+@respx.mock
 def test_pull_no_targets_renders_empty(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_auth(monkeypatch, tmp_config_paths)
+    _me_route()
     runner = CliRunner()
     result = runner.invoke(app, ["workflows", "sync", "pull", "--table"])
     assert result.exit_code == 0, result.output
@@ -435,6 +452,7 @@ def test_status_json_default_shape(
     tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
 ) -> None:
     _setup_auth(monkeypatch, tmp_config_paths)
+    _me_route()
     target_dir = tmp_path / "skills"
     _seed_target(monkeypatch, tmp_config_paths, str(target_dir))
     # A tracked entry whose disk copy diverges from the recorded hash.
@@ -485,6 +503,7 @@ def test_status_json_default_shape(
 @respx.mock
 def test_status_table_mode(tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path) -> None:
     _setup_auth(monkeypatch, tmp_config_paths)
+    _me_route()
     monkeypatch.setenv("COLUMNS", "200")
     target_dir = tmp_path / "skills"
     _seed_target(monkeypatch, tmp_config_paths, str(target_dir))
@@ -513,8 +532,10 @@ def test_status_table_mode(tmp_config_paths: ConfigPaths, monkeypatch, tmp_path:
     assert "goodeye workflows sync pull" in result.output
 
 
+@respx.mock
 def test_status_no_targets_renders_empty(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_auth(monkeypatch, tmp_config_paths)
+    _me_route()
     runner = CliRunner()
     result = runner.invoke(app, ["workflows", "sync", "status", "--table"])
     assert result.exit_code == 0, result.output
@@ -606,6 +627,7 @@ def test_push_json_default_shape(
     tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
 ) -> None:
     _setup_auth(monkeypatch, tmp_config_paths)
+    _me_route()
     target_dir = tmp_path / "skills"
     _seed_target(monkeypatch, tmp_config_paths, str(target_dir))
     _seed_modified_entry(
@@ -632,6 +654,7 @@ def test_push_json_default_shape(
 @respx.mock
 def test_push_table_mode(tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path) -> None:
     _setup_auth(monkeypatch, tmp_config_paths)
+    _me_route()
     monkeypatch.setenv("COLUMNS", "200")
     target_dir = tmp_path / "skills"
     _seed_target(monkeypatch, tmp_config_paths, str(target_dir))
@@ -658,6 +681,7 @@ def test_push_table_conflict_hint(
     tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
 ) -> None:
     _setup_auth(monkeypatch, tmp_config_paths)
+    _me_route()
     monkeypatch.setenv("COLUMNS", "200")
     target_dir = tmp_path / "skills"
     _seed_target(monkeypatch, tmp_config_paths, str(target_dir))
@@ -688,6 +712,7 @@ def test_push_target_option_scopes_to_one(
     tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
 ) -> None:
     _setup_auth(monkeypatch, tmp_config_paths)
+    _me_route()
     first = tmp_path / "first"
     second = tmp_path / "second"
     _seed_target(monkeypatch, tmp_config_paths, str(first))
@@ -717,9 +742,315 @@ def test_push_target_option_scopes_to_one(
     assert save_route.call_count == 1
 
 
+@respx.mock
 def test_push_no_targets_renders_empty(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_auth(monkeypatch, tmp_config_paths)
+    _me_route()
     runner = CliRunner()
     result = runner.invoke(app, ["workflows", "sync", "push", "--table"])
     assert result.exit_code == 0, result.output
     assert "No locally edited workflows to push" in result.output
+
+
+# ----- bare `sync` umbrella -----
+
+
+def test_sync_umbrella_requires_auth(
+    tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
+) -> None:
+    _redirect_config(monkeypatch, tmp_config_paths)
+    monkeypatch.delenv("GOODEYE_API_KEY", raising=False)
+    _seed_target(monkeypatch, tmp_config_paths, str(tmp_path / "skills"))
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "sync"])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, AuthRequired)
+
+
+@respx.mock
+def test_sync_umbrella_pulls_then_shows_status(
+    tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
+) -> None:
+    _setup_auth(monkeypatch, tmp_config_paths)
+    _me_route()
+    target_dir = tmp_path / "skills"
+    _seed_target(monkeypatch, tmp_config_paths, str(target_dir))
+    # status lists with include_deleted, pull lists without; both hit the same
+    # route, so one mock serves both passes.
+    list_route = respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response(
+            [{"id": "skl_01", "name": "alpha", "current_version": 1, "version_token": "tok"}]
+        )
+    )
+    detail_route = respx.get(f"{SERVER}/v1/workflows/skl_01").mock(
+        return_value=_detail_response(id_="skl_01", name="alpha", body="alpha body")
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "sync"])
+    assert result.exit_code == 0, result.output
+
+    # The pull materialized the workflow on disk and the index.
+    assert (target_dir / "alpha" / "SKILL.md").read_text(encoding="utf-8") == "alpha body"
+    assert detail_route.call_count == 1
+    # The umbrella then rendered the STATUS result (post-pull): alpha is clean.
+    payload = json.loads(result.output)
+    item = payload["items"][0]
+    assert item["slug"] == "alpha"
+    assert item["state"] == "clean"
+    # Both the pull and status passes listed.
+    assert list_route.call_count >= 2
+
+
+@respx.mock
+def test_sync_umbrella_table_mode_renders_status(
+    tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
+) -> None:
+    _setup_auth(monkeypatch, tmp_config_paths)
+    _me_route()
+    monkeypatch.setenv("COLUMNS", "200")
+    target_dir = tmp_path / "skills"
+    _seed_target(monkeypatch, tmp_config_paths, str(target_dir))
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response(
+            [{"id": "skl_01", "name": "alpha", "current_version": 1, "version_token": "tok"}]
+        )
+    )
+    respx.get(f"{SERVER}/v1/workflows/skl_01").mock(
+        return_value=_detail_response(id_="skl_01", name="alpha", body="alpha body")
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "sync", "--table"])
+    assert result.exit_code == 0, result.output
+    assert "Sync status" in result.output
+    assert "alpha" in result.output
+    assert "clean" in result.output
+
+
+@respx.mock
+def test_sync_umbrella_identity_mismatch_surfaces_conflict(
+    tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
+) -> None:
+    """The bare umbrella aborts before any pull when the signed-in account does
+    not match the account this local sync was set up for.
+    """
+    from goodeye_cli import sync
+
+    _setup_auth(monkeypatch, tmp_config_paths)
+    # The local index was stamped for one account.
+    _me_route("intruder@example.com")
+    target_dir = tmp_path / "skills"
+    _seed_target(monkeypatch, tmp_config_paths, str(target_dir))
+    state = sync.load_sync_state(tmp_config_paths)
+    state.identity = "owner@example.com"
+    sync.save_sync_state(state, tmp_config_paths)
+
+    # Registered to prove the guard fires before any listing or materialization.
+    list_route = respx.get(f"{SERVER}/v1/workflows")
+    detail_route = respx.get(f"{SERVER}/v1/workflows/skl_01")
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "sync"])
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, Conflict)
+    # No pull happened: nothing was listed, fetched, or written to disk.
+    assert list_route.call_count == 0
+    assert detail_route.call_count == 0
+    assert not (target_dir / "alpha").exists()
+
+
+def test_sync_subcommand_target_list_still_works(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    # The callback early-returns for subcommands, so `target list` (a purely
+    # local read with no auth) is unaffected by the umbrella.
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "sync", "target", "list"])
+    assert result.exit_code == 0, result.output
+    assert result.output == '{"items":[]}\n'
+
+
+@respx.mock
+def test_sync_pull_subcommand_still_works(
+    tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
+) -> None:
+    # `sync pull` must dispatch to the pull command, not the umbrella.
+    _setup_auth(monkeypatch, tmp_config_paths)
+    _me_route()
+    target_dir = tmp_path / "skills"
+    _seed_target(monkeypatch, tmp_config_paths, str(target_dir))
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response(
+            [{"id": "skl_01", "name": "alpha", "current_version": 1, "version_token": "tok"}]
+        )
+    )
+    respx.get(f"{SERVER}/v1/workflows/skl_01").mock(
+        return_value=_detail_response(id_="skl_01", name="alpha", body="alpha body")
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "sync", "pull"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    # The pull renderer reports per-item actions, not status states.
+    assert payload["items"][0]["action"] == "pulled"
+
+
+# ----- pull deletion reconcile (CLI) -----
+
+
+@respx.mock
+def test_pull_yes_removes_deleted_local_copy(
+    tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
+) -> None:
+    _setup_auth(monkeypatch, tmp_config_paths)
+    _me_route()
+    target_dir = tmp_path / "skills"
+    _seed_target(monkeypatch, tmp_config_paths, str(target_dir))
+    # A tracked, clean local copy of a workflow that is now soft-deleted.
+    _seed_index_entry(
+        tmp_config_paths,
+        target_dir=target_dir,
+        workflow_id="skl_gone",
+        slug="gone",
+        body="registry body",
+    )
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response(
+            [
+                {
+                    "id": "skl_gone",
+                    "name": "gone",
+                    "current_version": 1,
+                    "version_token": "tok",
+                    "deleted_at": "2026-01-01T00:00:00Z",
+                }
+            ]
+        )
+    )
+    delete_route = respx.delete(f"{SERVER}/v1/workflows/skl_gone")
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "sync", "pull", "--yes"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["items"][0]["action"] == "deleted-local"
+    assert not (target_dir / "gone").exists()
+    # The local removal never issued a server-side delete.
+    assert delete_route.call_count == 0
+
+
+@respx.mock
+def test_pull_table_hint_on_deleted_on_server(
+    tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
+) -> None:
+    _setup_auth(monkeypatch, tmp_config_paths)
+    _me_route()
+    monkeypatch.setenv("COLUMNS", "200")
+    target_dir = tmp_path / "skills"
+    _seed_target(monkeypatch, tmp_config_paths, str(target_dir))
+    _seed_index_entry(
+        tmp_config_paths,
+        target_dir=target_dir,
+        workflow_id="skl_gone",
+        slug="gone",
+        body="registry body",
+    )
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response(
+            [
+                {
+                    "id": "skl_gone",
+                    "name": "gone",
+                    "current_version": 1,
+                    "version_token": "tok",
+                    "deleted_at": "2026-01-01T00:00:00Z",
+                }
+            ]
+        )
+    )
+    # A real terminal where the user declines the prompt. CliRunner reassigns
+    # sys.stdin during invoke, so patch the confirm helper the sync engine
+    # bound at import time to return False.
+    monkeypatch.setattr("goodeye_cli.sync.confirm_destructive", lambda *a, **k: False)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "sync", "pull", "--table"])
+    assert result.exit_code == 0, result.output
+    # The deletion was reported (the table cell may wrap the long action string,
+    # so assert on the unwrapped next-step hint that names a real command).
+    assert "Next:" in result.output
+    assert "gone from the registry" in result.output
+    assert "goodeye workflows sync pull --yes" in result.output
+    # The declined copy survives on disk.
+    assert (target_dir / "gone" / "SKILL.md").exists()
+
+
+# ----- multi-target convergence (CLI) -----
+
+
+@respx.mock
+def test_push_converges_sibling_target_once(
+    tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
+) -> None:
+    _setup_auth(monkeypatch, tmp_config_paths)
+    _me_route()
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    _seed_target(monkeypatch, tmp_config_paths, str(first), scope="all")
+    _seed_target(monkeypatch, tmp_config_paths, str(second), scope="all")
+    # The same workflow is edited identically in both targets.
+    body = _push_body(slug="alpha")
+    _seed_modified_entry(
+        tmp_config_paths, target_dir=first, workflow_id="skl_a", slug="alpha", body=body
+    )
+    _seed_modified_entry(
+        tmp_config_paths, target_dir=second, workflow_id="skl_a", slug="alpha", body=body
+    )
+    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=_save_response(workflow_id="skl_a", name="alpha")
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "sync", "push"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    actions = sorted(i["action"] for i in payload["items"])
+    assert actions == ["converged", "pushed"]
+    # One upload covered both copies.
+    assert save_route.call_count == 1
+
+
+@respx.mock
+def test_push_diverged_hint(tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path) -> None:
+    _setup_auth(monkeypatch, tmp_config_paths)
+    _me_route()
+    monkeypatch.setenv("COLUMNS", "200")
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    _seed_target(monkeypatch, tmp_config_paths, str(first), scope="all")
+    _seed_target(monkeypatch, tmp_config_paths, str(second), scope="all")
+    _seed_modified_entry(
+        tmp_config_paths,
+        target_dir=first,
+        workflow_id="skl_a",
+        slug="alpha",
+        body=_push_body(slug="alpha", description="Edit A keeps its own description."),
+    )
+    _seed_modified_entry(
+        tmp_config_paths,
+        target_dir=second,
+        workflow_id="skl_a",
+        slug="alpha",
+        body=_push_body(slug="alpha", description="Edit B differs from A."),
+    )
+    save_route = respx.post(f"{SERVER}/v1/workflows")
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "sync", "push", "--table"])
+    assert result.exit_code == 0, result.output
+    # No upload; the hint points at --target to pick the copy to keep.
+    assert save_route.call_count == 0
+    assert "Next:" in result.output
+    assert "goodeye workflows sync push --target" in result.output
