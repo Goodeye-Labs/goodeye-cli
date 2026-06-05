@@ -27,6 +27,11 @@ from goodeye_cli.wire import (
     ClientConfig,
     DeviceAuthResponse,
     ExchangeResult,
+    ImageGenerationRunResult,
+    ImageGeneratorDeployResult,
+    ImageGeneratorDetail,
+    ImageGeneratorList,
+    ImageGeneratorRevokeResult,
     InvitationAcceptResult,
     InvitationCancelResult,
     InvitationDeclineResult,
@@ -733,6 +738,116 @@ class GoodeyeClient:
     def revoke_verifier(self, verifier_id: str) -> VerifierRevokeResult:
         response = self._request("DELETE", f"/v1/verifiers/{verifier_id}")
         return VerifierRevokeResult.model_validate(response.json())
+
+    # ----- image generators -----
+
+    def deploy_image_generator(
+        self,
+        *,
+        name: str,
+        description: str,
+        provider: str = "fal",
+        model: str,
+        generation_contract: str,
+        default_params: dict[str, Any] | None = None,
+        expected_version_token: str | None = None,
+    ) -> ImageGeneratorDeployResult:
+        """POST /v1/image-generators to create or re-version an image generator."""
+        payload: dict[str, Any] = {
+            "name": name,
+            "description": description,
+            "provider": provider,
+            "model": model,
+            "generation_contract": generation_contract,
+        }
+        if default_params is not None:
+            payload["default_params"] = default_params
+        if expected_version_token is not None:
+            payload["expected_version_token"] = expected_version_token
+        response = self._request("POST", "/v1/image-generators", json_body=payload)
+        return ImageGeneratorDeployResult.model_validate(response.json())
+
+    def list_image_generators(
+        self, limit: int = 50, cursor: str | None = None
+    ) -> ImageGeneratorList:
+        """GET /v1/image-generators with cursor-based pagination."""
+        params: dict[str, Any] = {"limit": limit}
+        if cursor:
+            params["cursor"] = cursor
+        response = self._request("GET", "/v1/image-generators", params=params)
+        return ImageGeneratorList.model_validate(response.json())
+
+    def get_image_generator(
+        self, generator_id: str, *, version: int | None = None
+    ) -> ImageGeneratorDetail:
+        """GET /v1/image-generators/{generator_id} for a UUID."""
+        params: dict[str, Any] = {}
+        if version is not None:
+            params["version"] = version
+        response = self._request("GET", f"/v1/image-generators/{generator_id}", params=params)
+        return ImageGeneratorDetail.model_validate(response.json())
+
+    def generate_image(
+        self,
+        generator_path_id: str,
+        *,
+        prompt: str,
+        model: str | None = None,
+        reference_image_url: str | None = None,
+        num_images: int = 1,
+        seed: int | None = None,
+        param_overrides: dict[str, Any] | None = None,
+        version: int | None = None,
+        workflow_id: str | None = None,
+        workflow_version: int | None = None,
+        workflow_ref: str | None = None,
+        run_id: str | None = None,
+        anonymous: bool = False,
+    ) -> ImageGenerationRunResult:
+        """POST /v1/image-generators/{generator_path_id}/runs.
+
+        ``generator_path_id`` is the path segment resolved by the caller:
+        - a deployed generator UUID (when ``--generator`` is supplied)
+        - ``system:image-standard`` as a placeholder when ``--model`` is
+          supplied in the body (the server ignores the path when ``model``
+          is set) or when neither flag is given (server resolves the default
+          tier).
+
+        ``anonymous=True`` omits ``Authorization`` even when the client was
+        constructed with an API key.
+        """
+        body: dict[str, Any] = {"prompt": prompt}
+        if model is not None:
+            body["model"] = model
+        if reference_image_url is not None:
+            body["reference_image_url"] = reference_image_url
+        body["num_images"] = num_images
+        if seed is not None:
+            body["seed"] = seed
+        if param_overrides is not None:
+            body["param_overrides"] = param_overrides
+        if version is not None:
+            body["version"] = version
+        if workflow_id is not None:
+            body["workflow_id"] = workflow_id
+        if workflow_version is not None:
+            body["workflow_version"] = workflow_version
+        if workflow_ref is not None:
+            body["workflow_ref"] = workflow_ref
+        if run_id is not None:
+            body["run_id"] = run_id
+        response = self._request(
+            "POST",
+            f"/v1/image-generators/{generator_path_id}/runs",
+            json_body=body,
+            authenticated=not anonymous,
+        )
+        return ImageGenerationRunResult.model_validate(response.json())
+
+    def revoke_image_generator(self, generator_id: str) -> ImageGeneratorRevokeResult:
+        """DELETE /v1/image-generators/{generator_id}."""
+        response = self._request("DELETE", f"/v1/image-generators/{generator_id}")
+        return ImageGeneratorRevokeResult.model_validate(response.json())
 
     # ----- invitations -----
     def list_invitations(
