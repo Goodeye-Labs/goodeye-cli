@@ -658,3 +658,89 @@ def test_unpushed_sibling_edit_blocks_deletion(
     # Tracking entry survives.
     remaining = load_sync_state(tmp_config_paths).entries
     assert [e.slug for e in remaining] == ["modified-wf"]
+
+
+@respx.mock
+def test_unpushed_sibling_edit_blocks_unforced_overwrite(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    """A sibling edited on disk blocks an unforced pull that would drop that sibling.
+
+    The workflow is still live but has advanced, and the new manifest no longer
+    lists the sibling. Without ``--force`` the whole-tree edit guard must trip on
+    the sibling edit and skip the pull, so the dropped-sibling removal never runs
+    and the locally edited file is preserved. A body-only guard would let the
+    overwrite proceed and silently unlink the edited sibling.
+    """
+    _me_route()
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+
+    skill_body = "registry body"
+    original_sibling = "original sibling content"
+    edited_sibling = "locally edited content - DIFFERENT from recorded sha"
+
+    slug_dir = target_dir / "drop-wf"
+    slug_dir.mkdir(parents=True)
+    (slug_dir / "SKILL.md").write_text(skill_body, encoding="utf-8")
+    # The on-disk sibling is EDITED relative to the recorded sha.
+    (slug_dir / "helper.sh").write_text(edited_sibling, encoding="utf-8")
+
+    state = SyncState(
+        entries=[
+            SyncEntry(
+                workflow_id="wf_drop",
+                slug="drop-wf",
+                target_path=normalize_target_path(str(target_dir)),
+                synced_version=1,
+                version_token="t1",
+                # Body sha matches disk (only the sibling was edited).
+                body_sha256=body_sha256(skill_body),
+                files=[
+                    FileState(
+                        path="helper.sh",
+                        # Recorded sha is the ORIGINAL (pre-edit) content.
+                        sha256=_sha256_text(original_sibling),
+                        executable=True,
+                    )
+                ],
+            )
+        ]
+    )
+
+    # Workflow is still live but the registry advanced (new token) and the new
+    # manifest no longer carries the sibling. The detail/files routes must never
+    # be reached: the guard returns first.
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response(
+            [_summary_dict(id_="wf_drop", name="drop-wf", token="t2", version=2)]
+        )
+    )
+    detail_route = respx.get(f"{SERVER}/v1/workflows/wf_drop").mock(
+        return_value=_detail_response(
+            id_="wf_drop", name="drop-wf", body=skill_body, token="t2", version=2, files=[]
+        )
+    )
+
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = pull(
+            client,
+            config,
+            state,
+            slugs=[],
+            target_path=None,
+            force=False,
+            yes=True,
+            paths=tmp_config_paths,
+        )
+
+    # Both sides moved relative to the recorded sync point: a conflict, not a
+    # plain modification.
+    assert [(i.slug, i.action) for i in result.items] == [("drop-wf", "skipped-conflict")]
+
+    # No fetch happened: the guard returned before touching the detail route.
+    assert detail_route.call_count == 0
+
+    # The locally edited sibling survives untouched.
+    assert (slug_dir / "helper.sh").exists()
+    assert (slug_dir / "helper.sh").read_text(encoding="utf-8") == edited_sibling

@@ -990,11 +990,15 @@ def _pull_one(
 
     # Protect local edits. An entry whose disk copy diverged from the recorded
     # hash, or an untracked pre-existing SKILL.md, is not overwritten unless the
-    # caller forces it. A conflict means both sides moved relative to a recorded
-    # sync point: a tracked entry whose local body diverged AND whose server
-    # token advanced. An untracked file has no recorded base, so it is reported
-    # as plain modified, never a conflict.
-    tracked_edit = entry is not None and is_modified_locally(entry, local_body)
+    # caller forces it. The divergence check spans the whole tree, not just the
+    # SKILL.md body, so an un-pushed edit to a sibling file also blocks an
+    # unforced overwrite (a forced pull can drop server-removed siblings, and a
+    # body-only guard would let it discard a locally edited one). A conflict
+    # means both sides moved relative to a recorded sync point: a tracked entry
+    # whose local tree diverged AND whose server token advanced. An untracked
+    # file has no recorded base, so it is reported as plain modified, never a
+    # conflict.
+    tracked_edit = entry is not None and tree_modified_locally(entry, target)
     untracked_present = entry is None and local_body is not None
     if (tracked_edit or untracked_present) and not force:
         is_conflict = entry is not None and tracked_edit and server_moved(entry, summary)
@@ -1007,12 +1011,12 @@ def _pull_one(
         )
 
     # Already current: an entry exists, the server has not advanced, and the
-    # local file matches what we recorded. No fetch needed.
+    # local tree matches what we recorded. No fetch needed.
     if (
         entry is not None
         and not server_moved(entry, summary)
         and local_body is not None
-        and not is_modified_locally(entry, local_body)
+        and not tree_modified_locally(entry, target)
     ):
         return PullItem(
             slug=slug,
@@ -1151,8 +1155,10 @@ def _classify_tracked(
         return base.model_copy(update={"state": "deleted-on-server", "next_action": "resolve"})
 
     base = base.model_copy(update={"server_version": summary.current_version})
-    local_body = read_local_body(target, entry.slug)
-    modified = is_modified_locally(entry, local_body)
+    # Whole-tree drift: a sibling-file edit counts as modified just like a body
+    # edit, so status does not report a directory with un-pushed sibling work as
+    # clean.
+    modified = tree_modified_locally(entry, target)
     moved = server_moved(entry, summary)
 
     if modified and moved:
