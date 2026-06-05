@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import sys
 from pathlib import Path
@@ -32,6 +33,8 @@ from goodeye_cli.output import (
     resolve_output_mode,
 )
 from goodeye_cli.wire import SafetyCheckResult, WorkflowDetail
+
+_log = logging.getLogger(__name__)
 
 _WORKFLOW_VERIFIER_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,127}$")
 
@@ -476,7 +479,10 @@ def publish(
                 cfg = anon_client.get_client_config()
                 ignore_defaults = cfg.ignore_defaults if cfg.ignore_defaults else None
         except Exception:
-            pass
+            # Offline fallback to the baked-in defaults is intentional; log the
+            # swallowed error at debug level so a misconfiguration is diagnosable
+            # without changing the fallback behavior.
+            _log.debug("could not fetch ignore defaults from server config", exc_info=True)
         files_payload, _ = build_files_payload(skill_dir, None, ignore_defaults)
     else:
         files_payload = None

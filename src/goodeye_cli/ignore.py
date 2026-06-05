@@ -25,6 +25,16 @@ import pathspec
 # ---------------------------------------------------------------------------
 # Baked-in defaults
 # ---------------------------------------------------------------------------
+#
+# Single source of truth: the authoritative list lives on the server and is
+# served live under the ``ignore_defaults`` key of
+# ``/.well-known/goodeye-client-config``. ``build_ignore_spec`` always prefers
+# that served list; this baked-in copy is the OFFLINE fallback only (used when
+# the config endpoint is unavailable or not yet fetched). Keep it identical to
+# the server's authoritative list (same strings, same order). The two repos are
+# separate packages, so this cannot be import-checked here: any edit to one must
+# be mirrored to the other by hand, and the live config endpoint is what
+# overrides this copy in normal operation.
 
 DEFAULT_IGNORE_PATTERNS: list[str] = [
     ".git/",
