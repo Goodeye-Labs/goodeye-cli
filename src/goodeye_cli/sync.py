@@ -683,9 +683,17 @@ def _write_sibling_file(path: Path, envelope: dict[str, Any]) -> None:
     else:
         _log.warning("skipping sibling %s: envelope has neither content nor error", path)
         return
+    # The envelope's ``executable`` field is the authoritative source of truth
+    # for the bit, so the on-disk mode is brought into line with it in both
+    # directions. A force-overwrite reuses an existing inode, whose stale mode
+    # bits survive ``write_text`` / ``write_bytes``; clearing the execute bits
+    # when the envelope says non-executable prevents a now-non-executable file
+    # from keeping a leftover ``+x`` from a prior executable version.
+    current_mode = os.stat(path).st_mode
     if envelope.get("executable"):
-        current_mode = os.stat(path).st_mode
         os.chmod(path, current_mode | 0o111)
+    else:
+        os.chmod(path, current_mode & ~0o111)
 
 
 def _remove_skill_dir(target: SyncTarget, slug: str, entry: SyncEntry) -> None:

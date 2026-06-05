@@ -308,6 +308,102 @@ def test_pull_applies_executable_bit(tmp_path: Path, tmp_config_paths: ConfigPat
     assert not (plain_mode & 0o111), f"Expected no executable bit, got mode {oct(plain_mode)}"
 
 
+@respx.mock
+def test_pull_force_clears_stale_executable_bit(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    """A force-overwrite of a now-non-executable sibling clears the stale +x bit.
+
+    The on-disk sibling was previously executable. The registry has advanced and
+    the new manifest marks the same path non-executable. ``write_text`` reuses the
+    existing inode, so its mode bits survive the overwrite; the pull must bring the
+    mode into line with the authoritative manifest by clearing ``+x``.
+    """
+    _me_route()
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+
+    skill_body = "---\nname: flip-wf\n---\nrun"
+    old_content = "#!/bin/sh\necho hi"
+    new_content = "no longer a script"
+
+    slug_dir = target_dir / "flip-wf"
+    slug_dir.mkdir(parents=True)
+    (slug_dir / "SKILL.md").write_text(skill_body, encoding="utf-8")
+    sibling_path = slug_dir / "tool"
+    sibling_path.write_text(old_content, encoding="utf-8")
+    # Seed the on-disk sibling as executable, as a prior executable pull would.
+    os.chmod(sibling_path, os.stat(sibling_path).st_mode | 0o111)
+    assert os.stat(sibling_path).st_mode & 0o111
+
+    state = SyncState(
+        entries=[
+            _tracked_entry(
+                target_dir,
+                id_="wf_flip",
+                slug="flip-wf",
+                body=skill_body,
+                token="t1",
+                files=[
+                    FileState(
+                        path="tool",
+                        sha256=_sha256_text(old_content),
+                        executable=True,
+                    )
+                ],
+            )
+        ]
+    )
+
+    # Registry advanced (new token) and the manifest now marks the path
+    # non-executable with new content.
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response(
+            [_summary_dict(id_="wf_flip", name="flip-wf", token="t2", version=2)]
+        )
+    )
+    respx.get(f"{SERVER}/v1/workflows/wf_flip").mock(
+        return_value=_detail_response(
+            id_="wf_flip",
+            name="flip-wf",
+            body=skill_body,
+            token="t2",
+            version=2,
+            files=[
+                {
+                    "path": "tool",
+                    "sha256": _sha256_text(new_content),
+                    "size_bytes": len(new_content),
+                    "executable": False,
+                    "content_kind": "text",
+                }
+            ],
+        )
+    )
+    respx.get(f"{SERVER}/v1/workflows/wf_flip/files").mock(
+        return_value=httpx.Response(
+            200,
+            json={"files": [_file_envelope("tool", content=new_content, executable=False)]},
+        )
+    )
+
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        pull(
+            client,
+            config,
+            state,
+            slugs=[],
+            target_path=None,
+            force=True,
+            yes=True,
+            paths=tmp_config_paths,
+        )
+
+    assert sibling_path.read_text(encoding="utf-8") == new_content
+    mode = os.stat(sibling_path).st_mode
+    assert not (mode & 0o111), f"Expected stale +x cleared, got mode {oct(mode)}"
+
+
 # ---- incremental fetch -----------------------------------------------------
 
 
