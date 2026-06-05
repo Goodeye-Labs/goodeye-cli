@@ -424,6 +424,101 @@ def test_pull_incremental_fetches_only_changed(
     assert (target_dir / "inc-wf" / "changed.txt").read_text() == changed_content_v2
 
 
+@respx.mock
+def test_pull_restores_locally_deleted_sibling_when_server_unchanged(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    """A tracked sibling deleted locally is restored on a plain pull, even when
+    the server has not advanced.
+
+    A missing sibling is intentionally not treated as a local modification (so
+    it never blocks a deletion or an unforced overwrite), but the up-to-date
+    fast path must still notice the gap and fetch the file back, mirroring how a
+    deleted SKILL.md body is restored. Before the fix, the fast path returned
+    "up-to-date" and left the sibling missing on disk.
+    """
+    _me_route()
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+
+    skill_body = "---\nname: del-wf\n---\nbody"
+    sibling_content = "important helper"
+    sibling_sha = _sha256_text(sibling_content)
+
+    # Pre-populate disk as if a previous pull ran, then delete the sibling.
+    slug_dir = target_dir / "del-wf"
+    slug_dir.mkdir(parents=True)
+    (slug_dir / "SKILL.md").write_text(skill_body, encoding="utf-8")
+    sibling_path = slug_dir / "helpers" / "run.sh"
+    sibling_path.parent.mkdir(parents=True)
+    sibling_path.write_text(sibling_content, encoding="utf-8")
+    # User deletes the tracked sibling locally.
+    sibling_path.unlink()
+    assert not sibling_path.exists()
+
+    state = SyncState(
+        entries=[
+            _tracked_entry(
+                target_dir,
+                id_="wf_del",
+                slug="del-wf",
+                body=skill_body,
+                token="t1",
+                version=1,
+                files=[FileState(path="helpers/run.sh", sha256=sibling_sha, executable=False)],
+            )
+        ]
+    )
+
+    # Server is unchanged (same token t1, same version).
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response(
+            [_summary_dict(id_="wf_del", name="del-wf", token="t1", version=1)]
+        )
+    )
+    respx.get(f"{SERVER}/v1/workflows/wf_del").mock(
+        return_value=_detail_response(
+            id_="wf_del",
+            name="del-wf",
+            body=skill_body,
+            token="t1",
+            version=1,
+            files=[
+                {
+                    "path": "helpers/run.sh",
+                    "sha256": sibling_sha,
+                    "size_bytes": len(sibling_content),
+                    "executable": False,
+                    "content_kind": "text",
+                }
+            ],
+        )
+    )
+    respx.get(f"{SERVER}/v1/workflows/wf_del/files").mock(
+        return_value=httpx.Response(
+            200,
+            json={"files": [_file_envelope("helpers/run.sh", content=sibling_content)]},
+        )
+    )
+
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = pull(
+            client,
+            config,
+            state,
+            slugs=[],
+            target_path=None,
+            force=False,
+            yes=False,
+            paths=tmp_config_paths,
+        )
+
+    # The pull did real work (not "up-to-date") and restored the sibling.
+    assert [i.action for i in result.items] == ["pulled"]
+    assert sibling_path.exists()
+    assert sibling_path.read_text() == sibling_content
+
+
 # ---- safe deletion ---------------------------------------------------------
 
 

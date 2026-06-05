@@ -513,6 +513,26 @@ def tree_modified_locally(entry: SyncEntry, target: SyncTarget) -> bool:
     return False
 
 
+def tracked_sibling_missing(entry: SyncEntry, target: SyncTarget) -> bool:
+    """Return True if any tracked sibling file is absent from disk.
+
+    ``tree_modified_locally`` deliberately treats a missing sibling as "nothing
+    to lose" so it never blocks a deletion or an unforced overwrite. That makes
+    a deleted sibling invisible to the up-to-date fast path, which would then
+    leave the gap on disk instead of restoring it. This predicate lets the pull
+    fast path notice a missing sibling and fall through to a fetch, mirroring the
+    body's own ``local_body is not None`` guard so a deleted body and a deleted
+    sibling are both restored on a plain pull.
+    """
+    slug_dir = local_skill_dir(target, entry.slug)
+    for file_state in entry.files:
+        if not _is_safe_sibling_path(slug_dir, file_state.path):
+            continue
+        if not (slug_dir / file_state.path).exists():
+            return True
+    return False
+
+
 def server_moved(entry: SyncEntry, summary: WorkflowSummary) -> bool:
     """Return whether the registry advanced past the recorded version.
 
@@ -1081,13 +1101,17 @@ def _pull_one(
             workflow_id=summary.id,
         )
 
-    # Already current: an entry exists, the server has not advanced, and the
-    # local tree matches what we recorded. No fetch needed.
+    # Already current: an entry exists, the server has not advanced, the body is
+    # present, the local tree matches what we recorded, and no tracked sibling
+    # was deleted. A missing sibling is not "modified" (so it does not block this
+    # path on its own), but it must still be restored, so it is checked
+    # explicitly here just as the body is via ``local_body is not None``.
     if (
         entry is not None
         and not server_moved(entry, summary)
         and local_body is not None
         and not tree_modified_locally(entry, target)
+        and not tracked_sibling_missing(entry, target)
     ):
         return PullItem(
             slug=slug,
@@ -1847,11 +1871,22 @@ def build_files_payload(
 
         raw = abs_path.read_bytes()
         sha = hashlib.sha256(raw).hexdigest()
-        executable = bool(os.stat(abs_path).st_mode & 0o100)
-        states.append(FileState(path=rel, sha256=sha, executable=executable))
+        local_executable = bool(os.stat(abs_path).st_mode & 0o100)
 
         recorded = recorded_map.get(rel)
-        if recorded is not None and recorded.sha256 == sha:
+        unchanged = recorded is not None and recorded.sha256 == sha
+        # For an unchanged file, prefer the recorded executable flag over the
+        # local OS mode. A filesystem that does not preserve the execute bit
+        # (e.g. a Windows checkout or a FAT/exFAT mount) would otherwise report
+        # ``False`` here and silently clear a flag the server already holds as
+        # ``True``. The content is identical, so the recorded metadata is the
+        # authoritative source of truth for the bit. Changed (inline) files
+        # always carry the freshly observed local bit, since their content (and
+        # thus any intended permission) is what is being uploaded.
+        executable = recorded.executable if recorded is not None and unchanged else local_executable
+        states.append(FileState(path=rel, sha256=sha, executable=executable))
+
+        if unchanged:
             # Reference entry: server already has this blob.
             entries.append({"path": rel, "sha256": sha, "executable": executable})
         else:

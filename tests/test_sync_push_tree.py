@@ -246,6 +246,60 @@ def test_binary_sibling_records_raw_sha_and_converges_to_reference(tmp_path: Pat
     assert bin_entry2["sha256"] == raw_sha
 
 
+def test_unchanged_file_keeps_recorded_executable_bit(tmp_path: Path) -> None:
+    """An unchanged file (sha matches recorded) carries forward the recorded
+    executable flag rather than re-deriving it from the local OS mode.
+
+    On a filesystem that does not preserve the execute bit (e.g. a Windows
+    checkout or a FAT mount), ``os.stat`` would report the file as
+    non-executable. Without carrying the recorded bit forward, pushing an
+    otherwise-unchanged file would silently clear an executable flag the server
+    already holds.
+    """
+    skill_dir = tmp_path / "skl"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("body", encoding="utf-8")
+    script_text = "#!/bin/sh\necho hi\n"
+    script = skill_dir / "run.sh"
+    script.write_text(script_text, encoding="utf-8")
+    # Simulate a filesystem that did not preserve the execute bit on disk.
+    script.chmod(0o644)
+    script_sha = _sha256_text(script_text)
+
+    # Recorded state says this file is executable (set on a previous pull/push
+    # from an exec-bit-preserving filesystem) and its content is unchanged.
+    recorded = [FileState(path="run.sh", sha256=script_sha, executable=True)]
+    payload, states = build_files_payload(skill_dir, recorded, [])
+
+    entry = {e["path"]: e for e in payload}["run.sh"]
+    # Unchanged => reference entry, and the executable flag is preserved.
+    assert "sha256" in entry and "content" not in entry
+    assert entry["executable"] is True
+    assert {s.path: s for s in states}["run.sh"].executable is True
+
+
+def test_changed_file_uses_local_executable_bit(tmp_path: Path) -> None:
+    """A changed file (content differs from recorded) carries the freshly
+    observed local execute bit, since its current content and permissions are
+    what is being uploaded."""
+    skill_dir = tmp_path / "skl"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("body", encoding="utf-8")
+    script = skill_dir / "run.sh"
+    script.write_text("#!/bin/sh\necho changed\n", encoding="utf-8")
+    script.chmod(0o644)
+
+    # Recorded state has a different sha (so the file is treated as changed) and
+    # claims executable=True; the local bit (cleared) must win for a changed file.
+    recorded = [FileState(path="run.sh", sha256="0" * 64, executable=True)]
+    payload, states = build_files_payload(skill_dir, recorded, [])
+
+    entry = {e["path"]: e for e in payload}["run.sh"]
+    assert "content" in entry  # inline, since changed
+    assert entry["executable"] is False
+    assert {s.path: s for s in states}["run.sh"].executable is False
+
+
 def test_short_text_sibling_that_is_valid_base64_sent_as_text(tmp_path: Path) -> None:
     """A text sibling whose content is coincidentally valid base64 (e.g. 'test')
     is sent through the verbatim text ``content`` field and recorded under its
