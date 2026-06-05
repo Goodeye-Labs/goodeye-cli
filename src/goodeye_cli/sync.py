@@ -13,11 +13,13 @@ machines or shared across accounts, and matches the form the presets use.
 
 from __future__ import annotations
 
+import base64
+import contextlib
 import fnmatch
 import hashlib
+import logging
 import os
 import re
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -485,6 +487,32 @@ def is_modified_locally(entry: SyncEntry, body: str | None) -> bool:
     return body_sha256(body) != entry.body_sha256
 
 
+def tree_modified_locally(entry: SyncEntry, target: SyncTarget) -> bool:
+    """Return True if the body OR any tracked sibling on disk diverges from its recorded hash.
+
+    Used as the deletion guard in ``_reconcile_deletions`` so that an un-pushed
+    sibling edit also blocks deletion, not just a body edit. A missing body or a
+    missing sibling file is not treated as a local modification (there is nothing
+    to lose), so a partial on-disk state does not prevent cleanup.
+    """
+    # Check the body first.
+    if is_modified_locally(entry, read_local_body(target, entry.slug)):
+        return True
+    # Check each tracked sibling.
+    slug_dir = local_skill_dir(target, entry.slug)
+    for file_state in entry.files:
+        if not _is_safe_sibling_path(slug_dir, file_state.path):
+            continue
+        sibling_path = slug_dir / file_state.path
+        if not sibling_path.exists():
+            # Missing sibling - not a local modification (treat as nothing to lose).
+            continue
+        on_disk_sha = _sibling_sha256(sibling_path)
+        if on_disk_sha != file_state.sha256:
+            return True
+    return False
+
+
 def server_moved(entry: SyncEntry, summary: WorkflowSummary) -> bool:
     """Return whether the registry advanced past the recorded version.
 
@@ -570,6 +598,9 @@ def _list_all_for_target(
     return list(items)
 
 
+_log = logging.getLogger(__name__)
+
+
 def _write_skill_file(path: Path, body: str) -> None:
     """Write a workflow body to ``path`` with ordinary file permissions.
 
@@ -580,17 +611,116 @@ def _write_skill_file(path: Path, body: str) -> None:
     path.write_text(body, encoding="utf-8")
 
 
-def _remove_skill_dir(target: SyncTarget, slug: str) -> None:
-    """Remove the whole ``<target>/<slug>/`` directory if it exists.
+def _is_safe_sibling_path(slug_dir: Path, rel_path: str) -> bool:
+    """Return True if ``rel_path`` resolves inside ``slug_dir`` and has no dangerous segments.
 
-    This is the only filesystem deletion sync performs, and it is purely local:
-    it never reaches the registry. A workflow gone server-side has its local
-    mirror removed only after the caller confirms; the directory and everything
-    under it (not just ``SKILL.md``) is taken with it.
+    Rejects empty segments, ``.`` segments (to avoid confusion), ``..`` segments
+    (path traversal), and anything that resolves outside the skill directory.
+    This is a defence-in-depth check: well-formed server paths never trigger it,
+    but a crafted or buggy payload must not write outside the per-skill directory.
     """
-    directory = local_skill_dir(target, slug)
-    if directory.is_dir():
-        shutil.rmtree(directory)
+    parts = Path(rel_path).parts
+    if not parts:
+        return False
+    # No empty, dot, or double-dot segments.
+    for segment in parts:
+        if segment in ("", ".", ".."):
+            return False
+    resolved_target = slug_dir.resolve()
+    resolved_child = (slug_dir / rel_path).resolve()
+    try:
+        resolved_child.relative_to(resolved_target)
+    except ValueError:
+        return False
+    return True
+
+
+def _sibling_sha256(path: Path) -> str:
+    """Return the hex SHA-256 of a file at ``path``."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _write_sibling_file(path: Path, envelope: dict[str, Any]) -> None:
+    """Write one sibling file from a file-fetch envelope.
+
+    Handles text (``content`` key), binary (``content_base64`` key), or skips
+    when the envelope carries an ``error`` key. The executable bit is applied
+    according to the envelope's ``executable`` field.
+    """
+    if "error" in envelope:
+        _log.warning(
+            "skipping sibling %s: server returned error %r",
+            envelope.get("path", "?"),
+            envelope["error"],
+        )
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if "content" in envelope:
+        path.write_text(envelope["content"], encoding="utf-8")
+    elif "content_base64" in envelope:
+        path.write_bytes(base64.b64decode(envelope["content_base64"]))
+    else:
+        _log.warning("skipping sibling %s: envelope has neither content nor error", path)
+        return
+    if envelope.get("executable"):
+        current_mode = os.stat(path).st_mode
+        os.chmod(path, current_mode | 0o111)
+
+
+def _remove_skill_dir(target: SyncTarget, slug: str, entry: SyncEntry) -> None:
+    """Remove ONLY the tracked files for ``slug``, then clean up now-empty directories.
+
+    Unlike the old ``shutil.rmtree``, this never destroys files the caller never
+    synced. Author-local or untracked files in the skill directory are left in
+    place. The set of tracked files is ``SKILL.md`` plus each path in
+    ``entry.files``.
+
+    After removing tracked files we walk up the directory tree from each leaf
+    subdirectory toward (but not beyond) the slug directory, calling ``os.rmdir``
+    at each level. ``os.rmdir`` raises ``OSError`` when the directory still holds
+    any files or subdirectories, so an author file silently blocks the removal of
+    its containing directory. The slug directory itself is also removed if empty,
+    but we never remove the target directory or anything above it.
+    """
+    slug_dir = local_skill_dir(target, slug)
+    if not slug_dir.is_dir():
+        return
+
+    # Build the set of tracked absolute paths to remove.
+    tracked: list[Path] = [slug_dir / "SKILL.md"]
+    for file_state in entry.files:
+        if _is_safe_sibling_path(slug_dir, file_state.path):
+            tracked.append(slug_dir / file_state.path)
+
+    # Remove tracked files.
+    subdirs_to_try: set[Path] = set()
+    for p in tracked:
+        if p.exists():
+            # Record the parent dir (if it is a subdirectory of slug_dir, not slug_dir itself)
+            # so we can try rmdir-ing it later.
+            if p.parent != slug_dir:
+                subdirs_to_try.add(p.parent)
+            try:
+                p.unlink()
+            except OSError as exc:
+                _log.warning("could not remove tracked file %s: %s", p, exc)
+
+    # Try to remove empty subdirectories, deepest first, stopping at slug_dir.
+    # Sort by depth (number of parts) descending so we try children before parents.
+    sorted_subdirs = sorted(subdirs_to_try, key=lambda d: len(d.parts), reverse=True)
+    for d in sorted_subdirs:
+        # Walk upward from d toward slug_dir (exclusive), attempting rmdir at each level.
+        current = d
+        while current != slug_dir and current.is_relative_to(slug_dir):
+            try:
+                os.rmdir(current)
+            except OSError:
+                break  # Not empty; stop ascending this branch.
+            current = current.parent
+
+    # Finally try to remove the slug dir itself.
+    with contextlib.suppress(OSError):
+        os.rmdir(slug_dir)
 
 
 def pull(
@@ -697,14 +827,15 @@ def _reconcile_deletions(
             surviving.append(entry)
             continue
 
-        # Protect un-pushed local edits. If the on-disk body diverged from the
-        # recorded hash, removal would discard work the registry never received,
-        # and the deleted workflow cannot be re-pulled to recover it. Keep it and
-        # report `deleted-on-server` unless the caller forced the pull. This is
-        # the same `--force` gate `_pull_one` applies to a locally edited file,
-        # and it is what stops a non-TTY agent run (where `confirm_destructive`
-        # auto-approves) from silently destroying local edits.
-        if not force and is_modified_locally(entry, read_local_body(target, entry.slug)):
+        # Protect un-pushed local edits. If the on-disk body or any tracked
+        # sibling diverged from the recorded hash, removal would discard work the
+        # registry never received, and the deleted workflow cannot be re-pulled to
+        # recover it. Keep it and report `deleted-on-server` unless the caller
+        # forced the pull. This is the same `--force` gate `_pull_one` applies to
+        # a locally edited file, and it stops a non-TTY agent run (where
+        # `confirm_destructive` auto-approves) from silently destroying local edits
+        # -- including edits to sibling files, not just the SKILL.md body.
+        if not force and tree_modified_locally(entry, target):
             surviving.append(entry)
             items.append(
                 PullItem(
@@ -722,7 +853,7 @@ def _reconcile_deletions(
             yes=yes,
         )
         if confirmed:
-            _remove_skill_dir(target, entry.slug)
+            _remove_skill_dir(target, entry.slug, entry)
             items.append(
                 PullItem(
                     slug=entry.slug,
@@ -744,6 +875,100 @@ def _reconcile_deletions(
         )
     state.entries = surviving
     return items
+
+
+def _sibling_needs_fetch(
+    row: Any,
+    slug_dir: Path,
+    old_files: dict[str, FileState],
+) -> bool:
+    """Return True when a manifest row needs to be fetched from the server.
+
+    A sibling is skipped (returns False) when its recorded sha matches the manifest
+    row and the local file already exists on disk.
+    """
+    existing = old_files.get(row.path)
+    local_sibling = slug_dir / row.path
+    return not (existing is not None and existing.sha256 == row.sha256 and local_sibling.exists())
+
+
+def _fetch_and_write_siblings(
+    client: GoodeyeClient,
+    workflow_id: str,
+    slug_dir: Path,
+    to_fetch: list[str],
+) -> None:
+    """Batch-fetch ``to_fetch`` paths and write each file to disk.
+
+    Uses ``get_workflow_files`` for a uniform ``{"files": [...]}`` response shape.
+    Unsafe envelope paths and error envelopes are skipped with a warning.
+    """
+    batch_result = client.get_workflow_files(workflow_id, to_fetch)
+    for envelope in batch_result.get("files", []):
+        env_path = envelope.get("path", "")
+        if not _is_safe_sibling_path(slug_dir, env_path):
+            _log.warning("skipping unsafe path %r in file envelope for %s", env_path, workflow_id)
+            continue
+        _write_sibling_file(slug_dir / env_path, envelope)
+
+
+def _remove_dropped_siblings(
+    slug_dir: Path,
+    old_files: dict[str, FileState],
+    new_manifest_paths: set[str],
+) -> None:
+    """Remove local files for paths that were in the old manifest but absent from the new one."""
+    for dropped_path in old_files:
+        if dropped_path not in new_manifest_paths and _is_safe_sibling_path(slug_dir, dropped_path):
+            dropped_local = slug_dir / dropped_path
+            if dropped_local.exists():
+                try:
+                    dropped_local.unlink()
+                except OSError as exc:
+                    _log.warning("could not remove dropped sibling %s: %s", dropped_local, exc)
+
+
+def _build_file_states(slug_dir: Path, new_manifest: list[Any]) -> list[FileState]:
+    """Build the updated ``FileState`` list from the server manifest rows."""
+    new_file_states: list[FileState] = []
+    for row in new_manifest:
+        if not _is_safe_sibling_path(slug_dir, row.path):
+            continue
+        sha = row.sha256
+        if sha is None:
+            local_sibling = slug_dir / row.path
+            sha = _sibling_sha256(local_sibling) if local_sibling.exists() else ""
+        new_file_states.append(FileState(path=row.path, sha256=sha, executable=row.executable))
+    return new_file_states
+
+
+def _sync_sibling_files(
+    client: GoodeyeClient,
+    detail: Any,
+    slug_dir: Path,
+    old_files: dict[str, FileState],
+) -> list[FileState]:
+    """Fetch, write, and remove sibling files so the skill directory matches the server manifest.
+
+    Returns the updated ``FileState`` list for the new manifest. Called from
+    ``_pull_one`` after the ``SKILL.md`` body has already been written.
+    """
+    # Exclude any synthesized SKILL.md row - the body is already written by the caller.
+    new_manifest = [row for row in detail.files if row.path != "SKILL.md"]
+    new_manifest_paths = {row.path for row in new_manifest}
+
+    # Determine which siblings need fetching (new or changed sha), skipping unsafe paths.
+    to_fetch = [
+        row.path
+        for row in new_manifest
+        if _is_safe_sibling_path(slug_dir, row.path)
+        and _sibling_needs_fetch(row, slug_dir, old_files)
+    ]
+    if to_fetch:
+        _fetch_and_write_siblings(client, detail.id, slug_dir, to_fetch)
+
+    _remove_dropped_siblings(slug_dir, old_files, new_manifest_paths)
+    return _build_file_states(slug_dir, new_manifest)
 
 
 def _pull_one(
@@ -801,6 +1026,10 @@ def _pull_one(
     path = local_skill_path(target, slug)
     _write_skill_file(path, detail.body)
 
+    slug_dir = local_skill_dir(target, slug)
+    old_files: dict[str, FileState] = {f.path: f for f in (entry.files if entry else [])}
+    new_file_states = _sync_sibling_files(client, detail, slug_dir, old_files)
+
     effective_role = detail.effective_role or summary.effective_role or "owner"
     # Record the validated slug (the name we checked against SLUG_RE and used to
     # build the file path), so the recorded slug can never diverge from the path
@@ -820,6 +1049,7 @@ def _pull_one(
             ],
             effective_role=effective_role,
             read_only=effective_role == "view",
+            files=new_file_states,
         ),
     )
     return PullItem(
