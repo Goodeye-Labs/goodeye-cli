@@ -259,6 +259,21 @@ class SyncVerifierBinding(_SyncBase):
     version: int | None = None
 
 
+class FileState(_SyncBase):
+    """SHA-256 and metadata for one sibling file in a skill directory.
+
+    Tracks every file that lives alongside SKILL.md so a sibling edit
+    registers as drift on the next sync pass. ``executable`` preserves the
+    file's execute permission across rounds.
+
+    Kept intentionally minimal: a 500-workflow bundle stores 500+ of these.
+    """
+
+    path: str
+    sha256: str
+    executable: bool = False
+
+
 class SyncEntry(_SyncBase):
     """A single synced workflow tracked in the local index.
 
@@ -267,6 +282,10 @@ class SyncEntry(_SyncBase):
     written to (or read from) disk, used to detect local edits on the next
     pass. ``read_only`` records that the caller holds only a view grant, so
     later pushes know not to attempt an upload.
+
+    ``files`` tracks sibling files in the skill directory (everything except
+    SKILL.md). This field was added after initial release; state files written
+    by older CLI versions omit it and load with ``files == []``.
     """
 
     workflow_id: str
@@ -278,6 +297,7 @@ class SyncEntry(_SyncBase):
     verifier_bindings: list[SyncVerifierBinding] = Field(default_factory=list)
     effective_role: str = "owner"
     read_only: bool = False
+    files: list[FileState] = Field(default_factory=list)
 
 
 class SyncState(_SyncBase):
