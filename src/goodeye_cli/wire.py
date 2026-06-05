@@ -23,6 +23,7 @@ class ClientConfig(_WireBase):
     workos_client_id: str
     workos_device_authorization_uri: str
     workos_token_uri: str
+    ignore_defaults: list[str] = Field(default_factory=list)
 
 
 class MeResponse(_WireBase):
@@ -134,6 +135,30 @@ class WorkflowVerifierRefWire(_WireBase):
     source_workflow_id: str | None = None
 
 
+class WorkflowFileEntry(_WireBase):
+    """One row in the file manifest returned by GET /v1/workflows/{id}."""
+
+    path: str
+    sha256: str | None = None
+    size_bytes: int = 0
+    executable: bool = False
+    content_kind: str = "text"
+    purpose: str | None = None
+    fetchable_over_mcp: bool = True
+    execution_gated: bool = False
+    safety_verification_status: str | None = None
+
+
+class FileEntryWire(_WireBase):
+    """One file entry in the POST /v1/workflows `files` array."""
+
+    path: str
+    executable: bool = False
+    purpose: str | None = None
+    content: str | None = None
+    sha256: str | None = None
+
+
 class WorkflowDetail(_WireBase):
     id: str
     name: str
@@ -149,6 +174,8 @@ class WorkflowDetail(_WireBase):
     effective_role: str | None = None
     version_token: str | None = None
     verifiers: list[WorkflowVerifierRefWire] = Field(default_factory=list)
+    files: list[WorkflowFileEntry] = Field(default_factory=list)
+    safety_verification_status: str | None = None
 
 
 class WorkflowSaveResult(_WireBase):
@@ -170,6 +197,9 @@ class SaveWorkflowInput(_WireBase):
     tags: list[str] = Field(default_factory=list)
     source: str | None = None
     verifiers: list[WorkflowVerifierRefWire] = Field(default_factory=list)
+    # None means omit from the payload (server carries the tree forward).
+    # An empty list explicitly clears the file tree on the server.
+    files: list[FileEntryWire] | None = None
 
 
 class WorkflowGrantResult(_WireBase):
