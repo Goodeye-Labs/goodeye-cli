@@ -1807,14 +1807,18 @@ def build_files_payload(
       recorded sha256 for a path matches the on-disk sha256, a reference entry
       (``{path, sha256, executable}``) is emitted so the server can carry the
       blob forward without re-uploading it.  Otherwise the file is sent inline:
-      text files as a UTF-8 ``content`` string, binary files (NUL byte or
-      invalid UTF-8) as a base64-encoded ``content`` string.
+      text files as a verbatim UTF-8 ``content`` string, binary files (NUL byte
+      or invalid UTF-8) as a base64-encoded ``content_base64`` string. The two
+      fields are distinct so the server never guesses text-vs-binary; a short
+      text file whose bytes are coincidentally valid base64 (e.g. ``test``)
+      still goes through ``content`` and round-trips losslessly.
 
     Returns ``(payload, states)``, both sorted lexicographically by path:
     *payload* is the wire list for ``save_workflow``; *states* is the matching
     ``FileState`` list (each sha256 computed over the raw on-disk bytes) for the
-    local sync index, so a binary file (whose inline ``content`` is base64) is
-    recorded under its true byte sha256 and converges to a reference next push.
+    local sync index, so a binary file (whose inline ``content_base64`` is
+    base64) is recorded under its true byte sha256 and converges to a reference
+    next push.
     """
     from goodeye_cli.ignore import build_ignore_spec
 
@@ -1851,7 +1855,12 @@ def build_files_payload(
             # Reference entry: server already has this blob.
             entries.append({"path": rel, "sha256": sha, "executable": executable})
         else:
-            # Inline entry: text or binary.
+            # Inline entry. Text and binary use distinct wire fields so the
+            # server never has to guess: ``content`` is verbatim UTF-8 text,
+            # ``content_base64`` is base64-encoded bytes. A short text file
+            # whose content is coincidentally valid base64 (e.g. ``test``) must
+            # go through ``content`` so it round-trips losslessly and its stored
+            # sha matches the on-disk sha recorded below.
             try:
                 content_str = raw.decode("utf-8")
                 if "\x00" in content_str:
@@ -1861,7 +1870,7 @@ def build_files_payload(
                 entries.append(
                     {
                         "path": rel,
-                        "content": base64.b64encode(raw).decode("ascii"),
+                        "content_base64": base64.b64encode(raw).decode("ascii"),
                         "executable": executable,
                     }
                 )

@@ -213,8 +213,9 @@ def test_push_applies_ignore_before_upload(tmp_path: Path, tmp_config_paths: Con
 
 
 def test_binary_sibling_records_raw_sha_and_converges_to_reference(tmp_path: Path) -> None:
-    """A binary sibling is sent inline as base64 but recorded under its raw-byte
-    sha256, so a subsequent build sends it as a reference instead of re-uploading."""
+    """A binary sibling is sent inline as base64 (in ``content_base64``) but
+    recorded under its raw-byte sha256, so a subsequent build sends it as a
+    reference instead of re-uploading."""
     skill_dir = tmp_path / "skl"
     skill_dir.mkdir()
     (skill_dir / "SKILL.md").write_text("body", encoding="utf-8")
@@ -222,22 +223,49 @@ def test_binary_sibling_records_raw_sha_and_converges_to_reference(tmp_path: Pat
     (skill_dir / "data.bin").write_bytes(raw)
     raw_sha = hashlib.sha256(raw).hexdigest()
 
-    # First build with no recorded state: the binary is inline base64.
+    # First build with no recorded state: the binary is inline base64 in the
+    # explicit ``content_base64`` field, never the text ``content`` field.
     payload, states = build_files_payload(skill_dir, None, [])
     bin_entry = {e["path"]: e for e in payload}["data.bin"]
-    assert "content" in bin_entry and "sha256" not in bin_entry
-    assert bin_entry["content"] == base64.b64encode(raw).decode("ascii")
+    assert "content_base64" in bin_entry and "content" not in bin_entry
+    assert "sha256" not in bin_entry
+    assert bin_entry["content_base64"] == base64.b64encode(raw).decode("ascii")
 
     # The recorded state uses the RAW-byte sha, not the sha of the base64 string.
     bin_state = {s.path: s for s in states}["data.bin"]
     assert bin_state.sha256 == raw_sha
-    assert bin_state.sha256 != hashlib.sha256(bin_entry["content"].encode("utf-8")).hexdigest()
+    assert (
+        bin_state.sha256 != hashlib.sha256(bin_entry["content_base64"].encode("utf-8")).hexdigest()
+    )
 
     # Second build using that recorded state: the binary converges to a reference.
     payload2, _ = build_files_payload(skill_dir, states, [])
     bin_entry2 = {e["path"]: e for e in payload2}["data.bin"]
     assert "sha256" in bin_entry2 and "content" not in bin_entry2
+    assert "content_base64" not in bin_entry2
     assert bin_entry2["sha256"] == raw_sha
+
+
+def test_short_text_sibling_that_is_valid_base64_sent_as_text(tmp_path: Path) -> None:
+    """A text sibling whose content is coincidentally valid base64 (e.g. 'test')
+    is sent through the verbatim text ``content`` field and recorded under its
+    UTF-8 byte sha, so a push/pull round trip stays lossless and converges to a
+    reference (no silent binary corruption)."""
+    skill_dir = tmp_path / "skl"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("body", encoding="utf-8")
+    for fname, text in (("a.txt", "test"), ("b.txt", "abcd")):
+        (skill_dir / fname).write_text(text, encoding="utf-8")
+
+    payload, states = build_files_payload(skill_dir, None, [])
+    by_path = {e["path"]: e for e in payload}
+    state_by_path = {s.path: s for s in states}
+    for fname, text in (("a.txt", "test"), ("b.txt", "abcd")):
+        entry = by_path[fname]
+        assert "content" in entry and "content_base64" not in entry
+        assert entry["content"] == text
+        # Recorded sha is over the verbatim UTF-8 bytes the server will store.
+        assert state_by_path[fname].sha256 == hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def test_push_skips_symlink_pointing_outside_skill_dir(tmp_path: Path) -> None:
