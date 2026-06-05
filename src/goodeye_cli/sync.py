@@ -266,14 +266,21 @@ class FileState(_SyncBase):
 
     Tracks every file that lives alongside SKILL.md so a sibling edit
     registers as drift on the next sync pass. ``executable`` preserves the
-    file's execute permission across rounds.
+    file's execute permission across rounds. ``purpose`` carries the file's
+    role label forward so a pull-edit-push round-trip does not strip the label
+    the designer set: the push always sends a full file snapshot, so a
+    reference entry that omitted ``purpose`` would reset it to null server-side.
 
     Kept intentionally minimal: a 500-workflow bundle stores 500+ of these.
+    ``purpose`` was added after the initial sibling-tracking release; state
+    files written by older CLI versions omit it and load with ``purpose``
+    ``None``.
     """
 
     path: str
     sha256: str
     executable: bool = False
+    purpose: str | None = None
 
 
 class SyncEntry(_SyncBase):
@@ -1041,7 +1048,14 @@ def _build_file_states(
         sha = row.sha256
         if sha is None:
             sha = _sibling_sha256(local_sibling) if local_sibling.exists() else ""
-        new_file_states.append(FileState(path=row.path, sha256=sha, executable=row.executable))
+        new_file_states.append(
+            FileState(
+                path=row.path,
+                sha256=sha,
+                executable=row.executable,
+                purpose=row.purpose,
+            )
+        )
     return new_file_states, missing
 
 
@@ -1851,6 +1865,12 @@ def build_files_payload(
       fields are distinct so the server never guesses text-vs-binary; a short
       text file whose bytes are coincidentally valid base64 (e.g. ``test``)
       still goes through ``content`` and round-trips losslessly.
+    - A recorded ``purpose`` (the file's role label, which lives only in the
+      index, never on disk) is re-emitted on both reference and inline entries.
+      The push sends a full snapshot, so omitting it would reset the label to
+      null on the server; carrying it forward preserves the designer-set label
+      across a pull-edit-push round-trip. A brand-new local file has no recorded
+      purpose, so the field is simply left off its wire entry.
 
     Returns ``(payload, states)``, both sorted lexicographically by path:
     *payload* is the wire list for ``save_workflow``; *states* is the matching
@@ -1899,11 +1919,21 @@ def build_files_payload(
         # always carry the freshly observed local bit, since their content (and
         # thus any intended permission) is what is being uploaded.
         executable = recorded.executable if recorded is not None and unchanged else local_executable
-        states.append(FileState(path=rel, sha256=sha, executable=executable))
+        # The role label lives only in the index, not on disk, so the recorded
+        # ``purpose`` is the sole source of truth. Carry it forward for every
+        # path that has one (changed or unchanged): the push sends a full
+        # snapshot, so dropping it here would reset the label to null on the
+        # server. A brand-new local file (no recorded row) has no purpose to
+        # send and the field is left off the wire entry entirely.
+        purpose = recorded.purpose if recorded is not None else None
+        states.append(FileState(path=rel, sha256=sha, executable=executable, purpose=purpose))
 
         if unchanged:
             # Reference entry: server already has this blob.
-            entries.append({"path": rel, "sha256": sha, "executable": executable})
+            entry: dict[str, Any] = {"path": rel, "sha256": sha, "executable": executable}
+            if purpose is not None:
+                entry["purpose"] = purpose
+            entries.append(entry)
         else:
             # Inline entry. Text and binary use distinct wire fields so the
             # server never has to guess: ``content`` is verbatim UTF-8 text,
@@ -1915,15 +1945,20 @@ def build_files_payload(
                 content_str = raw.decode("utf-8")
                 if "\x00" in content_str:
                     raise ValueError("NUL byte")
-                entries.append({"path": rel, "content": content_str, "executable": executable})
+                inline: dict[str, Any] = {
+                    "path": rel,
+                    "content": content_str,
+                    "executable": executable,
+                }
             except (UnicodeDecodeError, ValueError):
-                entries.append(
-                    {
-                        "path": rel,
-                        "content_base64": base64.b64encode(raw).decode("ascii"),
-                        "executable": executable,
-                    }
-                )
+                inline = {
+                    "path": rel,
+                    "content_base64": base64.b64encode(raw).decode("ascii"),
+                    "executable": executable,
+                }
+            if purpose is not None:
+                inline["purpose"] = purpose
+            entries.append(inline)
 
     return entries, states
 

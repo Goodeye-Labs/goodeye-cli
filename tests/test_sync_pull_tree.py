@@ -1112,3 +1112,118 @@ def test_pull_recovers_batch_cap_overflow_via_single_fetch(
     entry = load_sync_state(tmp_config_paths).entries[0]
     tracked_paths = {f.path for f in entry.files}
     assert tracked_paths == {"a.txt", "b.txt"}
+
+
+# ---- path traversal containment (security) ---------------------------------
+
+
+@respx.mock
+def test_pull_rejects_unsafe_sibling_paths_and_writes_nothing_outside_slug_dir(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    """A malicious manifest row or fetch envelope must never write outside the slug dir.
+
+    This pins the top security invariant for pull: a server-supplied sibling path
+    that escapes the per-skill directory (``..`` traversal or an absolute path),
+    whether it arrives in a manifest row or in the ``path`` of a fetch envelope,
+    is rejected. Nothing is written outside ``<target>/<slug>/`` and the unsafe
+    path is never recorded in the index. A legitimate sibling alongside the
+    malicious entries still lands so the rejection is path-scoped, not a blanket
+    abort.
+    """
+    _me_route()
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+
+    skill_body = "---\nname: evil-wf\n---\nbody"
+    good_text = "legitimate helper"
+
+    # A canary file outside the slug directory: if a traversal write lands, it
+    # would overwrite this with attacker content. It must survive untouched.
+    outside_canary = tmp_path / "escape.sh"
+    outside_canary.write_text("ORIGINAL", encoding="utf-8")
+
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response([_summary_dict(id_="wf_evil", name="evil-wf", token="t1")])
+    )
+    respx.get(f"{SERVER}/v1/workflows/wf_evil").mock(
+        return_value=_detail_response(
+            id_="wf_evil",
+            name="evil-wf",
+            body=skill_body,
+            token="t1",
+            files=[
+                {
+                    "path": "good.txt",
+                    "sha256": _sha256_text(good_text),
+                    "size_bytes": len(good_text),
+                    "executable": False,
+                    "content_kind": "text",
+                },
+                # Directory traversal: would resolve to tmp_path/escape.sh.
+                {
+                    "path": "../escape.sh",
+                    "sha256": _sha256_text("PWNED"),
+                    "size_bytes": 5,
+                    "executable": True,
+                    "content_kind": "text",
+                },
+                # Absolute path: must not be written to an absolute location.
+                {
+                    "path": "/etc/passwd",
+                    "sha256": _sha256_text("PWNED"),
+                    "size_bytes": 5,
+                    "executable": False,
+                    "content_kind": "text",
+                },
+            ],
+        )
+    )
+
+    # The batch fetch is only ever called with safe paths (unsafe manifest rows
+    # are filtered before fetching), but a hostile server can still return an
+    # unsafe ``path`` inside an envelope. Include such an envelope to exercise the
+    # second containment layer in the envelope writer.
+    respx.get(f"{SERVER}/v1/workflows/wf_evil/files").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "files": [
+                    _file_envelope("good.txt", content=good_text),
+                    _file_envelope("../envelope-escape.sh", content="PWNED"),
+                ]
+            },
+        )
+    )
+
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = pull(
+            client,
+            config,
+            SyncState(),
+            slugs=[],
+            target_path=None,
+            force=False,
+            yes=False,
+            paths=tmp_config_paths,
+        )
+
+    # The pull does not crash; the legitimate sibling is delivered.
+    assert [i.slug for i in result.items] == ["evil-wf"]
+    slug_dir = target_dir / "evil-wf"
+    assert (slug_dir / "good.txt").read_text(encoding="utf-8") == good_text
+
+    # Nothing escaped the slug directory.
+    assert outside_canary.read_text(encoding="utf-8") == "ORIGINAL"
+    assert not (tmp_path / "envelope-escape.sh").exists()
+    assert not Path("/etc/passwd").exists() or (
+        Path("/etc/passwd").read_text(encoding="utf-8") != "PWNED"
+    )
+
+    # Only the safe path is on disk inside the slug dir, and only the safe path
+    # is recorded as synced. The unsafe rows are never tracked.
+    landed = {p.relative_to(slug_dir).as_posix() for p in slug_dir.rglob("*") if p.is_file()}
+    assert landed == {"SKILL.md", "good.txt"}
+    entry = load_sync_state(tmp_config_paths).entries[0]
+    tracked_paths = {f.path for f in entry.files}
+    assert tracked_paths == {"good.txt"}
