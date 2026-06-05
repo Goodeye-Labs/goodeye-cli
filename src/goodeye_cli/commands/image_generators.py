@@ -289,7 +289,7 @@ def generate(
         None,
         "--reference-image-url",
         help=(
-            "Public HTTPS URL of the reference image. Required for "
+            "Public HTTP or HTTPS URL of the reference image. Required for "
             "``image_to_image`` generators; rejected for ``text_to_image`` ones."
         ),
     ),
