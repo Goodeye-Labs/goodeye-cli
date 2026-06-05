@@ -765,9 +765,13 @@ def pull(
     visible) has its local copy removed, but only with confirmation (``yes``
     skips the prompt for agents and non-interactive callers); removing a local
     directory never touches the registry. The index is updated in memory as
-    each workflow is written and persisted in a ``finally`` even if a later
-    fetch raises, so files written before a failure are tracked and a re-run
-    resumes from where it left off rather than re-pulling them as untracked.
+    each workflow finishes and persisted in a ``finally`` even if a later
+    workflow raises, so every workflow whose pull completed is tracked and a
+    re-run resumes after them rather than re-pulling them as untracked. A
+    workflow that raises partway through (its ``SKILL.md`` written but its
+    sibling fetch interrupted) records no entry, so a re-run reports its
+    ``SKILL.md`` as untracked and preserves it (it is never clobbered without
+    ``force``); the resume guarantee covers completed workflows only.
     """
     result = PullResult()
     # Guard before any work: a mismatched identity aborts here, and a first run
@@ -789,9 +793,12 @@ def pull(
                 _reconcile_deletions(state, target, live, slug_args=slug_args, force=force, yes=yes)
             )
     finally:
-        # Persist whatever the index accumulated, including on a mid-loop raise:
-        # any SKILL.md already written has a matching entry, so a re-run treats
-        # it as tracked instead of clobbering or duplicating it.
+        # Persist whatever the index accumulated, including on a mid-loop raise.
+        # Each entry is recorded only after its workflow finishes, so a workflow
+        # that raised partway (SKILL.md written, siblings not) leaves no entry;
+        # a re-run sees that SKILL.md as untracked and preserves it rather than
+        # clobbering it. Completed workflows are tracked, so a re-run resumes
+        # after them instead of re-pulling them as untracked.
         save_sync_state(state, paths)
     return result
 
