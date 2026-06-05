@@ -1409,6 +1409,14 @@ def push(
     targets = _targets_to_process(config, target_path)
     slug_args = set(slugs)
 
+    # Fetch ignore defaults once so all push candidates share the same spec.
+    ignore_defaults: list[str] | None = None
+    try:
+        cfg = client.get_client_config()
+        ignore_defaults = cfg.ignore_defaults if cfg.ignore_defaults else None
+    except Exception:
+        pass
+
     try:
         candidates = _collect_push_candidates(state, targets, slug_args=slug_args)
         # Group the modified-local copies by workflow identity so a workflow
@@ -1419,7 +1427,14 @@ def push(
             by_workflow.setdefault(candidate.entry.workflow_id, []).append(candidate)
         for group in by_workflow.values():
             result.items.extend(
-                _push_workflow_group(client, state, config, group, scoped=target_path is not None)
+                _push_workflow_group(
+                    client,
+                    state,
+                    config,
+                    group,
+                    scoped=target_path is not None,
+                    ignore_defaults=ignore_defaults,
+                )
             )
         result.items.extend(_untracked_push_items(state, targets, slug_args=slug_args))
     finally:
@@ -1439,9 +1454,10 @@ def _collect_push_candidates(
     """Gather every modified-local tracked entry across the processed targets.
 
     An entry is a candidate when it lives in one of the targets, its slug is in
-    that target's scope and (if given) the slug args, and its on-disk body
-    differs from the recorded hash. Read-only and invalid entries are kept here:
-    they are classified per-entry at upload time, not silently dropped.
+    that target's scope and (if given) the slug args, and its on-disk body OR
+    any tracked sibling differs from the recorded hash. Read-only and invalid
+    entries are kept here: they are classified per-entry at upload time, not
+    silently dropped.
     """
     by_path = {normalize_target_path(t.path): t for t in targets}
     candidates: list[_PushCandidate] = []
@@ -1455,7 +1471,12 @@ def _collect_push_candidates(
         if slug_args and entry.slug not in slug_args:
             continue
         local_body = read_local_body(target, entry.slug)
-        if local_body is None or not is_modified_locally(entry, local_body):
+        if local_body is None:
+            continue
+        # A candidate when the body or any tracked sibling drifted.
+        body_drifted = is_modified_locally(entry, local_body)
+        tree_drifted = tree_modified_locally(entry, target)
+        if not body_drifted and not tree_drifted:
             continue
         candidates.append(_PushCandidate(entry=entry, target=target, body=local_body))
     return candidates
@@ -1468,6 +1489,7 @@ def _push_workflow_group(
     group: list[_PushCandidate],
     *,
     scoped: bool,
+    ignore_defaults: list[str] | None = None,
 ) -> list[PushItem]:
     """Push one workflow's modified copies, keeping multi-target copies coherent.
 
@@ -1503,7 +1525,13 @@ def _push_workflow_group(
     # Either a lone candidate, identical copies, or a single scoped copy: push
     # the first and converge any siblings to the just-pushed body.
     source = writable[0]
-    item = _push_candidate(client, source.entry, target=source.target, body=source.body)
+    item = _push_candidate(
+        client,
+        source.entry,
+        target=source.target,
+        body=source.body,
+        ignore_defaults=ignore_defaults,
+    )
     items.append(item)
     if item.action != "pushed":
         # An upload that did not land (conflict, read-only, invalid) leaves the
@@ -1675,12 +1703,87 @@ def _untracked_push_items(
     return items
 
 
+def build_files_payload(
+    skill_dir: Path,
+    recorded_files: list[FileState] | None,
+    ignore_defaults: list[str] | None,
+) -> tuple[list[dict[str, Any]], list[FileState]]:
+    """Build the ``files`` payload for ``save_workflow`` from a skill directory.
+
+    Walks *skill_dir* recursively.  For each file (POSIX-relative path from the
+    skill root):
+
+    - ``SKILL.md`` is always skipped (it is the body, not a sibling).
+    - Files whose relative path is ignored by the effective ignore spec are
+      skipped *before* reading their bytes, so large cache directories are never
+      read.
+    - The remaining files are checked against *recorded_files*.  When the
+      recorded sha256 for a path matches the on-disk sha256, a reference entry
+      (``{path, sha256, executable}``) is emitted so the server can carry the
+      blob forward without re-uploading it.  Otherwise the file is sent inline:
+      text files as a UTF-8 ``content`` string, binary files (NUL byte or
+      invalid UTF-8) as a base64-encoded ``content`` string.
+
+    Returns ``(payload, states)``, both sorted lexicographically by path:
+    *payload* is the wire list for ``save_workflow``; *states* is the matching
+    ``FileState`` list (each sha256 computed over the raw on-disk bytes) for the
+    local sync index, so a binary file (whose inline ``content`` is base64) is
+    recorded under its true byte sha256 and converges to a reference next push.
+    """
+    from goodeye_cli.ignore import build_ignore_spec
+
+    matcher = build_ignore_spec(skill_dir, ignore_defaults)
+    recorded_map: dict[str, FileState] = {f.path: f for f in (recorded_files or [])}
+
+    entries: list[dict[str, Any]] = []
+    states: list[FileState] = []
+    for abs_path in sorted(skill_dir.rglob("*")):
+        if not abs_path.is_file():
+            continue
+        try:
+            rel = abs_path.relative_to(skill_dir).as_posix()
+        except ValueError:
+            continue
+        if rel == "SKILL.md":
+            continue
+        if matcher.is_ignored(rel):
+            continue
+
+        raw = abs_path.read_bytes()
+        sha = hashlib.sha256(raw).hexdigest()
+        executable = bool(os.stat(abs_path).st_mode & 0o100)
+        states.append(FileState(path=rel, sha256=sha, executable=executable))
+
+        recorded = recorded_map.get(rel)
+        if recorded is not None and recorded.sha256 == sha:
+            # Reference entry: server already has this blob.
+            entries.append({"path": rel, "sha256": sha, "executable": executable})
+        else:
+            # Inline entry: text or binary.
+            try:
+                content_str = raw.decode("utf-8")
+                if "\x00" in content_str:
+                    raise ValueError("NUL byte")
+                entries.append({"path": rel, "content": content_str, "executable": executable})
+            except (UnicodeDecodeError, ValueError):
+                entries.append(
+                    {
+                        "path": rel,
+                        "content": base64.b64encode(raw).decode("ascii"),
+                        "executable": executable,
+                    }
+                )
+
+    return entries, states
+
+
 def _push_candidate(
     client: GoodeyeClient,
     entry: SyncEntry,
     *,
     target: SyncTarget,
     body: str,
+    ignore_defaults: list[str] | None = None,
 ) -> PushItem:
     """Upload one modified entry's body, mutating the entry in place on success.
 
@@ -1704,6 +1807,10 @@ def _push_candidate(
         return base.model_copy(update={"action": "skipped-invalid", "detail": metadata})
     description, outcome, tags = metadata
 
+    # Build the sibling-file payload for this skill directory.
+    skill_dir = local_skill_dir(target, entry.slug)
+    files_payload, file_states = build_files_payload(skill_dir, list(entry.files), ignore_defaults)
+
     try:
         save_result = client.save_workflow(
             name=entry.slug,
@@ -1714,6 +1821,7 @@ def _push_candidate(
             expected_version_token=entry.version_token,
             source="manual",
             verifiers=_verifier_payload(entry),
+            files=files_payload,
         )
     except Conflict:
         return base.model_copy(
@@ -1744,6 +1852,9 @@ def _push_candidate(
         SyncVerifierBinding(name=v.name, verifier_id=v.verifier_id, version=v.version)
         for v in save_result.verifiers
     ]
+    # Record the file states (each sha256 is over the raw on-disk bytes, so a
+    # binary file converges to a reference on the next push rather than re-uploading).
+    entry.files = file_states
     return base.model_copy(update={"workflow_id": save_result.workflow_id})
 
 
@@ -1751,6 +1862,7 @@ __all__ = [
     "PRESETS",
     "SLUG_RE",
     "SYNC_SCOPES",
+    "FileState",
     "PullAction",
     "PullItem",
     "PullResult",
@@ -1769,6 +1881,7 @@ __all__ = [
     "SyncVerifierBinding",
     "add_target",
     "body_sha256",
+    "build_files_payload",
     "ensure_identity",
     "expand_target_path",
     "find_entry",
