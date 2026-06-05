@@ -352,3 +352,85 @@ def test_push_skips_symlink_pointing_outside_skill_dir(tmp_path: Path) -> None:
     # The outside file's contents never appear in any payload entry.
     serialized = json.dumps(payload)
     assert "SECRET CONTENTS OUTSIDE THE SKILL" not in serialized
+
+
+def test_recorded_purpose_is_reemitted_on_reference_and_inline(tmp_path: Path) -> None:
+    """A recorded ``purpose`` is carried forward onto the wire entry for both an
+    unchanged path (reference entry) and a changed path (inline entry).
+
+    The push sends a full file snapshot, so dropping the label here would reset
+    it to null on the server and strip the role label the designer set across a
+    pull-edit-push round trip. A path with no recorded purpose leaves the key off
+    its wire entry entirely.
+    """
+    skill_dir = tmp_path / "skl"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("body", encoding="utf-8")
+
+    # Unchanged file: on-disk content matches the recorded sha (reference entry).
+    unchanged_text = "stable helper\n"
+    (skill_dir / "helper.sh").write_text(unchanged_text, encoding="utf-8")
+    unchanged_sha = _sha256_text(unchanged_text)
+
+    # Changed file: on-disk content differs from the recorded sha (inline entry).
+    changed_text = "new query body\n"
+    (skill_dir / "query.sql").write_text(changed_text, encoding="utf-8")
+
+    recorded = [
+        FileState(path="helper.sh", sha256=unchanged_sha, executable=False, purpose="setup script"),
+        FileState(path="query.sql", sha256="0" * 64, executable=False, purpose="data query"),
+    ]
+    payload, states = build_files_payload(skill_dir, recorded, [])
+    by_path = {e["path"]: e for e in payload}
+
+    # Unchanged => reference entry (sha, no content) carrying the recorded purpose.
+    ref_entry = by_path["helper.sh"]
+    assert "sha256" in ref_entry and "content" not in ref_entry
+    assert ref_entry["purpose"] == "setup script"
+
+    # Changed => inline entry (content) carrying the recorded purpose.
+    inline_entry = by_path["query.sql"]
+    assert "content" in inline_entry
+    assert inline_entry["purpose"] == "data query"
+
+    # The carried-forward purpose is also recorded back into the local state.
+    state_by_path = {s.path: s for s in states}
+    assert state_by_path["helper.sh"].purpose == "setup script"
+    assert state_by_path["query.sql"].purpose == "data query"
+
+
+def test_purpose_none_omits_key_on_reference_and_inline(tmp_path: Path) -> None:
+    """A path whose recorded purpose is ``None`` (or which has no recorded row)
+    leaves the ``purpose`` key off its wire entry, so the server is not handed an
+    explicit null. Covers both the reference (unchanged) and inline (changed)
+    branches."""
+    skill_dir = tmp_path / "skl"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("body", encoding="utf-8")
+
+    # Unchanged file with a recorded row whose purpose is None.
+    unchanged_text = "no label here\n"
+    (skill_dir / "helper.sh").write_text(unchanged_text, encoding="utf-8")
+    unchanged_sha = _sha256_text(unchanged_text)
+
+    # Brand-new local file with no recorded row at all (also purpose-less).
+    (skill_dir / "brand_new.txt").write_text("fresh content\n", encoding="utf-8")
+
+    recorded = [FileState(path="helper.sh", sha256=unchanged_sha, executable=False, purpose=None)]
+    payload, states = build_files_payload(skill_dir, recorded, [])
+    by_path = {e["path"]: e for e in payload}
+
+    # Reference entry for the unchanged, purpose-None file omits the key.
+    ref_entry = by_path["helper.sh"]
+    assert "sha256" in ref_entry and "content" not in ref_entry
+    assert "purpose" not in ref_entry
+
+    # Inline entry for the brand-new file (no recorded row) omits the key.
+    inline_entry = by_path["brand_new.txt"]
+    assert "content" in inline_entry
+    assert "purpose" not in inline_entry
+
+    # The recorded state also carries no purpose for either path.
+    state_by_path = {s.path: s for s in states}
+    assert state_by_path["helper.sh"].purpose is None
+    assert state_by_path["brand_new.txt"].purpose is None
