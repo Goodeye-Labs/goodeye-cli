@@ -259,6 +259,13 @@ def _pull_hints(items: list[sync.PullItem]) -> list[str]:
             "`goodeye workflows sync pull --yes` to remove their local copies "
             "(use --force if they have local edits)"
         )
+    incomplete = sum(1 for item in items if item.action == "pulled-incomplete")
+    if incomplete:
+        hints.append(
+            f"{incomplete} workflow(s) pulled with missing sibling files (some assets could "
+            "not be retrieved); those files were left out of the local directory and were not "
+            "recorded as synced"
+        )
     return hints
 
 

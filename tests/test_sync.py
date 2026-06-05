@@ -15,6 +15,7 @@ from goodeye_cli.config import ConfigPaths
 from goodeye_cli.errors import Conflict, NotFound, ServerError, ValidationFailed
 from goodeye_cli.sync import (
     PRESETS,
+    FileState,
     PushItem,
     SyncConfig,
     SyncEntry,
@@ -1188,6 +1189,58 @@ def test_status_modified_local(tmp_path: Path, tmp_config_paths: ConfigPaths) ->
     assert item.server_version == 4
     assert item.read_only is False
     assert detail_route.call_count == 0
+
+
+@respx.mock
+def test_status_sibling_edit_reports_modified_local(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    """A sibling-file edit (body unchanged) reports modified-local, not clean.
+
+    Drift detection spans the whole tree, so an un-pushed sibling edit is
+    surfaced just like a body edit; a body-only classifier would mislabel it
+    clean and hide pending local work.
+    """
+    _me_route()
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    body = "server body"
+    # Body on disk matches the recorded hash; only the sibling diverges.
+    slug_dir = target_dir / "alpha"
+    slug_dir.mkdir(parents=True)
+    (slug_dir / "SKILL.md").write_text(body, encoding="utf-8")
+    (slug_dir / "helper.sh").write_text("locally edited helper", encoding="utf-8")
+    state = SyncState(
+        entries=[
+            SyncEntry(
+                workflow_id="skl_a",
+                slug="alpha",
+                target_path=normalize_target_path(str(target_dir)),
+                synced_version=1,
+                version_token="t1",
+                body_sha256=body_sha256(body),
+                files=[
+                    FileState(
+                        path="helper.sh",
+                        sha256=body_sha256("original helper"),
+                        executable=True,
+                    )
+                ],
+            )
+        ]
+    )
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response([_summary_dict(id_="skl_a", name="alpha", token="t1")])
+    )
+    detail_route = respx.get(f"{SERVER}/v1/workflows/skl_a").mock(
+        return_value=_detail_response(id_="skl_a", name="alpha", body=body)
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = status(client, config, state, target_path=None)
+    item = result.items[0]
+    assert item.state == "modified-local"
+    assert item.next_action == "push"
+    assert detail_route.call_count == 0  # no body fetch
 
 
 @respx.mock

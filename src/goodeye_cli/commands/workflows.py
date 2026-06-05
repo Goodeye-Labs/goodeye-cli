@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import sys
 from pathlib import Path
@@ -32,6 +33,8 @@ from goodeye_cli.output import (
     resolve_output_mode,
 )
 from goodeye_cli.wire import SafetyCheckResult, WorkflowDetail
+
+_log = logging.getLogger(__name__)
 
 _WORKFLOW_VERIFIER_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,127}$")
 
@@ -291,12 +294,19 @@ def _read_markdown_input(source: str) -> str:
         ) from exc
 
 
+def _is_skill_directory(source: str) -> bool:
+    """Return True when *source* points to a directory containing SKILL.md."""
+    p = Path(source)
+    return p.is_dir() and (p / "SKILL.md").is_file()
+
+
 @app.command("publish")
 def publish(
     file: str = typer.Argument(
         ...,
         help=(
-            "Markdown workflow file to upload, or '-' to read markdown from stdin "
+            "Markdown workflow file, a directory containing SKILL.md (uploads the full "
+            "directory tree), or '-' to read markdown from stdin "
             "(preferred for generated agent output)."
         ),
     ),
@@ -345,8 +355,18 @@ def publish(
         "--clear-verifiers",
         help="Send an explicit empty verifier binding list, removing existing bindings.",
     ),
+    clear_files: bool = typer.Option(
+        False,
+        "--clear-files",
+        help="Send an empty file tree, removing all sibling files from the workflow.",
+    ),
 ) -> None:
-    """Upload a workflow from a markdown file, or from stdin when FILE is `-`.
+    """Upload a workflow from a markdown file, directory, or stdin when FILE is `-`.
+
+    When FILE is a directory containing SKILL.md, the full directory tree is
+    uploaded: SKILL.md becomes the workflow body and all other non-ignored files
+    are uploaded as sibling files.  When FILE is a single file or stdin, no
+    file tree is sent (the server carries the existing tree forward).
 
     Metadata can be passed as flags, read from YAML front-matter, or both.
     When both are present, command-line flags win:
@@ -380,8 +400,26 @@ def publish(
     Deploy LLM-judge checks separately as verifiers and reference them by
     verifier_id or verifier_id@version.
     """
+    from goodeye_cli.sync import build_files_payload
+
     console = Console()
-    markdown = _read_markdown_input(file)
+
+    # Determine input mode: directory with SKILL.md, single file, or stdin.
+    is_dir_mode = file != "-" and _is_skill_directory(file)
+    if clear_files and is_dir_mode:
+        raise ValidationFailed(
+            slug="validation_error",
+            message="--clear-files cannot be used with a directory input.",
+            hint="Either pass a single file path to clear the tree, or omit --clear-files "
+            "to upload the directory tree.",
+        )
+
+    skill_dir = Path(file)
+    if is_dir_mode:
+        markdown = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+    else:
+        markdown = _read_markdown_input(file)
+
     front_matter, _stripped_body = _parse_front_matter(markdown)
     # Server stores the full markdown (including front-matter) so workflow
     # bodies round-trip through `goodeye workflows get`.
@@ -423,6 +461,32 @@ def publish(
     verifiers = _parse_workflow_verifier_flags(list(verifier or []))
     verifier_payload: list[dict[str, str]] | None = [] if clear_verifiers else verifiers or None
 
+    # Build the files payload.
+    # Directory mode: upload the full tree (everything is inline since there is
+    # no recorded state to compare against).
+    # Single-file / stdin: omit files entirely so the server carries the
+    # existing tree forward.
+    # --clear-files: send an empty list to wipe the tree.
+    files_payload: list[dict] | None
+    if clear_files:
+        files_payload = []
+    elif is_dir_mode:
+        # Fetch ignore defaults from the server; fall back to baked-in list on
+        # any network failure.
+        ignore_defaults: list[str] | None = None
+        try:
+            with _client(require_auth=False) as anon_client:
+                cfg = anon_client.get_client_config()
+                ignore_defaults = cfg.ignore_defaults if cfg.ignore_defaults else None
+        except Exception:
+            # Offline fallback to the baked-in defaults is intentional; log the
+            # swallowed error at debug level so a misconfiguration is diagnosable
+            # without changing the fallback behavior.
+            _log.debug("could not fetch ignore defaults from server config", exc_info=True)
+        files_payload, _ = build_files_payload(skill_dir, None, ignore_defaults)
+    else:
+        files_payload = None
+
     with _client(require_auth=True) as client:
         result = client.save_workflow(
             name=effective_name,
@@ -433,6 +497,7 @@ def publish(
             expected_version_token=expected_version_token,
             source=source,
             verifiers=verifier_payload,
+            files=files_payload,
         )
 
     console.print(

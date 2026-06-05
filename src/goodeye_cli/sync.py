@@ -13,11 +13,13 @@ machines or shared across accounts, and matches the form the presets use.
 
 from __future__ import annotations
 
+import base64
+import contextlib
 import fnmatch
 import hashlib
+import logging
 import os
 import re
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -259,6 +261,28 @@ class SyncVerifierBinding(_SyncBase):
     version: int | None = None
 
 
+class FileState(_SyncBase):
+    """SHA-256 and metadata for one sibling file in a skill directory.
+
+    Tracks every file that lives alongside SKILL.md so a sibling edit
+    registers as drift on the next sync pass. ``executable`` preserves the
+    file's execute permission across rounds. ``purpose`` carries the file's
+    role label forward so a pull-edit-push round-trip does not strip the label
+    the designer set: the push always sends a full file snapshot, so a
+    reference entry that omitted ``purpose`` would reset it to null server-side.
+
+    Kept intentionally minimal: a 500-workflow bundle stores 500+ of these.
+    ``purpose`` was added after the initial sibling-tracking release; state
+    files written by older CLI versions omit it and load with ``purpose``
+    ``None``.
+    """
+
+    path: str
+    sha256: str
+    executable: bool = False
+    purpose: str | None = None
+
+
 class SyncEntry(_SyncBase):
     """A single synced workflow tracked in the local index.
 
@@ -267,6 +291,10 @@ class SyncEntry(_SyncBase):
     written to (or read from) disk, used to detect local edits on the next
     pass. ``read_only`` records that the caller holds only a view grant, so
     later pushes know not to attempt an upload.
+
+    ``files`` tracks sibling files in the skill directory (everything except
+    SKILL.md). This field was added after initial release; state files written
+    by older CLI versions omit it and load with ``files == []``.
     """
 
     workflow_id: str
@@ -278,6 +306,7 @@ class SyncEntry(_SyncBase):
     verifier_bindings: list[SyncVerifierBinding] = Field(default_factory=list)
     effective_role: str = "owner"
     read_only: bool = False
+    files: list[FileState] = Field(default_factory=list)
 
 
 class SyncState(_SyncBase):
@@ -465,6 +494,52 @@ def is_modified_locally(entry: SyncEntry, body: str | None) -> bool:
     return body_sha256(body) != entry.body_sha256
 
 
+def tree_modified_locally(entry: SyncEntry, target: SyncTarget) -> bool:
+    """Return True if the body OR any tracked sibling on disk diverges from its recorded hash.
+
+    Used as the deletion guard in ``_reconcile_deletions`` so that an un-pushed
+    sibling edit also blocks deletion, not just a body edit. A missing body or a
+    missing sibling file is not treated as a local modification (there is nothing
+    to lose), so a partial on-disk state does not prevent cleanup.
+    """
+    # Check the body first.
+    if is_modified_locally(entry, read_local_body(target, entry.slug)):
+        return True
+    # Check each tracked sibling.
+    slug_dir = local_skill_dir(target, entry.slug)
+    for file_state in entry.files:
+        if not _is_safe_sibling_path(slug_dir, file_state.path):
+            continue
+        sibling_path = slug_dir / file_state.path
+        if not sibling_path.exists():
+            # Missing sibling - not a local modification (treat as nothing to lose).
+            continue
+        on_disk_sha = _sibling_sha256(sibling_path)
+        if on_disk_sha != file_state.sha256:
+            return True
+    return False
+
+
+def tracked_sibling_missing(entry: SyncEntry, target: SyncTarget) -> bool:
+    """Return True if any tracked sibling file is absent from disk.
+
+    ``tree_modified_locally`` deliberately treats a missing sibling as "nothing
+    to lose" so it never blocks a deletion or an unforced overwrite. That makes
+    a deleted sibling invisible to the up-to-date fast path, which would then
+    leave the gap on disk instead of restoring it. This predicate lets the pull
+    fast path notice a missing sibling and fall through to a fetch, mirroring the
+    body's own ``local_body is not None`` guard so a deleted body and a deleted
+    sibling are both restored on a plain pull.
+    """
+    slug_dir = local_skill_dir(target, entry.slug)
+    for file_state in entry.files:
+        if not _is_safe_sibling_path(slug_dir, file_state.path):
+            continue
+        if not (slug_dir / file_state.path).exists():
+            return True
+    return False
+
+
 def server_moved(entry: SyncEntry, summary: WorkflowSummary) -> bool:
     """Return whether the registry advanced past the recorded version.
 
@@ -481,6 +556,7 @@ def server_moved(entry: SyncEntry, summary: WorkflowSummary) -> bool:
 
 PullAction = Literal[
     "pulled",
+    "pulled-incomplete",
     "up-to-date",
     "skipped-modified",
     "skipped-conflict",
@@ -550,6 +626,9 @@ def _list_all_for_target(
     return list(items)
 
 
+_log = logging.getLogger(__name__)
+
+
 def _write_skill_file(path: Path, body: str) -> None:
     """Write a workflow body to ``path`` with ordinary file permissions.
 
@@ -560,17 +639,124 @@ def _write_skill_file(path: Path, body: str) -> None:
     path.write_text(body, encoding="utf-8")
 
 
-def _remove_skill_dir(target: SyncTarget, slug: str) -> None:
-    """Remove the whole ``<target>/<slug>/`` directory if it exists.
+def _is_safe_sibling_path(slug_dir: Path, rel_path: str) -> bool:
+    """Return True if ``rel_path`` resolves inside ``slug_dir`` and has no dangerous segments.
 
-    This is the only filesystem deletion sync performs, and it is purely local:
-    it never reaches the registry. A workflow gone server-side has its local
-    mirror removed only after the caller confirms; the directory and everything
-    under it (not just ``SKILL.md``) is taken with it.
+    Rejects empty segments, ``.`` segments (to avoid confusion), ``..`` segments
+    (path traversal), and anything that resolves outside the skill directory.
+    This is a defence-in-depth check: well-formed server paths never trigger it,
+    but a crafted or buggy payload must not write outside the per-skill directory.
     """
-    directory = local_skill_dir(target, slug)
-    if directory.is_dir():
-        shutil.rmtree(directory)
+    parts = Path(rel_path).parts
+    if not parts:
+        return False
+    # No empty, dot, or double-dot segments.
+    for segment in parts:
+        if segment in ("", ".", ".."):
+            return False
+    resolved_target = slug_dir.resolve()
+    resolved_child = (slug_dir / rel_path).resolve()
+    try:
+        resolved_child.relative_to(resolved_target)
+    except ValueError:
+        return False
+    return True
+
+
+def _sibling_sha256(path: Path) -> str:
+    """Return the hex SHA-256 of a file at ``path``."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _write_sibling_file(path: Path, envelope: dict[str, Any]) -> None:
+    """Write one sibling file from a file-fetch envelope.
+
+    Handles text (``content`` key), binary (``content_base64`` key), or skips
+    when the envelope carries an ``error`` key. The executable bit is applied
+    according to the envelope's ``executable`` field.
+    """
+    if "error" in envelope:
+        _log.warning(
+            "skipping sibling %s: server returned error %r",
+            envelope.get("path", "?"),
+            envelope["error"],
+        )
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if "content" in envelope:
+        path.write_text(envelope["content"], encoding="utf-8")
+    elif "content_base64" in envelope:
+        path.write_bytes(base64.b64decode(envelope["content_base64"]))
+    else:
+        _log.warning("skipping sibling %s: envelope has neither content nor error", path)
+        return
+    # The envelope's ``executable`` field is the authoritative source of truth
+    # for the bit, so the on-disk mode is brought into line with it in both
+    # directions. A force-overwrite reuses an existing inode, whose stale mode
+    # bits survive ``write_text`` / ``write_bytes``; clearing the execute bits
+    # when the envelope says non-executable prevents a now-non-executable file
+    # from keeping a leftover ``+x`` from a prior executable version.
+    current_mode = os.stat(path).st_mode
+    if envelope.get("executable"):
+        os.chmod(path, current_mode | 0o111)
+    else:
+        os.chmod(path, current_mode & ~0o111)
+
+
+def _remove_skill_dir(target: SyncTarget, slug: str, entry: SyncEntry) -> None:
+    """Remove ONLY the tracked files for ``slug``, then clean up now-empty directories.
+
+    Unlike the old ``shutil.rmtree``, this never destroys files the caller never
+    synced. Author-local or untracked files in the skill directory are left in
+    place. The set of tracked files is ``SKILL.md`` plus each path in
+    ``entry.files``.
+
+    After removing tracked files we walk up the directory tree from each leaf
+    subdirectory toward (but not beyond) the slug directory, calling ``os.rmdir``
+    at each level. ``os.rmdir`` raises ``OSError`` when the directory still holds
+    any files or subdirectories, so an author file silently blocks the removal of
+    its containing directory. The slug directory itself is also removed if empty,
+    but we never remove the target directory or anything above it.
+    """
+    slug_dir = local_skill_dir(target, slug)
+    if not slug_dir.is_dir():
+        return
+
+    # Build the set of tracked absolute paths to remove.
+    tracked: list[Path] = [slug_dir / "SKILL.md"]
+    for file_state in entry.files:
+        if _is_safe_sibling_path(slug_dir, file_state.path):
+            tracked.append(slug_dir / file_state.path)
+
+    # Remove tracked files.
+    subdirs_to_try: set[Path] = set()
+    for p in tracked:
+        if p.exists():
+            # Record the parent dir (if it is a subdirectory of slug_dir, not slug_dir itself)
+            # so we can try rmdir-ing it later.
+            if p.parent != slug_dir:
+                subdirs_to_try.add(p.parent)
+            try:
+                p.unlink()
+            except OSError as exc:
+                _log.warning("could not remove tracked file %s: %s", p, exc)
+
+    # Try to remove empty subdirectories, deepest first, stopping at slug_dir.
+    # Sort by depth (number of parts) descending so we try children before parents.
+    sorted_subdirs = sorted(subdirs_to_try, key=lambda d: len(d.parts), reverse=True)
+    for d in sorted_subdirs:
+        # Walk upward from d toward slug_dir (exclusive), attempting rmdir at each level.
+        current = d
+        while current != slug_dir and current.is_relative_to(slug_dir):
+            try:
+                os.rmdir(current)
+            except OSError:
+                break  # Not empty; stop ascending this branch.
+            current = current.parent
+
+    # Finally try to remove the slug dir itself.
+    with contextlib.suppress(OSError):
+        os.rmdir(slug_dir)
 
 
 def pull(
@@ -594,9 +780,13 @@ def pull(
     visible) has its local copy removed, but only with confirmation (``yes``
     skips the prompt for agents and non-interactive callers); removing a local
     directory never touches the registry. The index is updated in memory as
-    each workflow is written and persisted in a ``finally`` even if a later
-    fetch raises, so files written before a failure are tracked and a re-run
-    resumes from where it left off rather than re-pulling them as untracked.
+    each workflow finishes and persisted in a ``finally`` even if a later
+    workflow raises, so every workflow whose pull completed is tracked and a
+    re-run resumes after them rather than re-pulling them as untracked. A
+    workflow that raises partway through (its ``SKILL.md`` written but its
+    sibling fetch interrupted) records no entry, so a re-run reports its
+    ``SKILL.md`` as untracked and preserves it (it is never clobbered without
+    ``force``); the resume guarantee covers completed workflows only.
     """
     result = PullResult()
     # Guard before any work: a mismatched identity aborts here, and a first run
@@ -618,9 +808,12 @@ def pull(
                 _reconcile_deletions(state, target, live, slug_args=slug_args, force=force, yes=yes)
             )
     finally:
-        # Persist whatever the index accumulated, including on a mid-loop raise:
-        # any SKILL.md already written has a matching entry, so a re-run treats
-        # it as tracked instead of clobbering or duplicating it.
+        # Persist whatever the index accumulated, including on a mid-loop raise.
+        # Each entry is recorded only after its workflow finishes, so a workflow
+        # that raised partway (SKILL.md written, siblings not) leaves no entry;
+        # a re-run sees that SKILL.md as untracked and preserves it rather than
+        # clobbering it. Completed workflows are tracked, so a re-run resumes
+        # after them instead of re-pulling them as untracked.
         save_sync_state(state, paths)
     return result
 
@@ -677,14 +870,15 @@ def _reconcile_deletions(
             surviving.append(entry)
             continue
 
-        # Protect un-pushed local edits. If the on-disk body diverged from the
-        # recorded hash, removal would discard work the registry never received,
-        # and the deleted workflow cannot be re-pulled to recover it. Keep it and
-        # report `deleted-on-server` unless the caller forced the pull. This is
-        # the same `--force` gate `_pull_one` applies to a locally edited file,
-        # and it is what stops a non-TTY agent run (where `confirm_destructive`
-        # auto-approves) from silently destroying local edits.
-        if not force and is_modified_locally(entry, read_local_body(target, entry.slug)):
+        # Protect un-pushed local edits. If the on-disk body or any tracked
+        # sibling diverged from the recorded hash, removal would discard work the
+        # registry never received, and the deleted workflow cannot be re-pulled to
+        # recover it. Keep it and report `deleted-on-server` unless the caller
+        # forced the pull. This is the same `--force` gate `_pull_one` applies to
+        # a locally edited file, and it stops a non-TTY agent run (where
+        # `confirm_destructive` auto-approves) from silently destroying local edits
+        # -- including edits to sibling files, not just the SKILL.md body.
+        if not force and tree_modified_locally(entry, target):
             surviving.append(entry)
             items.append(
                 PullItem(
@@ -702,7 +896,7 @@ def _reconcile_deletions(
             yes=yes,
         )
         if confirmed:
-            _remove_skill_dir(target, entry.slug)
+            _remove_skill_dir(target, entry.slug, entry)
             items.append(
                 PullItem(
                     slug=entry.slug,
@@ -726,6 +920,177 @@ def _reconcile_deletions(
     return items
 
 
+def _sibling_needs_fetch(
+    row: Any,
+    slug_dir: Path,
+    old_files: dict[str, FileState],
+) -> bool:
+    """Return True when a manifest row needs to be fetched from the server.
+
+    A sibling is skipped (returns False) when its recorded sha matches the manifest
+    row and the local file already exists on disk.
+    """
+    existing = old_files.get(row.path)
+    local_sibling = slug_dir / row.path
+    return not (existing is not None and existing.sha256 == row.sha256 and local_sibling.exists())
+
+
+# Maximum number of paths sent in a single batch file fetch. The server caps
+# the aggregate inline bytes per batch response (paths that overflow come back
+# as references rather than content), and it has no hard cap on the request path
+# count, so the client bounds the request itself to keep any single call modest.
+# Paths that overflow the server's aggregate budget are recovered one at a time
+# through the single-file route, which carries no aggregate cap.
+_FETCH_BATCH_PATHS = 100
+
+
+def _write_one_envelope(slug_dir: Path, workflow_id: str, envelope: dict[str, Any]) -> str | None:
+    """Write a single file envelope to disk, returning its path on success.
+
+    Returns ``None`` (without writing) when the path is unsafe or the envelope
+    carries an ``error`` / has no content. Callers use the returned path to track
+    exactly which siblings landed on disk.
+    """
+    env_path = envelope.get("path", "")
+    if not _is_safe_sibling_path(slug_dir, env_path):
+        _log.warning("skipping unsafe path %r in file envelope for %s", env_path, workflow_id)
+        return None
+    if "error" in envelope or not ("content" in envelope or "content_base64" in envelope):
+        return None
+    _write_sibling_file(slug_dir / env_path, envelope)
+    return env_path
+
+
+def _fetch_and_write_siblings(
+    client: GoodeyeClient,
+    workflow_id: str,
+    slug_dir: Path,
+    to_fetch: list[str],
+) -> set[str]:
+    """Batch-fetch ``to_fetch`` paths and write each file to disk.
+
+    Chunks the request so no single batch call sends an unbounded path list, and
+    recovers any path the server returns as ``batch_response_cap_exceeded`` (its
+    content would have pushed the batch past the aggregate inline budget) by
+    re-fetching it alone through the single-file route, which has no aggregate
+    cap. Unsafe envelope paths and remaining error envelopes are skipped with a
+    warning. Returns the set of paths actually written to disk so the caller can
+    avoid recording a skipped file as synced.
+    """
+    written: set[str] = set()
+    for start in range(0, len(to_fetch), _FETCH_BATCH_PATHS):
+        chunk = to_fetch[start : start + _FETCH_BATCH_PATHS]
+        batch_result = client.get_workflow_files(workflow_id, chunk)
+        for envelope in batch_result.get("files", []):
+            if envelope.get("error") == "batch_response_cap_exceeded":
+                # The file was dropped from the batch to honor the aggregate
+                # inline budget. Re-fetch it on its own, where no aggregate cap
+                # applies, so a large-but-individually-fetchable sibling still
+                # lands on disk instead of being silently skipped.
+                env_path = envelope.get("path", "")
+                if not _is_safe_sibling_path(slug_dir, env_path):
+                    _log.warning(
+                        "skipping unsafe path %r in file envelope for %s", env_path, workflow_id
+                    )
+                    continue
+                single = client.get_workflow_file(workflow_id, env_path)
+                landed = _write_one_envelope(slug_dir, workflow_id, single)
+            else:
+                landed = _write_one_envelope(slug_dir, workflow_id, envelope)
+            if landed is not None:
+                written.add(landed)
+    return written
+
+
+def _remove_dropped_siblings(
+    slug_dir: Path,
+    old_files: dict[str, FileState],
+    new_manifest_paths: set[str],
+) -> None:
+    """Remove local files for paths that were in the old manifest but absent from the new one."""
+    for dropped_path in old_files:
+        if dropped_path not in new_manifest_paths and _is_safe_sibling_path(slug_dir, dropped_path):
+            dropped_local = slug_dir / dropped_path
+            if dropped_local.exists():
+                try:
+                    dropped_local.unlink()
+                except OSError as exc:
+                    _log.warning("could not remove dropped sibling %s: %s", dropped_local, exc)
+
+
+def _build_file_states(
+    slug_dir: Path, new_manifest: list[Any], landed_paths: set[str]
+) -> tuple[list[FileState], list[str]]:
+    """Build the updated ``FileState`` list from the server manifest rows.
+
+    Only records a path as synced when it is actually present on disk: a path is
+    on disk when it was just written (in ``landed_paths``) or it was already
+    current and skipped from the fetch (its local copy still exists). A path the
+    server could not deliver (over the inline binary ceiling, or otherwise
+    missing on disk) is left out of the recorded state so the next pull retries
+    it, and is reported in the returned ``missing`` list so the caller can flag
+    an incomplete pull instead of falsely reporting success.
+
+    Returns ``(states, missing)``.
+    """
+    new_file_states: list[FileState] = []
+    missing: list[str] = []
+    for row in new_manifest:
+        if not _is_safe_sibling_path(slug_dir, row.path):
+            continue
+        local_sibling = slug_dir / row.path
+        if row.path not in landed_paths and not local_sibling.exists():
+            # The server did not deliver this sibling (e.g. a binary over the
+            # inline ceiling) and it is not already on disk. Do not record it as
+            # synced; the directory is incomplete.
+            missing.append(row.path)
+            continue
+        sha = row.sha256
+        if sha is None:
+            sha = _sibling_sha256(local_sibling) if local_sibling.exists() else ""
+        new_file_states.append(
+            FileState(
+                path=row.path,
+                sha256=sha,
+                executable=row.executable,
+                purpose=row.purpose,
+            )
+        )
+    return new_file_states, missing
+
+
+def _sync_sibling_files(
+    client: GoodeyeClient,
+    detail: Any,
+    slug_dir: Path,
+    old_files: dict[str, FileState],
+) -> tuple[list[FileState], list[str]]:
+    """Fetch, write, and remove sibling files so the skill directory matches the server manifest.
+
+    Returns ``(states, missing)``: the updated ``FileState`` list for the new
+    manifest, and the list of manifest paths the server could not deliver to
+    disk. Called from ``_pull_one`` after the ``SKILL.md`` body has already been
+    written.
+    """
+    # Exclude any synthesized SKILL.md row - the body is already written by the caller.
+    new_manifest = [row for row in detail.files if row.path != "SKILL.md"]
+    new_manifest_paths = {row.path for row in new_manifest}
+
+    # Determine which siblings need fetching (new or changed sha), skipping unsafe paths.
+    to_fetch = [
+        row.path
+        for row in new_manifest
+        if _is_safe_sibling_path(slug_dir, row.path)
+        and _sibling_needs_fetch(row, slug_dir, old_files)
+    ]
+    landed_paths: set[str] = set()
+    if to_fetch:
+        landed_paths = _fetch_and_write_siblings(client, detail.id, slug_dir, to_fetch)
+
+    _remove_dropped_siblings(slug_dir, old_files, new_manifest_paths)
+    return _build_file_states(slug_dir, new_manifest, landed_paths)
+
+
 def _pull_one(
     client: GoodeyeClient,
     state: SyncState,
@@ -745,11 +1110,15 @@ def _pull_one(
 
     # Protect local edits. An entry whose disk copy diverged from the recorded
     # hash, or an untracked pre-existing SKILL.md, is not overwritten unless the
-    # caller forces it. A conflict means both sides moved relative to a recorded
-    # sync point: a tracked entry whose local body diverged AND whose server
-    # token advanced. An untracked file has no recorded base, so it is reported
-    # as plain modified, never a conflict.
-    tracked_edit = entry is not None and is_modified_locally(entry, local_body)
+    # caller forces it. The divergence check spans the whole tree, not just the
+    # SKILL.md body, so an un-pushed edit to a sibling file also blocks an
+    # unforced overwrite (a forced pull can drop server-removed siblings, and a
+    # body-only guard would let it discard a locally edited one). A conflict
+    # means both sides moved relative to a recorded sync point: a tracked entry
+    # whose local tree diverged AND whose server token advanced. An untracked
+    # file has no recorded base, so it is reported as plain modified, never a
+    # conflict.
+    tracked_edit = entry is not None and tree_modified_locally(entry, target)
     untracked_present = entry is None and local_body is not None
     if (tracked_edit or untracked_present) and not force:
         is_conflict = entry is not None and tracked_edit and server_moved(entry, summary)
@@ -761,13 +1130,17 @@ def _pull_one(
             workflow_id=summary.id,
         )
 
-    # Already current: an entry exists, the server has not advanced, and the
-    # local file matches what we recorded. No fetch needed.
+    # Already current: an entry exists, the server has not advanced, the body is
+    # present, the local tree matches what we recorded, and no tracked sibling
+    # was deleted. A missing sibling is not "modified" (so it does not block this
+    # path on its own), but it must still be restored, so it is checked
+    # explicitly here just as the body is via ``local_body is not None``.
     if (
         entry is not None
         and not server_moved(entry, summary)
         and local_body is not None
-        and not is_modified_locally(entry, local_body)
+        and not tree_modified_locally(entry, target)
+        and not tracked_sibling_missing(entry, target)
     ):
         return PullItem(
             slug=slug,
@@ -780,6 +1153,19 @@ def _pull_one(
     assert not isinstance(detail, str)  # JSON path: accept_markdown is False
     path = local_skill_path(target, slug)
     _write_skill_file(path, detail.body)
+
+    slug_dir = local_skill_dir(target, slug)
+    old_files: dict[str, FileState] = {f.path: f for f in (entry.files if entry else [])}
+    new_file_states, missing_siblings = _sync_sibling_files(client, detail, slug_dir, old_files)
+    if missing_siblings:
+        _log.warning(
+            "workflow %s (%s): %d sibling file(s) could not be retrieved and were left out "
+            "of the local directory: %s",
+            slug,
+            detail.id,
+            len(missing_siblings),
+            ", ".join(sorted(missing_siblings)),
+        )
 
     effective_role = detail.effective_role or summary.effective_role or "owner"
     # Record the validated slug (the name we checked against SLUG_RE and used to
@@ -800,12 +1186,13 @@ def _pull_one(
             ],
             effective_role=effective_role,
             read_only=effective_role == "view",
+            files=new_file_states,
         ),
     )
     return PullItem(
         slug=slug,
         target_path=stored_target,
-        action="pulled",
+        action="pulled-incomplete" if missing_siblings else "pulled",
         workflow_id=detail.id,
     )
 
@@ -901,8 +1288,10 @@ def _classify_tracked(
         return base.model_copy(update={"state": "deleted-on-server", "next_action": "resolve"})
 
     base = base.model_copy(update={"server_version": summary.current_version})
-    local_body = read_local_body(target, entry.slug)
-    modified = is_modified_locally(entry, local_body)
+    # Whole-tree drift: a sibling-file edit counts as modified just like a body
+    # edit, so status does not report a directory with un-pushed sibling work as
+    # clean.
+    modified = tree_modified_locally(entry, target)
     moved = server_moved(entry, summary)
 
     if modified and moved:
@@ -1159,6 +1548,14 @@ def push(
     targets = _targets_to_process(config, target_path)
     slug_args = set(slugs)
 
+    # Fetch ignore defaults once so all push candidates share the same spec.
+    ignore_defaults: list[str] | None = None
+    try:
+        cfg = client.get_client_config()
+        ignore_defaults = cfg.ignore_defaults if cfg.ignore_defaults else None
+    except Exception:
+        pass
+
     try:
         candidates = _collect_push_candidates(state, targets, slug_args=slug_args)
         # Group the modified-local copies by workflow identity so a workflow
@@ -1169,7 +1566,14 @@ def push(
             by_workflow.setdefault(candidate.entry.workflow_id, []).append(candidate)
         for group in by_workflow.values():
             result.items.extend(
-                _push_workflow_group(client, state, config, group, scoped=target_path is not None)
+                _push_workflow_group(
+                    client,
+                    state,
+                    config,
+                    group,
+                    scoped=target_path is not None,
+                    ignore_defaults=ignore_defaults,
+                )
             )
         result.items.extend(_untracked_push_items(state, targets, slug_args=slug_args))
     finally:
@@ -1189,9 +1593,10 @@ def _collect_push_candidates(
     """Gather every modified-local tracked entry across the processed targets.
 
     An entry is a candidate when it lives in one of the targets, its slug is in
-    that target's scope and (if given) the slug args, and its on-disk body
-    differs from the recorded hash. Read-only and invalid entries are kept here:
-    they are classified per-entry at upload time, not silently dropped.
+    that target's scope and (if given) the slug args, and its on-disk body OR
+    any tracked sibling differs from the recorded hash. Read-only and invalid
+    entries are kept here: they are classified per-entry at upload time, not
+    silently dropped.
     """
     by_path = {normalize_target_path(t.path): t for t in targets}
     candidates: list[_PushCandidate] = []
@@ -1205,7 +1610,12 @@ def _collect_push_candidates(
         if slug_args and entry.slug not in slug_args:
             continue
         local_body = read_local_body(target, entry.slug)
-        if local_body is None or not is_modified_locally(entry, local_body):
+        if local_body is None:
+            continue
+        # A candidate when the body or any tracked sibling drifted.
+        body_drifted = is_modified_locally(entry, local_body)
+        tree_drifted = tree_modified_locally(entry, target)
+        if not body_drifted and not tree_drifted:
             continue
         candidates.append(_PushCandidate(entry=entry, target=target, body=local_body))
     return candidates
@@ -1218,6 +1628,7 @@ def _push_workflow_group(
     group: list[_PushCandidate],
     *,
     scoped: bool,
+    ignore_defaults: list[str] | None = None,
 ) -> list[PushItem]:
     """Push one workflow's modified copies, keeping multi-target copies coherent.
 
@@ -1253,7 +1664,13 @@ def _push_workflow_group(
     # Either a lone candidate, identical copies, or a single scoped copy: push
     # the first and converge any siblings to the just-pushed body.
     source = writable[0]
-    item = _push_candidate(client, source.entry, target=source.target, body=source.body)
+    item = _push_candidate(
+        client,
+        source.entry,
+        target=source.target,
+        body=source.body,
+        ignore_defaults=ignore_defaults,
+    )
     items.append(item)
     if item.action != "pushed":
         # An upload that did not land (conflict, read-only, invalid) leaves the
@@ -1425,12 +1842,134 @@ def _untracked_push_items(
     return items
 
 
+def build_files_payload(
+    skill_dir: Path,
+    recorded_files: list[FileState] | None,
+    ignore_defaults: list[str] | None,
+) -> tuple[list[dict[str, Any]], list[FileState]]:
+    """Build the ``files`` payload for ``save_workflow`` from a skill directory.
+
+    Walks *skill_dir* recursively.  For each file (POSIX-relative path from the
+    skill root):
+
+    - ``SKILL.md`` is always skipped (it is the body, not a sibling).
+    - Files whose relative path is ignored by the effective ignore spec are
+      skipped *before* reading their bytes, so large cache directories are never
+      read.
+    - The remaining files are checked against *recorded_files*.  When the
+      recorded sha256 for a path matches the on-disk sha256, a reference entry
+      (``{path, sha256, executable}``) is emitted so the server can carry the
+      blob forward without re-uploading it.  Otherwise the file is sent inline:
+      text files as a verbatim UTF-8 ``content`` string, binary files (NUL byte
+      or invalid UTF-8) as a base64-encoded ``content_base64`` string. The two
+      fields are distinct so the server never guesses text-vs-binary; a short
+      text file whose bytes are coincidentally valid base64 (e.g. ``test``)
+      still goes through ``content`` and round-trips losslessly.
+    - A recorded ``purpose`` (the file's role label, which lives only in the
+      index, never on disk) is re-emitted on both reference and inline entries.
+      The push sends a full snapshot, so omitting it would reset the label to
+      null on the server; carrying it forward preserves the designer-set label
+      across a pull-edit-push round-trip. A brand-new local file has no recorded
+      purpose, so the field is simply left off its wire entry.
+
+    Returns ``(payload, states)``, both sorted lexicographically by path:
+    *payload* is the wire list for ``save_workflow``; *states* is the matching
+    ``FileState`` list (each sha256 computed over the raw on-disk bytes) for the
+    local sync index, so a binary file (whose inline ``content_base64`` is
+    base64) is recorded under its true byte sha256 and converges to a reference
+    next push.
+    """
+    from goodeye_cli.ignore import build_ignore_spec
+
+    matcher = build_ignore_spec(skill_dir, ignore_defaults)
+    recorded_map: dict[str, FileState] = {f.path: f for f in (recorded_files or [])}
+
+    entries: list[dict[str, Any]] = []
+    states: list[FileState] = []
+    for abs_path in sorted(skill_dir.rglob("*")):
+        # Skip symlinks. ``is_file()`` and ``read_bytes()`` both follow links, so
+        # an in-tree symlink pointing outside the skill directory would otherwise
+        # upload the target's bytes. This mirrors the containment defense the pull
+        # side applies when writing siblings back to disk.
+        if abs_path.is_symlink():
+            continue
+        if not abs_path.is_file():
+            continue
+        try:
+            rel = abs_path.relative_to(skill_dir).as_posix()
+        except ValueError:
+            continue
+        if rel == "SKILL.md":
+            continue
+        if matcher.is_ignored(rel):
+            continue
+
+        raw = abs_path.read_bytes()
+        sha = hashlib.sha256(raw).hexdigest()
+        local_executable = bool(os.stat(abs_path).st_mode & 0o100)
+
+        recorded = recorded_map.get(rel)
+        unchanged = recorded is not None and recorded.sha256 == sha
+        # For an unchanged file, prefer the recorded executable flag over the
+        # local OS mode. A filesystem that does not preserve the execute bit
+        # (e.g. a Windows checkout or a FAT/exFAT mount) would otherwise report
+        # ``False`` here and silently clear a flag the server already holds as
+        # ``True``. The content is identical, so the recorded metadata is the
+        # authoritative source of truth for the bit. Changed (inline) files
+        # always carry the freshly observed local bit, since their content (and
+        # thus any intended permission) is what is being uploaded.
+        executable = recorded.executable if recorded is not None and unchanged else local_executable
+        # The role label lives only in the index, not on disk, so the recorded
+        # ``purpose`` is the sole source of truth. Carry it forward for every
+        # path that has one (changed or unchanged): the push sends a full
+        # snapshot, so dropping it here would reset the label to null on the
+        # server. A brand-new local file (no recorded row) has no purpose to
+        # send and the field is left off the wire entry entirely.
+        purpose = recorded.purpose if recorded is not None else None
+        states.append(FileState(path=rel, sha256=sha, executable=executable, purpose=purpose))
+
+        if unchanged:
+            # Reference entry: server already has this blob.
+            entry: dict[str, Any] = {"path": rel, "sha256": sha, "executable": executable}
+            if purpose is not None:
+                entry["purpose"] = purpose
+            entries.append(entry)
+        else:
+            # Inline entry. Text and binary use distinct wire fields so the
+            # server never has to guess: ``content`` is verbatim UTF-8 text,
+            # ``content_base64`` is base64-encoded bytes. A short text file
+            # whose content is coincidentally valid base64 (e.g. ``test``) must
+            # go through ``content`` so it round-trips losslessly and its stored
+            # sha matches the on-disk sha recorded below.
+            try:
+                content_str = raw.decode("utf-8")
+                if "\x00" in content_str:
+                    raise ValueError("NUL byte")
+                inline: dict[str, Any] = {
+                    "path": rel,
+                    "content": content_str,
+                    "executable": executable,
+                }
+            except (UnicodeDecodeError, ValueError):
+                inline = {
+                    "path": rel,
+                    "content_base64": base64.b64encode(raw).decode("ascii"),
+                    "executable": executable,
+                }
+            if purpose is not None:
+                inline["purpose"] = purpose
+            entries.append(inline)
+
+    return entries, states
+
+
 def _push_candidate(
     client: GoodeyeClient,
     entry: SyncEntry,
     *,
     target: SyncTarget,
     body: str,
+    ignore_defaults: list[str] | None = None,
 ) -> PushItem:
     """Upload one modified entry's body, mutating the entry in place on success.
 
@@ -1454,6 +1993,10 @@ def _push_candidate(
         return base.model_copy(update={"action": "skipped-invalid", "detail": metadata})
     description, outcome, tags = metadata
 
+    # Build the sibling-file payload for this skill directory.
+    skill_dir = local_skill_dir(target, entry.slug)
+    files_payload, file_states = build_files_payload(skill_dir, list(entry.files), ignore_defaults)
+
     try:
         save_result = client.save_workflow(
             name=entry.slug,
@@ -1464,6 +2007,7 @@ def _push_candidate(
             expected_version_token=entry.version_token,
             source="manual",
             verifiers=_verifier_payload(entry),
+            files=files_payload,
         )
     except Conflict:
         return base.model_copy(
@@ -1494,6 +2038,9 @@ def _push_candidate(
         SyncVerifierBinding(name=v.name, verifier_id=v.verifier_id, version=v.version)
         for v in save_result.verifiers
     ]
+    # Record the file states (each sha256 is over the raw on-disk bytes, so a
+    # binary file converges to a reference on the next push rather than re-uploading).
+    entry.files = file_states
     return base.model_copy(update={"workflow_id": save_result.workflow_id})
 
 
@@ -1501,6 +2048,7 @@ __all__ = [
     "PRESETS",
     "SLUG_RE",
     "SYNC_SCOPES",
+    "FileState",
     "PullAction",
     "PullItem",
     "PullResult",
@@ -1519,6 +2067,7 @@ __all__ = [
     "SyncVerifierBinding",
     "add_target",
     "body_sha256",
+    "build_files_payload",
     "ensure_identity",
     "expand_target_path",
     "find_entry",

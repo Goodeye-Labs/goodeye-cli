@@ -133,7 +133,7 @@ class GoodeyeClient:
         path: str,
         *,
         json_body: dict[str, Any] | None = None,
-        params: dict[str, Any] | None = None,
+        params: dict[str, Any] | list[tuple[str, Any]] | None = None,
         accept: str | None = None,
         follow_redirects: bool = False,
         authenticated: bool = True,
@@ -297,6 +297,7 @@ class GoodeyeClient:
         expected_version_token: str | None = None,
         source: str | None = None,
         verifiers: list[dict[str, Any]] | None = None,
+        files: list[dict[str, Any]] | None = None,
     ) -> WorkflowSaveResult:
         """POST /v1/workflows with the flat ``save_workflow`` payload.
 
@@ -305,6 +306,10 @@ class GoodeyeClient:
         and ``tags`` are top-level discovery facets surfaced by
         ``list_workflows``. ``source`` is an optional provenance marker
         (e.g. 'manual' or 'teach').
+
+        ``files`` controls the workflow file tree. Omit it (``None``) to carry
+        the existing tree forward unchanged. Pass an empty list to clear the
+        tree. Pass a non-empty list to replace the tree with the supplied files.
         """
         payload: dict[str, Any] = {
             "name": name,
@@ -320,6 +325,8 @@ class GoodeyeClient:
             payload["source"] = source
         if verifiers is not None:
             payload["verifiers"] = list(verifiers)
+        if files is not None:
+            payload["files"] = list(files)
         response = self._request("POST", "/v1/workflows", json_body=payload)
         return WorkflowSaveResult.model_validate(response.json())
 
@@ -416,6 +423,35 @@ class GoodeyeClient:
             params=params or None,
         )
         return SafetyCheckResult.model_validate(response.json())
+
+    def get_workflow_file(self, workflow_id: str, path: str) -> dict[str, Any]:
+        """GET /v1/workflows/{workflow_id}/files?path=<path>.
+
+        Returns the file envelope for a single file. The envelope contains
+        ``path``, ``content_kind``, ``size_bytes``, ``executable``, ``purpose``,
+        ``safety_verification_status``, ``execution_gated``, and exactly one of
+        ``content`` (text), ``content_base64`` (small binary), or ``error``.
+        """
+        response = self._request(
+            "GET",
+            f"/v1/workflows/{workflow_id}/files",
+            params={"path": path},
+        )
+        return response.json()
+
+    def get_workflow_files(self, workflow_id: str, paths: list[str]) -> dict[str, Any]:
+        """GET /v1/workflows/{workflow_id}/files?paths=A&paths=B (batch).
+
+        Returns ``{"files": [<envelope>, ...]}``. Envelopes are returned in
+        lexicographic path order. An envelope may carry ``error`` instead of
+        content if the path was not found or exceeds the inline size cap.
+        """
+        response = self._request(
+            "GET",
+            f"/v1/workflows/{workflow_id}/files",
+            params=[("paths", p) for p in paths],
+        )
+        return response.json()
 
     # ----- templates -----
     def list_templates(
