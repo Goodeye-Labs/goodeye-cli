@@ -505,7 +505,7 @@ def test_delete_only_removes_tracked_files_keeps_untracked(
 
 @respx.mock
 def test_delete_rmdirs_only_if_empty(tmp_path: Path, tmp_config_paths: ConfigPaths) -> None:
-    """Slug dir containing only tracked files is rmdir'd; one with an extra untracked file is left."""
+    """Slug dir with only tracked files is rmdir'd; one with an extra untracked file is left."""
     _me_route()
     target_dir = tmp_path / "skills"
     config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
