@@ -238,3 +238,35 @@ def test_binary_sibling_records_raw_sha_and_converges_to_reference(tmp_path: Pat
     bin_entry2 = {e["path"]: e for e in payload2}["data.bin"]
     assert "sha256" in bin_entry2 and "content" not in bin_entry2
     assert bin_entry2["sha256"] == raw_sha
+
+
+def test_push_skips_symlink_pointing_outside_skill_dir(tmp_path: Path) -> None:
+    """An in-tree symlink to a file outside the skill dir is not uploaded.
+
+    ``rglob`` + ``is_file`` follows links, so without a guard the symlink's target
+    bytes would be read and uploaded. The push walk must skip symlinks to match
+    the containment defense the pull side applies when writing siblings."""
+    outside = tmp_path / "secret.txt"
+    outside.write_text("SECRET CONTENTS OUTSIDE THE SKILL", encoding="utf-8")
+
+    skill_dir = tmp_path / "skl"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("body", encoding="utf-8")
+    real_content = "real sibling"
+    (skill_dir / "real.txt").write_text(real_content, encoding="utf-8")
+    # In-tree symlink pointing outside the skill directory.
+    (skill_dir / "leak.txt").symlink_to(outside)
+
+    payload, states = build_files_payload(skill_dir, None, [])
+
+    paths_sent = {e["path"] for e in payload}
+    recorded_paths = {s.path for s in states}
+
+    # The real sibling is uploaded; the symlink is skipped entirely.
+    assert "real.txt" in paths_sent
+    assert "leak.txt" not in paths_sent
+    assert "leak.txt" not in recorded_paths
+
+    # The outside file's contents never appear in any payload entry.
+    serialized = json.dumps(payload)
+    assert "SECRET CONTENTS OUTSIDE THE SKILL" not in serialized

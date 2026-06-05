@@ -744,3 +744,180 @@ def test_unpushed_sibling_edit_blocks_unforced_overwrite(
     # The locally edited sibling survives untouched.
     assert (slug_dir / "helper.sh").exists()
     assert (slug_dir / "helper.sh").read_text(encoding="utf-8") == edited_sibling
+
+
+# ---- undeliverable siblings are not recorded as synced ---------------------
+
+
+@respx.mock
+def test_pull_skips_undeliverable_sibling_and_reports_incomplete(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    """A sibling the server cannot inline is left off disk, not recorded, and flagged.
+
+    The server returns an error envelope (e.g. a binary over the inline ceiling)
+    for one sibling and content for the other. The undeliverable sibling must not
+    be written, must not be recorded in the index as synced (so the next pull
+    retries it), and the pull must report ``pulled-incomplete``.
+    """
+    _me_route()
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+
+    skill_body = "---\nname: big-wf\n---\nbody"
+    small_text = "small helper"
+    big_bin = b"\x00" * 2048  # stands in for a binary over the inline ceiling
+
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response([_summary_dict(id_="wf_big", name="big-wf", token="t1")])
+    )
+    respx.get(f"{SERVER}/v1/workflows/wf_big").mock(
+        return_value=_detail_response(
+            id_="wf_big",
+            name="big-wf",
+            body=skill_body,
+            token="t1",
+            files=[
+                {
+                    "path": "small.txt",
+                    "sha256": _sha256_text(small_text),
+                    "size_bytes": len(small_text),
+                    "executable": False,
+                    "content_kind": "text",
+                },
+                {
+                    "path": "big.bin",
+                    "sha256": _sha256(big_bin),
+                    "size_bytes": len(big_bin),
+                    "executable": False,
+                    "content_kind": "binary",
+                },
+            ],
+        )
+    )
+    respx.get(f"{SERVER}/v1/workflows/wf_big/files").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "files": [
+                    _file_envelope("big.bin", error="binary_too_large_for_inline"),
+                    _file_envelope("small.txt", content=small_text),
+                ]
+            },
+        )
+    )
+
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = pull(
+            client,
+            config,
+            SyncState(),
+            slugs=[],
+            target_path=None,
+            force=False,
+            yes=False,
+            paths=tmp_config_paths,
+        )
+
+    assert [(i.slug, i.action) for i in result.items] == [("big-wf", "pulled-incomplete")]
+
+    slug_dir = target_dir / "big-wf"
+    # The deliverable sibling landed; the undeliverable one did not.
+    assert (slug_dir / "small.txt").read_text(encoding="utf-8") == small_text
+    assert not (slug_dir / "big.bin").exists()
+
+    # The undeliverable sibling is NOT recorded as synced, so a later pull retries
+    # it instead of treating the directory as complete.
+    entry = load_sync_state(tmp_config_paths).entries[0]
+    tracked_paths = {f.path for f in entry.files}
+    assert "small.txt" in tracked_paths
+    assert "big.bin" not in tracked_paths
+
+
+@respx.mock
+def test_pull_recovers_batch_cap_overflow_via_single_fetch(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    """A sibling dropped from the batch for the aggregate cap is recovered alone.
+
+    The batch response marks one path ``batch_response_cap_exceeded``; the client
+    must re-fetch that path through the single-file route (no aggregate cap) so it
+    still lands on disk and is recorded as synced.
+    """
+    _me_route()
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+
+    skill_body = "---\nname: cap-wf\n---\nbody"
+    first_text = "first sibling"
+    overflow_text = "overflow sibling content that the batch could not inline"
+
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response([_summary_dict(id_="wf_cap", name="cap-wf", token="t1")])
+    )
+    respx.get(f"{SERVER}/v1/workflows/wf_cap").mock(
+        return_value=_detail_response(
+            id_="wf_cap",
+            name="cap-wf",
+            body=skill_body,
+            token="t1",
+            files=[
+                {
+                    "path": "a.txt",
+                    "sha256": _sha256_text(first_text),
+                    "size_bytes": len(first_text),
+                    "executable": False,
+                    "content_kind": "text",
+                },
+                {
+                    "path": "b.txt",
+                    "sha256": _sha256_text(overflow_text),
+                    "size_bytes": len(overflow_text),
+                    "executable": False,
+                    "content_kind": "text",
+                },
+            ],
+        )
+    )
+
+    def _files_side_effect(request: httpx.Request) -> httpx.Response:
+        params = request.url.params
+        if "path" in params:
+            # Single-file fallback route: deliver the overflowed file with content.
+            assert params["path"] == "b.txt"
+            return httpx.Response(200, json=_file_envelope("b.txt", content=overflow_text))
+        # Batch route: first file inlined, second over the aggregate budget.
+        return httpx.Response(
+            200,
+            json={
+                "files": [
+                    _file_envelope("a.txt", content=first_text),
+                    _file_envelope("b.txt", error="batch_response_cap_exceeded"),
+                ]
+            },
+        )
+
+    respx.get(f"{SERVER}/v1/workflows/wf_cap/files").mock(side_effect=_files_side_effect)
+
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = pull(
+            client,
+            config,
+            SyncState(),
+            slugs=[],
+            target_path=None,
+            force=False,
+            yes=False,
+            paths=tmp_config_paths,
+        )
+
+    # The fallback recovered the overflowed file, so the pull is complete.
+    assert [(i.slug, i.action) for i in result.items] == [("cap-wf", "pulled")]
+
+    slug_dir = target_dir / "cap-wf"
+    assert (slug_dir / "a.txt").read_text(encoding="utf-8") == first_text
+    assert (slug_dir / "b.txt").read_text(encoding="utf-8") == overflow_text
+
+    entry = load_sync_state(tmp_config_paths).entries[0]
+    tracked_paths = {f.path for f in entry.files}
+    assert tracked_paths == {"a.txt", "b.txt"}

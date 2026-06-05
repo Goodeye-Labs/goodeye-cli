@@ -529,6 +529,7 @@ def server_moved(entry: SyncEntry, summary: WorkflowSummary) -> bool:
 
 PullAction = Literal[
     "pulled",
+    "pulled-incomplete",
     "up-to-date",
     "skipped-modified",
     "skipped-conflict",
@@ -892,24 +893,71 @@ def _sibling_needs_fetch(
     return not (existing is not None and existing.sha256 == row.sha256 and local_sibling.exists())
 
 
+# Maximum number of paths sent in a single batch file fetch. The server caps
+# the aggregate inline bytes per batch response (paths that overflow come back
+# as references rather than content), and it has no hard cap on the request path
+# count, so the client bounds the request itself to keep any single call modest.
+# Paths that overflow the server's aggregate budget are recovered one at a time
+# through the single-file route, which carries no aggregate cap.
+_FETCH_BATCH_PATHS = 100
+
+
+def _write_one_envelope(slug_dir: Path, workflow_id: str, envelope: dict[str, Any]) -> str | None:
+    """Write a single file envelope to disk, returning its path on success.
+
+    Returns ``None`` (without writing) when the path is unsafe or the envelope
+    carries an ``error`` / has no content. Callers use the returned path to track
+    exactly which siblings landed on disk.
+    """
+    env_path = envelope.get("path", "")
+    if not _is_safe_sibling_path(slug_dir, env_path):
+        _log.warning("skipping unsafe path %r in file envelope for %s", env_path, workflow_id)
+        return None
+    if "error" in envelope or not ("content" in envelope or "content_base64" in envelope):
+        return None
+    _write_sibling_file(slug_dir / env_path, envelope)
+    return env_path
+
+
 def _fetch_and_write_siblings(
     client: GoodeyeClient,
     workflow_id: str,
     slug_dir: Path,
     to_fetch: list[str],
-) -> None:
+) -> set[str]:
     """Batch-fetch ``to_fetch`` paths and write each file to disk.
 
-    Uses ``get_workflow_files`` for a uniform ``{"files": [...]}`` response shape.
-    Unsafe envelope paths and error envelopes are skipped with a warning.
+    Chunks the request so no single batch call sends an unbounded path list, and
+    recovers any path the server returns as ``batch_response_cap_exceeded`` (its
+    content would have pushed the batch past the aggregate inline budget) by
+    re-fetching it alone through the single-file route, which has no aggregate
+    cap. Unsafe envelope paths and remaining error envelopes are skipped with a
+    warning. Returns the set of paths actually written to disk so the caller can
+    avoid recording a skipped file as synced.
     """
-    batch_result = client.get_workflow_files(workflow_id, to_fetch)
-    for envelope in batch_result.get("files", []):
-        env_path = envelope.get("path", "")
-        if not _is_safe_sibling_path(slug_dir, env_path):
-            _log.warning("skipping unsafe path %r in file envelope for %s", env_path, workflow_id)
-            continue
-        _write_sibling_file(slug_dir / env_path, envelope)
+    written: set[str] = set()
+    for start in range(0, len(to_fetch), _FETCH_BATCH_PATHS):
+        chunk = to_fetch[start : start + _FETCH_BATCH_PATHS]
+        batch_result = client.get_workflow_files(workflow_id, chunk)
+        for envelope in batch_result.get("files", []):
+            if envelope.get("error") == "batch_response_cap_exceeded":
+                # The file was dropped from the batch to honor the aggregate
+                # inline budget. Re-fetch it on its own, where no aggregate cap
+                # applies, so a large-but-individually-fetchable sibling still
+                # lands on disk instead of being silently skipped.
+                env_path = envelope.get("path", "")
+                if not _is_safe_sibling_path(slug_dir, env_path):
+                    _log.warning(
+                        "skipping unsafe path %r in file envelope for %s", env_path, workflow_id
+                    )
+                    continue
+                single = client.get_workflow_file(workflow_id, env_path)
+                landed = _write_one_envelope(slug_dir, workflow_id, single)
+            else:
+                landed = _write_one_envelope(slug_dir, workflow_id, envelope)
+            if landed is not None:
+                written.add(landed)
+    return written
 
 
 def _remove_dropped_siblings(
@@ -928,18 +976,38 @@ def _remove_dropped_siblings(
                     _log.warning("could not remove dropped sibling %s: %s", dropped_local, exc)
 
 
-def _build_file_states(slug_dir: Path, new_manifest: list[Any]) -> list[FileState]:
-    """Build the updated ``FileState`` list from the server manifest rows."""
+def _build_file_states(
+    slug_dir: Path, new_manifest: list[Any], landed_paths: set[str]
+) -> tuple[list[FileState], list[str]]:
+    """Build the updated ``FileState`` list from the server manifest rows.
+
+    Only records a path as synced when it is actually present on disk: a path is
+    on disk when it was just written (in ``landed_paths``) or it was already
+    current and skipped from the fetch (its local copy still exists). A path the
+    server could not deliver (over the inline binary ceiling, or otherwise
+    missing on disk) is left out of the recorded state so the next pull retries
+    it, and is reported in the returned ``missing`` list so the caller can flag
+    an incomplete pull instead of falsely reporting success.
+
+    Returns ``(states, missing)``.
+    """
     new_file_states: list[FileState] = []
+    missing: list[str] = []
     for row in new_manifest:
         if not _is_safe_sibling_path(slug_dir, row.path):
             continue
+        local_sibling = slug_dir / row.path
+        if row.path not in landed_paths and not local_sibling.exists():
+            # The server did not deliver this sibling (e.g. a binary over the
+            # inline ceiling) and it is not already on disk. Do not record it as
+            # synced; the directory is incomplete.
+            missing.append(row.path)
+            continue
         sha = row.sha256
         if sha is None:
-            local_sibling = slug_dir / row.path
             sha = _sibling_sha256(local_sibling) if local_sibling.exists() else ""
         new_file_states.append(FileState(path=row.path, sha256=sha, executable=row.executable))
-    return new_file_states
+    return new_file_states, missing
 
 
 def _sync_sibling_files(
@@ -947,11 +1015,13 @@ def _sync_sibling_files(
     detail: Any,
     slug_dir: Path,
     old_files: dict[str, FileState],
-) -> list[FileState]:
+) -> tuple[list[FileState], list[str]]:
     """Fetch, write, and remove sibling files so the skill directory matches the server manifest.
 
-    Returns the updated ``FileState`` list for the new manifest. Called from
-    ``_pull_one`` after the ``SKILL.md`` body has already been written.
+    Returns ``(states, missing)``: the updated ``FileState`` list for the new
+    manifest, and the list of manifest paths the server could not deliver to
+    disk. Called from ``_pull_one`` after the ``SKILL.md`` body has already been
+    written.
     """
     # Exclude any synthesized SKILL.md row - the body is already written by the caller.
     new_manifest = [row for row in detail.files if row.path != "SKILL.md"]
@@ -964,11 +1034,12 @@ def _sync_sibling_files(
         if _is_safe_sibling_path(slug_dir, row.path)
         and _sibling_needs_fetch(row, slug_dir, old_files)
     ]
+    landed_paths: set[str] = set()
     if to_fetch:
-        _fetch_and_write_siblings(client, detail.id, slug_dir, to_fetch)
+        landed_paths = _fetch_and_write_siblings(client, detail.id, slug_dir, to_fetch)
 
     _remove_dropped_siblings(slug_dir, old_files, new_manifest_paths)
-    return _build_file_states(slug_dir, new_manifest)
+    return _build_file_states(slug_dir, new_manifest, landed_paths)
 
 
 def _pull_one(
@@ -1032,7 +1103,16 @@ def _pull_one(
 
     slug_dir = local_skill_dir(target, slug)
     old_files: dict[str, FileState] = {f.path: f for f in (entry.files if entry else [])}
-    new_file_states = _sync_sibling_files(client, detail, slug_dir, old_files)
+    new_file_states, missing_siblings = _sync_sibling_files(client, detail, slug_dir, old_files)
+    if missing_siblings:
+        _log.warning(
+            "workflow %s (%s): %d sibling file(s) could not be retrieved and were left out "
+            "of the local directory: %s",
+            slug,
+            detail.id,
+            len(missing_siblings),
+            ", ".join(sorted(missing_siblings)),
+        )
 
     effective_role = detail.effective_role or summary.effective_role or "owner"
     # Record the validated slug (the name we checked against SLUG_RE and used to
@@ -1059,7 +1139,7 @@ def _pull_one(
     return PullItem(
         slug=slug,
         target_path=stored_target,
-        action="pulled",
+        action="pulled-incomplete" if missing_siblings else "pulled",
         workflow_id=detail.id,
     )
 
@@ -1744,6 +1824,12 @@ def build_files_payload(
     entries: list[dict[str, Any]] = []
     states: list[FileState] = []
     for abs_path in sorted(skill_dir.rglob("*")):
+        # Skip symlinks. ``is_file()`` and ``read_bytes()`` both follow links, so
+        # an in-tree symlink pointing outside the skill directory would otherwise
+        # upload the target's bytes. This mirrors the containment defense the pull
+        # side applies when writing siblings back to disk.
+        if abs_path.is_symlink():
+            continue
         if not abs_path.is_file():
             continue
         try:
