@@ -150,12 +150,20 @@ class WorkflowFileEntry(_WireBase):
 
 
 class FileEntryWire(_WireBase):
-    """One file entry in the POST /v1/workflows `files` array."""
+    """One file entry in the POST /v1/workflows `files` array.
+
+    An inline entry carries exactly one content channel: ``content`` for
+    verbatim UTF-8 text, or ``content_base64`` for base64-encoded bytes
+    (binary siblings, or text whose bytes the CLI could not send through
+    ``content``). A reference entry carries ``sha256`` instead so the
+    server reuses an existing blob without a re-upload.
+    """
 
     path: str
     executable: bool = False
     purpose: str | None = None
     content: str | None = None
+    content_base64: str | None = None
     sha256: str | None = None
 
 
