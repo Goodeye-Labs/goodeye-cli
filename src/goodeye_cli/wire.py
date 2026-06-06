@@ -597,3 +597,87 @@ class InvitationEnvelope(_WireBase):
     invitation_id: str
     kind: str
     expires_at: datetime
+
+
+# ----- image generators -----
+
+
+class ImageGeneratorSummary(_WireBase):
+    """One row from GET /v1/image-generators (list)."""
+
+    generator_id: str
+    name: str
+    description: str = ""
+    current_version: int
+    version_token: str
+    status: str
+    scope: str = "user"
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class ImageGeneratorList(_WireBase):
+    items: list[ImageGeneratorSummary]
+    next_cursor: str | None = None
+
+
+class ImageGeneratorDetail(_WireBase):
+    """Full version detail from GET /v1/image-generators/{id} or POST /v1/image-generators."""
+
+    generator_id: str
+    name: str
+    description: str = ""
+    current_version: int
+    version: int
+    version_token: str
+    status: str
+    scope: str = "user"
+    provider: str = "fal"
+    model: str
+    generation_contract: str
+    default_params: dict[str, Any] = Field(default_factory=dict)
+    config_hash: str
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class ImageGeneratorDeployResult(_WireBase):
+    """Response from POST /v1/image-generators."""
+
+    generator_id: str
+    name: str
+    description: str = ""
+    current_version: int
+    version: int
+    version_token: str
+    status: str
+    scope: str = "user"
+    provider: str = "fal"
+    model: str
+    generation_contract: str
+    config_hash: str
+    created_at: str | None = None
+
+
+class ImageGeneratorRevokeResult(_WireBase):
+    generator_id: str
+    name: str
+    revoked: bool
+
+
+class ImageGenerationRunResult(_WireBase):
+    """Response from POST /v1/image-generators/{id}/runs."""
+
+    run_id: str
+    model_tier_or_model: str
+    image_url: str | None = None
+    image_urls: list[str] = Field(default_factory=list)
+    width: int | None = None
+    height: int | None = None
+    num_images: int = 1
+    cost_usd: str = "0"
+    duration_ms: int | None = None
+    status: str
+    created_at: str
+    error_code: str | None = None
+    error_message: str | None = None
