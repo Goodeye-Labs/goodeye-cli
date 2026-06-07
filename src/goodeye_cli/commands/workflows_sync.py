@@ -486,7 +486,8 @@ def push(
 ) -> None:
     """Push locally edited workflows back to the registry.
 
-    Only workflows whose on-disk SKILL.md differs from the last sync are sent.
+    Only workflows whose on-disk SKILL.md differs from the last sync are sent;
+    each send includes the full directory tree, not just SKILL.md.
     Each upload is optimistic-locked: if the registry moved since the last sync,
     the workflow is reported as a conflict and left untouched, and you reconcile
     with `goodeye workflows sync pull` before pushing again. Renaming through
