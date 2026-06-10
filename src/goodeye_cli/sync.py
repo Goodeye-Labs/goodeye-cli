@@ -246,6 +246,126 @@ def list_targets(config: SyncConfig) -> list[SyncTarget]:
     return list(config.targets)
 
 
+def _find_target_by_path(config: SyncConfig, path: str) -> SyncTarget | None:
+    """Return the target whose expanded path matches ``path``, or None."""
+    expanded = expand_target_path(path)
+    for target in config.targets:
+        if expand_target_path(target.path) == expanded:
+            return target
+    return None
+
+
+def append_to_allowlist(
+    config: SyncConfig,
+    *,
+    path: str,
+    entries: list[str],
+    explicit_scope: SyncScope | None = None,
+) -> tuple[list[str], list[str]]:
+    """Append ``entries`` to the ``selected`` allowlist of an existing target.
+
+    Looks up the target by ``path`` (normalized). The target must exist
+    (``NotFound`` otherwise) and must have ``scope=selected`` (``ValidationFailed``
+    otherwise). If the caller supplies an ``explicit_scope`` that differs from the
+    target's actual scope, raises ``Conflict``.
+
+    Deduplicates: entries already present are collected as ``already_present`` and
+    skipped; only genuinely new entries are appended. Order of existing entries is
+    preserved; new entries are appended in the order supplied.
+
+    Returns ``(added, already_present)``.
+    """
+    stored_path = normalize_target_path(path)
+    target = _find_target_by_path(config, path)
+    if target is None:
+        raise NotFound(
+            slug="not_found",
+            message=f"No sync target configured for {stored_path}.",
+            hint="Add it first with `goodeye workflows sync target add`.",
+        )
+
+    if explicit_scope is not None and explicit_scope != target.scope:
+        raise Conflict(
+            slug="conflict",
+            message=f"A sync target at {stored_path} already has scope {target.scope}.",
+            hint=(
+                f"Remove it first with `goodeye workflows sync target remove {stored_path}`, "
+                "then add it with the scope you want."
+            ),
+        )
+
+    if target.scope != "selected":
+        raise ValidationFailed(
+            slug="validation_error",
+            message=(
+                f"--only manages the selected allowlist; the target at {stored_path} "
+                f"has scope {target.scope}."
+            ),
+            hint=(
+                "Use --scope selected when creating a target with an allowlist, "
+                "or remove this target and recreate it with --scope selected."
+            ),
+        )
+
+    existing_set = set(target.selected)
+    added: list[str] = []
+    already_present: list[str] = []
+    for entry in entries:
+        if entry in existing_set:
+            already_present.append(entry)
+        else:
+            added.append(entry)
+            existing_set.add(entry)
+
+    target.selected = list(target.selected) + added
+    return added, already_present
+
+
+def prune_from_allowlist(
+    config: SyncConfig,
+    *,
+    path: str,
+    entries: list[str],
+) -> tuple[list[str], list[str]]:
+    """Remove ``entries`` from the ``selected`` allowlist of an existing target.
+
+    The target must exist (``NotFound`` otherwise) and must have
+    ``scope=selected`` (``ValidationFailed`` otherwise). Entries not present in
+    the allowlist are reported as ``absent`` and skipped without error.
+
+    Returns ``(removed, absent)``.
+    """
+    stored_path = normalize_target_path(path)
+    target = _find_target_by_path(config, path)
+    if target is None:
+        raise NotFound(
+            slug="not_found",
+            message=f"No sync target configured for {stored_path}.",
+            hint="List targets with `goodeye workflows sync target list`.",
+        )
+
+    if target.scope != "selected":
+        raise ValidationFailed(
+            slug="validation_error",
+            message=(
+                f"--only manages the selected allowlist; the target at {stored_path} "
+                f"has scope {target.scope}."
+            ),
+            hint=(
+                "Only targets with scope=selected carry an allowlist. "
+                "Without --only, `target remove` removes the whole target."
+            ),
+        )
+
+    current_set = set(target.selected)
+    removed = [e for e in entries if e in current_set]
+    absent = [e for e in entries if e not in current_set]
+
+    remove_set = set(removed)
+    target.selected = [e for e in target.selected if e not in remove_set]
+    return removed, absent
+
+
 # ----- sync-state index models -----
 
 
@@ -2066,6 +2186,7 @@ __all__ = [
     "SyncTarget",
     "SyncVerifierBinding",
     "add_target",
+    "append_to_allowlist",
     "body_sha256",
     "build_files_payload",
     "ensure_identity",
@@ -2078,6 +2199,7 @@ __all__ = [
     "local_skill_dir",
     "local_skill_path",
     "normalize_target_path",
+    "prune_from_allowlist",
     "pull",
     "read_local_body",
     "remove_target",

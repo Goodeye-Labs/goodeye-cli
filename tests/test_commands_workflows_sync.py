@@ -165,6 +165,7 @@ def test_target_add_rejects_unknown_scope(tmp_config_paths: ConfigPaths, monkeyp
 
 
 def test_target_add_duplicate_raises_conflict(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    # Without --only: recreating a whole target over an existing one is a conflict.
     _redirect_config(monkeypatch, tmp_config_paths)
     runner = CliRunner()
     first = runner.invoke(app, ["workflows", "sync", "target", "add", "~/skills"])
@@ -1125,3 +1126,245 @@ def test_push_diverged_hint(tmp_config_paths: ConfigPaths, monkeypatch, tmp_path
     assert save_route.call_count == 0
     assert "Next:" in result.output
     assert "goodeye workflows sync push --target" in result.output
+
+
+# ----- target add --only: allowlist append -----
+
+
+def test_target_add_only_appends_to_existing_selected_target_default_mode(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    # Create a selected target with one entry.
+    create = runner.invoke(
+        app,
+        ["workflows", "sync", "target", "add", "~/skills", "--scope", "selected", "--only", "a"],
+    )
+    assert create.exit_code == 0, create.output
+
+    # Append two more entries (one new, one already present).
+    result = runner.invoke(
+        app,
+        [
+            "workflows",
+            "sync",
+            "target",
+            "add",
+            "~/skills",
+            "--only",
+            "b",
+            "--only",
+            "a",
+            "--table",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "Added 1 workflow" in result.output
+    assert "~/skills" in result.output
+    # Pull hint must appear.
+    assert "goodeye workflows sync pull" in result.output
+
+
+def test_target_add_only_appends_to_existing_selected_target_json_mode(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    # Create a selected target.
+    runner.invoke(
+        app,
+        ["workflows", "sync", "target", "add", "~/skills", "--scope", "selected", "--only", "x"],
+    )
+    # Append via --only in JSON mode.
+    result = runner.invoke(
+        app,
+        ["workflows", "sync", "target", "add", "~/skills", "--only", "y", "--only", "x"],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["added"] == ["y"]
+    assert payload["already_present"] == ["x"]
+    assert payload["path"] == "~/skills"
+    assert payload["scope"] == "selected"
+
+
+def test_target_add_only_all_already_present_prints_nothing_to_add(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    runner.invoke(
+        app,
+        ["workflows", "sync", "target", "add", "~/skills", "--scope", "selected", "--only", "a"],
+    )
+    result = runner.invoke(
+        app,
+        ["workflows", "sync", "target", "add", "~/skills", "--only", "a", "--table"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "already in the allowlist" in result.output
+    assert "nothing to add" in result.output
+
+
+def test_target_add_only_against_non_selected_target_raises_validation_failed(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    runner.invoke(
+        app,
+        ["workflows", "sync", "target", "add", "~/skills", "--scope", "owned"],
+    )
+    result = runner.invoke(
+        app,
+        ["workflows", "sync", "target", "add", "~/skills", "--only", "a"],
+    )
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ValidationFailed)
+
+
+def test_target_add_only_with_conflicting_explicit_scope_raises_conflict(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    runner.invoke(
+        app,
+        ["workflows", "sync", "target", "add", "~/skills", "--scope", "selected", "--only", "a"],
+    )
+    result = runner.invoke(
+        app,
+        ["workflows", "sync", "target", "add", "~/skills", "--scope", "owned", "--only", "b"],
+    )
+    assert result.exit_code != 0
+    assert isinstance(result.exception, Conflict)
+
+
+# ----- target remove --only: allowlist prune -----
+
+
+def test_target_remove_only_prunes_entries_table_mode(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    runner.invoke(
+        app,
+        [
+            "workflows",
+            "sync",
+            "target",
+            "add",
+            "~/skills",
+            "--scope",
+            "selected",
+            "--only",
+            "a",
+            "--only",
+            "b",
+            "--only",
+            "c",
+        ],
+    )
+    result = runner.invoke(
+        app,
+        [
+            "workflows",
+            "sync",
+            "target",
+            "remove",
+            "~/skills",
+            "--only",
+            "a",
+            "--only",
+            "c",
+            "--table",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "Removed 2 workflow" in result.output
+    assert "~/skills" in result.output
+
+
+def test_target_remove_only_prunes_entries_json_mode(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    runner.invoke(
+        app,
+        [
+            "workflows",
+            "sync",
+            "target",
+            "add",
+            "~/skills",
+            "--scope",
+            "selected",
+            "--only",
+            "a",
+            "--only",
+            "b",
+        ],
+    )
+    result = runner.invoke(
+        app,
+        ["workflows", "sync", "target", "remove", "~/skills", "--only", "a", "--only", "x"],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["removed"] == ["a"]
+    assert payload["absent"] == ["x"]
+    assert payload["path"] == "~/skills"
+
+
+def test_target_remove_only_none_matched_prints_not_in_allowlist(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    runner.invoke(
+        app,
+        ["workflows", "sync", "target", "add", "~/skills", "--scope", "selected", "--only", "a"],
+    )
+    result = runner.invoke(
+        app,
+        ["workflows", "sync", "target", "remove", "~/skills", "--only", "z", "--table"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "not in the allowlist" in result.output
+
+
+def test_target_remove_without_only_still_removes_whole_target(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    # Existing test for whole-target removal must still pass unchanged.
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    add_result = runner.invoke(app, ["workflows", "sync", "target", "add", "~/skills"])
+    assert json.loads(add_result.output)["path"] == "~/skills"
+    result = runner.invoke(app, ["workflows", "sync", "target", "remove", "~/foo/../skills"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["removed"] is True
+    assert payload["path"] == "~/skills"
+    list_result = runner.invoke(app, ["workflows", "sync", "target", "list"])
+    assert list_result.output == '{"items":[]}\n'
+
+
+def test_target_remove_only_against_non_selected_target_raises_validation_failed(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    runner.invoke(
+        app,
+        ["workflows", "sync", "target", "add", "~/skills", "--scope", "owned"],
+    )
+    result = runner.invoke(
+        app,
+        ["workflows", "sync", "target", "remove", "~/skills", "--only", "a"],
+    )
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ValidationFailed)
