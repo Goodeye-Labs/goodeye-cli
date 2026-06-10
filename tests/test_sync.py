@@ -23,6 +23,7 @@ from goodeye_cli.sync import (
     SyncTarget,
     SyncVerifierBinding,
     add_target,
+    append_to_allowlist,
     body_sha256,
     ensure_identity,
     expand_target_path,
@@ -34,6 +35,7 @@ from goodeye_cli.sync import (
     local_skill_dir,
     local_skill_path,
     normalize_target_path,
+    prune_from_allowlist,
     pull,
     push,
     read_local_body,
@@ -152,14 +154,21 @@ def test_add_target_only_requires_selected_scope() -> None:
 
 
 def test_add_target_duplicate_path_raises_conflict() -> None:
+    # Without --only: creating a whole target over an existing one is a conflict.
     config = SyncConfig()
     add_target(config, path="~/skills", preset=None, scope="owned", only=[])
-    with pytest.raises(Conflict):
+    with pytest.raises(Conflict) as exc_info:
         add_target(config, path="~/skills", preset=None, scope="all", only=[])
+    hint = exc_info.value.hint or ""
+    assert "--only" in hint, "hint should mention --only"
+    assert (
+        "edit the sync config by hand" not in hint
+    ), "hint must not say 'edit the sync config by hand'"
 
 
 def test_add_target_duplicate_detected_across_path_forms() -> None:
-    # The ``~`` form and the equivalent absolute form must dedupe to one target.
+    # The ``~`` form and the equivalent absolute form must dedupe to one target
+    # when no --only is supplied (whole-target recreate path).
     config = SyncConfig()
     add_target(config, path="~/skills", preset=None, scope="owned", only=[])
     absolute = str(Path.home() / "skills")
@@ -3111,3 +3120,139 @@ def test_push_item_model_is_constructible() -> None:
     assert item.detail is None
     flagged = PushItem(slug="beta", target_path="~/skills", action="conflict", detail="pull first")
     assert flagged.detail == "pull first"
+
+
+# ----- allowlist append + prune -----
+
+
+def test_append_to_allowlist_adds_new_entries() -> None:
+    config = SyncConfig()
+    add_target(config, path="~/skills", preset=None, scope="selected", only=["existing"])
+    added, already_present = append_to_allowlist(
+        config, path="~/skills", entries=["new-a", "new-b"]
+    )
+    assert added == ["new-a", "new-b"]
+    assert already_present == []
+    target = config.targets[0]
+    assert target.selected == ["existing", "new-a", "new-b"]
+
+
+def test_append_to_allowlist_dedupes_already_present() -> None:
+    config = SyncConfig()
+    add_target(config, path="~/skills", preset=None, scope="selected", only=["existing"])
+    added, already_present = append_to_allowlist(
+        config, path="~/skills", entries=["existing", "new-one"]
+    )
+    assert added == ["new-one"]
+    assert already_present == ["existing"]
+    target = config.targets[0]
+    # Order: existing entry stays first, new entry appended.
+    assert target.selected == ["existing", "new-one"]
+
+
+def test_append_to_allowlist_all_already_present() -> None:
+    config = SyncConfig()
+    add_target(config, path="~/skills", preset=None, scope="selected", only=["a", "b"])
+    added, already_present = append_to_allowlist(config, path="~/skills", entries=["a", "b"])
+    assert added == []
+    assert already_present == ["a", "b"]
+    assert config.targets[0].selected == ["a", "b"]
+
+
+def test_append_to_allowlist_owned_scope_raises_validation_failed() -> None:
+    config = SyncConfig()
+    add_target(config, path="~/skills", preset=None, scope="owned", only=[])
+    with pytest.raises(ValidationFailed, match="selected allowlist"):
+        append_to_allowlist(config, path="~/skills", entries=["new"])
+
+
+def test_append_to_allowlist_all_scope_raises_validation_failed() -> None:
+    config = SyncConfig()
+    add_target(config, path="~/skills", preset=None, scope="all", only=[])
+    with pytest.raises(ValidationFailed, match="selected allowlist"):
+        append_to_allowlist(config, path="~/skills", entries=["new"])
+
+
+def test_append_to_allowlist_explicit_conflicting_scope_raises_conflict() -> None:
+    config = SyncConfig()
+    add_target(config, path="~/skills", preset=None, scope="selected", only=["a"])
+    with pytest.raises(Conflict, match="already has scope"):
+        append_to_allowlist(config, path="~/skills", entries=["b"], explicit_scope="owned")
+
+
+def test_append_to_allowlist_not_found_raises_not_found() -> None:
+    config = SyncConfig()
+    with pytest.raises(NotFound):
+        append_to_allowlist(config, path="~/skills", entries=["new"])
+
+
+def test_prune_from_allowlist_drops_named_entries() -> None:
+    config = SyncConfig()
+    add_target(config, path="~/skills", preset=None, scope="selected", only=["a", "b", "c"])
+    removed, absent = prune_from_allowlist(config, path="~/skills", entries=["a", "c"])
+    assert removed == ["a", "c"]
+    assert absent == []
+    assert config.targets[0].selected == ["b"]
+
+
+def test_prune_from_allowlist_absent_entries_reported_not_error() -> None:
+    config = SyncConfig()
+    add_target(config, path="~/skills", preset=None, scope="selected", only=["a"])
+    removed, absent = prune_from_allowlist(config, path="~/skills", entries=["a", "not-there"])
+    assert removed == ["a"]
+    assert absent == ["not-there"]
+    assert config.targets[0].selected == []
+
+
+def test_prune_from_allowlist_all_absent_is_no_op() -> None:
+    config = SyncConfig()
+    add_target(config, path="~/skills", preset=None, scope="selected", only=["a", "b"])
+    removed, absent = prune_from_allowlist(config, path="~/skills", entries=["x", "y"])
+    assert removed == []
+    assert absent == ["x", "y"]
+    assert config.targets[0].selected == ["a", "b"]
+
+
+def test_prune_from_allowlist_non_selected_target_raises_validation_failed() -> None:
+    config = SyncConfig()
+    add_target(config, path="~/skills", preset=None, scope="owned", only=[])
+    with pytest.raises(ValidationFailed, match="selected allowlist"):
+        prune_from_allowlist(config, path="~/skills", entries=["a"])
+
+
+def test_prune_from_allowlist_not_found_raises_not_found() -> None:
+    config = SyncConfig()
+    with pytest.raises(NotFound):
+        prune_from_allowlist(config, path="~/skills", entries=["a"])
+
+
+def test_remove_target_whole_target_still_works() -> None:
+    # remove_target (no allowlist op) must still remove the whole target unchanged.
+    config = SyncConfig()
+    add_target(config, path="~/skills", preset=None, scope="selected", only=["a", "b"])
+    assert remove_target(config, "~/skills") is True
+    assert config.targets == []
+
+
+def test_prune_from_allowlist_deduplicates_input_entries() -> None:
+    # Duplicate entries in the caller-supplied list must not produce duplicate
+    # values in removed/absent. Each entry appears at most once in either list.
+    config = SyncConfig()
+    add_target(config, path="~/skills", preset=None, scope="selected", only=["a", "b"])
+    removed, absent = prune_from_allowlist(config, path="~/skills", entries=["a", "a", "z", "z"])
+    assert removed == ["a"]
+    assert absent == ["z"]
+    assert config.targets[0].selected == ["b"]
+
+
+def test_append_to_allowlist_deduplicates_input_entries() -> None:
+    # Duplicate entries in the caller-supplied list must not produce duplicates.
+    # A repeated new entry must appear once in added, not also in already_present.
+    config = SyncConfig()
+    add_target(config, path="~/skills", preset=None, scope="selected", only=["existing"])
+    added, already_present = append_to_allowlist(
+        config, path="~/skills", entries=["new", "new", "existing", "existing"]
+    )
+    assert added == ["new"]
+    assert already_present == ["existing"]
+    assert config.targets[0].selected == ["existing", "new"]

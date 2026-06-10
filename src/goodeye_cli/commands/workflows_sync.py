@@ -9,6 +9,8 @@ it wrote in the local index.
 
 from __future__ import annotations
 
+import contextlib
+
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -137,34 +139,102 @@ def target_add(
         "--preset",
         help="Named target directory (claude, agents, or cursor). Use instead of a path.",
     ),
-    scope: str = typer.Option(
-        "owned",
+    scope: str | None = typer.Option(
+        None,
         "--scope",
         help="Which workflows to mirror here: owned, all, or selected.",
     ),
     only: list[str] = typer.Option(
         [],
         "--only",
-        help=("Slug or glob to include (repeatable). Only valid with --scope selected."),
+        help=(
+            "Workflow slug or glob (repeatable). With an existing target it is appended to "
+            "the selected allowlist (duplicates ignored). Only valid with --scope selected."
+        ),
     ),
     json_output: bool = typer.Option(False, "--json", help="Print the added target as JSON."),
     table_output: bool = typer.Option(False, "--table", help="Print the added target as a table."),
 ) -> None:
-    """Add a local sync target.
+    """Add a sync target, or add workflows to an existing target's selected allowlist.
 
-    Provide either a directory path or a --preset, not both. This is a local
-    configuration step: it does not contact the registry.
+    Without --only, creates a new target directory. With --only (and --scope
+    selected), manages individual workflows: a missing target is created with
+    them allowlisted; an existing target has them appended (duplicates ignored).
+    This is local configuration: it does not contact the registry. Run
+    `goodeye workflows sync pull` afterward to materialize them.
     """
     mode = resolve_output_mode(json_output=json_output, table_output=table_output)
-    coerced_scope = _coerce_scope(scope)
+    only_list = list(only)
     paths = get_config_paths()
     config = sync.load_sync_config(paths)
+
+    # Resolve the raw path or preset to a stored path for existence check.
+    # An unknown preset raises ValidationFailed; suppress only that so an
+    # unexpected error propagates rather than being silently swallowed into
+    # the create path below.
+    raw_path: str | None = None
+    if path is not None or preset is not None:
+        with contextlib.suppress(ValidationFailed):
+            raw_path = sync.resolve_preset(preset) if preset is not None else path
+
+    # Determine whether an existing target matches.
+    existing_target: sync.SyncTarget | None = None
+    if raw_path is not None:
+        existing_target = sync.find_target_by_path(config, raw_path)
+
+    if only_list and existing_target is not None:
+        # Append path: existing target + --only supplied.
+        explicit_scope: sync.SyncScope | None = None
+        if scope is not None:
+            explicit_scope = _coerce_scope(scope)
+        added, already_present = sync.append_to_allowlist(
+            config,
+            path=raw_path,  # type: ignore[arg-type]
+            entries=only_list,
+            explicit_scope=explicit_scope,
+        )
+        sync.save_sync_config(config, paths)
+
+        stored_path = sync.normalize_target_path(raw_path)  # type: ignore[arg-type]
+        if mode == "json":
+            echo_json(
+                {
+                    "path": existing_target.path,
+                    "scope": existing_target.scope,
+                    "added": added,
+                    "already_present": already_present,
+                }
+            )
+            return
+        console = Console()
+        if added:
+            console.print(
+                f"[green]Added[/green] {len(added)} workflow(s) to the allowlist of "
+                f"{stored_path}: {', '.join(added)}"
+            )
+            pull_args = " ".join(added)
+            console.print(
+                f"[yellow]Next:[/yellow] run "
+                f"`goodeye workflows sync pull {pull_args}` to materialize them."
+            )
+        else:
+            console.print(
+                f"{', '.join(already_present)} already in the allowlist of "
+                f"{stored_path}; nothing to add."
+            )
+        return
+
+    # Create path: either no --only, or --only with no existing target. This
+    # branch creates a new target (optionally a selected one seeded from --only
+    # when --scope selected is given), or raises at the add_target layer when
+    # --only is used without --scope selected (only valid with scope=selected).
+    coerced_scope = _coerce_scope(scope) if scope is not None else "owned"
     target = sync.add_target(
         config,
         path=path,
         preset=preset,
         scope=coerced_scope,
-        only=list(only),
+        only=only_list,
     )
     sync.save_sync_config(config, paths)
 
@@ -172,7 +242,7 @@ def target_add(
         echo_json(target)
         return
     console = Console()
-    console.print(f"[green]Added[/green] sync target {target.path} " f"(scope={target.scope})")
+    console.print(f"[green]Added[/green] sync target {target.path} (scope={target.scope})")
 
 
 @target_app.command("list")
@@ -212,17 +282,54 @@ def target_list(
 @target_app.command("remove")
 def target_remove(
     path: str = typer.Argument(..., help="Directory of the sync target to remove."),
+    only: list[str] = typer.Option(
+        [],
+        "--only",
+        help=(
+            "Workflow slug or glob to drop from the target's selected allowlist (repeatable). "
+            "Without --only the whole target is removed."
+        ),
+    ),
     json_output: bool = typer.Option(False, "--json", help="Print the result as JSON."),
     table_output: bool = typer.Option(False, "--table", help="Print a one-line confirmation."),
 ) -> None:
-    """Remove a configured local sync target by its directory."""
+    """Remove a whole sync target, or remove individual workflows from its allowlist.
+
+    Without --only, the entire target is removed and its directory is no longer
+    synced. With --only, only the named workflows are dropped from the target's
+    allowlist and the target itself is kept.
+    """
     mode = resolve_output_mode(json_output=json_output, table_output=table_output)
+    only_list = list(only)
     paths = get_config_paths()
     config = sync.load_sync_config(paths)
+    stored_path = sync.normalize_target_path(path)
+
+    if only_list:
+        # Prune path: drop named entries from the allowlist, keep the target.
+        removed_entries, absent_entries = sync.prune_from_allowlist(
+            config, path=path, entries=only_list
+        )
+        sync.save_sync_config(config, paths)
+
+        if mode == "json":
+            echo_json({"path": stored_path, "removed": removed_entries, "absent": absent_entries})
+            return
+
+        console = Console()
+        if removed_entries:
+            console.print(
+                f"[green]Removed[/green] {len(removed_entries)} workflow(s) from the "
+                f"allowlist of {stored_path}: {', '.join(removed_entries)}"
+            )
+        else:
+            console.print(f"{', '.join(absent_entries)} not in the allowlist of {stored_path}.")
+        return
+
+    # Whole-target removal path.
     removed = sync.remove_target(config, path)
     sync.save_sync_config(config, paths)
 
-    stored_path = sync.normalize_target_path(path)
     if mode == "json":
         echo_json({"path": stored_path, "removed": removed})
         return
