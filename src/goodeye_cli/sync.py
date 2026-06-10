@@ -220,8 +220,8 @@ def add_target(
             raise Conflict(
                 slug="conflict",
                 message=f"A sync target already points at {stored_path}.",
-                hint="Remove it first with `goodeye workflows sync target remove`, "
-                "or edit the sync config by hand.",
+                hint="Add workflows to it with --only, or remove it first with "
+                "`goodeye workflows sync target remove`.",
             )
 
     target = SyncTarget(path=stored_path, scope=scope, selected=list(only))
@@ -246,7 +246,7 @@ def list_targets(config: SyncConfig) -> list[SyncTarget]:
     return list(config.targets)
 
 
-def _find_target_by_path(config: SyncConfig, path: str) -> SyncTarget | None:
+def find_target_by_path(config: SyncConfig, path: str) -> SyncTarget | None:
     """Return the target whose expanded path matches ``path``, or None."""
     expanded = expand_target_path(path)
     for target in config.targets:
@@ -276,7 +276,7 @@ def append_to_allowlist(
     Returns ``(added, already_present)``.
     """
     stored_path = normalize_target_path(path)
-    target = _find_target_by_path(config, path)
+    target = find_target_by_path(config, path)
     if target is None:
         raise NotFound(
             slug="not_found",
@@ -336,7 +336,7 @@ def prune_from_allowlist(
     Returns ``(removed, absent)``.
     """
     stored_path = normalize_target_path(path)
-    target = _find_target_by_path(config, path)
+    target = find_target_by_path(config, path)
     if target is None:
         raise NotFound(
             slug="not_found",
@@ -2192,6 +2192,7 @@ __all__ = [
     "ensure_identity",
     "expand_target_path",
     "find_entry",
+    "find_target_by_path",
     "is_modified_locally",
     "list_targets",
     "load_sync_config",

@@ -177,7 +177,7 @@ def target_add(
     # Determine whether an existing target matches.
     existing_target: sync.SyncTarget | None = None
     if raw_path is not None:
-        existing_target = sync._find_target_by_path(config, raw_path)
+        existing_target = sync.find_target_by_path(config, raw_path)
 
     if only_list and existing_target is not None:
         # Append path: existing target + --only supplied.

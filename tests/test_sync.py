@@ -157,8 +157,13 @@ def test_add_target_duplicate_path_raises_conflict() -> None:
     # Without --only: creating a whole target over an existing one is a conflict.
     config = SyncConfig()
     add_target(config, path="~/skills", preset=None, scope="owned", only=[])
-    with pytest.raises(Conflict):
+    with pytest.raises(Conflict) as exc_info:
         add_target(config, path="~/skills", preset=None, scope="all", only=[])
+    hint = exc_info.value.hint or ""
+    assert "--only" in hint, "hint should mention --only"
+    assert (
+        "edit the sync config by hand" not in hint
+    ), "hint must not say 'edit the sync config by hand'"
 
 
 def test_add_target_duplicate_detected_across_path_forms() -> None:
