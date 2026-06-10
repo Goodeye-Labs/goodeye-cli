@@ -1368,3 +1368,163 @@ def test_target_remove_only_against_non_selected_target_raises_validation_failed
     )
     assert result.exit_code != 0
     assert isinstance(result.exception, ValidationFailed)
+
+
+def test_target_remove_only_deduplicates_input_prints_correct_count(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    # Duplicate --only values must not inflate the reported count or the list.
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    runner.invoke(
+        app,
+        [
+            "workflows",
+            "sync",
+            "target",
+            "add",
+            "~/skills",
+            "--scope",
+            "selected",
+            "--only",
+            "a",
+            "--only",
+            "b",
+        ],
+    )
+    result = runner.invoke(
+        app,
+        [
+            "workflows",
+            "sync",
+            "target",
+            "remove",
+            "~/skills",
+            "--only",
+            "a",
+            "--only",
+            "a",
+            "--table",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    # Duplicate input collapses to one removal, so count must be 1.
+    assert "Removed 1 workflow" in result.output
+    # 'a' must appear exactly once, not twice.
+    assert result.output.count(": a") == 1 or "a, a" not in result.output
+
+
+# ----- Fix 2: readback assertions for append and prune command tests -----
+
+
+def test_target_add_only_appends_to_allowlist_readback(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    # After appending, target list --json must reflect the new entry in selected.
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    runner.invoke(
+        app,
+        ["workflows", "sync", "target", "add", "~/skills", "--scope", "selected", "--only", "x"],
+    )
+    result = runner.invoke(
+        app,
+        ["workflows", "sync", "target", "add", "~/skills", "--only", "y"],
+    )
+    assert result.exit_code == 0, result.output
+
+    list_result = runner.invoke(app, ["workflows", "sync", "target", "list"])
+    assert list_result.exit_code == 0, list_result.output
+    payload = json.loads(list_result.output)
+    selected = payload["items"][0]["selected"]
+    assert "y" in selected
+    assert "x" in selected
+
+
+def test_target_remove_only_prunes_from_allowlist_readback(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    # After pruning, target list --json must show the entry absent from selected.
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    runner.invoke(
+        app,
+        [
+            "workflows",
+            "sync",
+            "target",
+            "add",
+            "~/skills",
+            "--scope",
+            "selected",
+            "--only",
+            "a",
+            "--only",
+            "b",
+        ],
+    )
+    result = runner.invoke(
+        app,
+        ["workflows", "sync", "target", "remove", "~/skills", "--only", "a"],
+    )
+    assert result.exit_code == 0, result.output
+
+    list_result = runner.invoke(app, ["workflows", "sync", "target", "list"])
+    assert list_result.exit_code == 0, list_result.output
+    payload = json.loads(list_result.output)
+    selected = payload["items"][0]["selected"]
+    assert "a" not in selected
+    assert "b" in selected
+
+
+# ----- Fix 3: preset + --only append path -----
+
+
+def test_target_add_only_with_preset_appends_to_existing_preset_target(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    # Create a target via --preset claude, then append to it with --preset claude --only.
+    # The preset must resolve to the same path before matching.
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    create = runner.invoke(
+        app,
+        [
+            "workflows",
+            "sync",
+            "target",
+            "add",
+            "--preset",
+            "claude",
+            "--scope",
+            "selected",
+            "--only",
+            "existing-wf",
+        ],
+    )
+    assert create.exit_code == 0, create.output
+
+    append = runner.invoke(
+        app,
+        [
+            "workflows",
+            "sync",
+            "target",
+            "add",
+            "--preset",
+            "claude",
+            "--only",
+            "new-wf",
+        ],
+    )
+    assert append.exit_code == 0, append.output
+    payload = json.loads(append.output)
+    assert "new-wf" in payload["added"]
+
+    list_result = runner.invoke(app, ["workflows", "sync", "target", "list"])
+    assert list_result.exit_code == 0, list_result.output
+    items = json.loads(list_result.output)["items"]
+    assert len(items) == 1
+    selected = items[0]["selected"]
+    assert "existing-wf" in selected
+    assert "new-wf" in selected

@@ -255,6 +255,11 @@ def find_target_by_path(config: SyncConfig, path: str) -> SyncTarget | None:
     return None
 
 
+def _dedup_entries(entries: list[str]) -> list[str]:
+    """Return ``entries`` with duplicates removed, preserving first-occurrence order."""
+    return list(dict.fromkeys(entries))
+
+
 def append_to_allowlist(
     config: SyncConfig,
     *,
@@ -270,8 +275,10 @@ def append_to_allowlist(
     target's actual scope, raises ``Conflict``.
 
     Deduplicates: entries already present are collected as ``already_present`` and
-    skipped; only genuinely new entries are appended. Order of existing entries is
-    preserved; new entries are appended in the order supplied.
+    skipped; only genuinely new entries are appended. Duplicate values in
+    ``entries`` are collapsed to first occurrence before categorization, so each
+    value appears at most once in ``added`` or ``already_present``. Order of
+    existing entries is preserved; new entries are appended in the order supplied.
 
     Returns ``(added, already_present)``.
     """
@@ -307,10 +314,11 @@ def append_to_allowlist(
             ),
         )
 
+    unique_entries = _dedup_entries(entries)
     existing_set = set(target.selected)
     added: list[str] = []
     already_present: list[str] = []
-    for entry in entries:
+    for entry in unique_entries:
         if entry in existing_set:
             already_present.append(entry)
         else:
@@ -332,6 +340,9 @@ def prune_from_allowlist(
     The target must exist (``NotFound`` otherwise) and must have
     ``scope=selected`` (``ValidationFailed`` otherwise). Entries not present in
     the allowlist are reported as ``absent`` and skipped without error.
+    Duplicate values in ``entries`` are collapsed to first occurrence before
+    categorization, so each value appears at most once in ``removed`` or
+    ``absent``.
 
     Returns ``(removed, absent)``.
     """
@@ -357,9 +368,10 @@ def prune_from_allowlist(
             ),
         )
 
+    unique_entries = _dedup_entries(entries)
     current_set = set(target.selected)
-    removed = [e for e in entries if e in current_set]
-    absent = [e for e in entries if e not in current_set]
+    removed = [e for e in unique_entries if e in current_set]
+    absent = [e for e in unique_entries if e not in current_set]
 
     remove_set = set(removed)
     target.selected = [e for e in target.selected if e not in remove_set]

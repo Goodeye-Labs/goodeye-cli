@@ -169,9 +169,12 @@ def target_add(
     config = sync.load_sync_config(paths)
 
     # Resolve the raw path or preset to a stored path for existence check.
+    # An unknown preset raises ValidationFailed; suppress only that so an
+    # unexpected error propagates rather than being silently swallowed into
+    # the create path below.
     raw_path: str | None = None
     if path is not None or preset is not None:
-        with contextlib.suppress(Exception):
+        with contextlib.suppress(ValidationFailed):
             raw_path = sync.resolve_preset(preset) if preset is not None else path
 
     # Determine whether an existing target matches.
@@ -221,10 +224,11 @@ def target_add(
             )
         return
 
-    # Create path: either no --only, or --only with no existing target.
+    # Create path: either no --only, or --only with no existing target. This
+    # branch creates a new target (optionally a selected one seeded from --only
+    # when --scope selected is given), or raises at the add_target layer when
+    # --only is used without --scope selected (only valid with scope=selected).
     coerced_scope = _coerce_scope(scope) if scope is not None else "owned"
-    # Validate: --only without --scope selected and no existing target raises at
-    # the add_target layer (only valid with scope=selected).
     target = sync.add_target(
         config,
         path=path,

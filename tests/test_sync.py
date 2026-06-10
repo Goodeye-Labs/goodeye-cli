@@ -3232,3 +3232,27 @@ def test_remove_target_whole_target_still_works() -> None:
     add_target(config, path="~/skills", preset=None, scope="selected", only=["a", "b"])
     assert remove_target(config, "~/skills") is True
     assert config.targets == []
+
+
+def test_prune_from_allowlist_deduplicates_input_entries() -> None:
+    # Duplicate entries in the caller-supplied list must not produce duplicate
+    # values in removed/absent. Each entry appears at most once in either list.
+    config = SyncConfig()
+    add_target(config, path="~/skills", preset=None, scope="selected", only=["a", "b"])
+    removed, absent = prune_from_allowlist(config, path="~/skills", entries=["a", "a", "z", "z"])
+    assert removed == ["a"]
+    assert absent == ["z"]
+    assert config.targets[0].selected == ["b"]
+
+
+def test_append_to_allowlist_deduplicates_input_entries() -> None:
+    # Duplicate entries in the caller-supplied list must not produce duplicates.
+    # A repeated new entry must appear once in added, not also in already_present.
+    config = SyncConfig()
+    add_target(config, path="~/skills", preset=None, scope="selected", only=["existing"])
+    added, already_present = append_to_allowlist(
+        config, path="~/skills", entries=["new", "new", "existing", "existing"]
+    )
+    assert added == ["new"]
+    assert already_present == ["existing"]
+    assert config.targets[0].selected == ["existing", "new"]
