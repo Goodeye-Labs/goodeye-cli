@@ -249,7 +249,7 @@ class WorkflowDeleteResult(_WireBase):
 class WorkflowArchiveResult(_WireBase):
     workflow_id: str
     name: str
-    archived_at: str | None = None
+    archived: bool
 
 
 class WorkflowUnarchiveResult(_WireBase):
@@ -422,7 +422,7 @@ class TemplateDeleteResult(_WireBase):
 
 class TemplateArchiveResult(_WireBase):
     template_id: str
-    archived_at: str | None = None
+    archived: bool
 
 
 class TemplateUnarchiveResult(_WireBase):
