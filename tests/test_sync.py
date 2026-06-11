@@ -161,9 +161,9 @@ def test_add_target_duplicate_path_raises_conflict() -> None:
         add_target(config, path="~/skills", preset=None, scope="all", only=[])
     hint = exc_info.value.hint or ""
     assert "--only" in hint, "hint should mention --only"
-    assert (
-        "edit the sync config by hand" not in hint
-    ), "hint must not say 'edit the sync config by hand'"
+    assert "edit the sync config by hand" not in hint, (
+        "hint must not say 'edit the sync config by hand'"
+    )
 
 
 def test_add_target_duplicate_detected_across_path_forms() -> None:
@@ -1083,7 +1083,7 @@ def _summary_dict(
     token: str = "tok",
     version: int = 1,
     role: str = "owner",
-    deleted_at: str | None = None,
+    archived_at: str | None = None,
 ) -> dict:
     payload: dict = {
         "id": id_,
@@ -1092,8 +1092,8 @@ def _summary_dict(
         "version_token": token,
         "effective_role": role,
     }
-    if deleted_at is not None:
-        payload["deleted_at"] = deleted_at
+    if archived_at is not None:
+        payload["archived_at"] = archived_at
     return payload
 
 
@@ -1359,7 +1359,7 @@ def test_status_conflict(tmp_path: Path, tmp_config_paths: ConfigPaths) -> None:
 
 
 @respx.mock
-def test_status_deleted_on_server_via_deleted_at(
+def test_status_deleted_on_server_via_archived_at(
     tmp_path: Path, tmp_config_paths: ConfigPaths
 ) -> None:
     _me_route()
@@ -1374,7 +1374,7 @@ def test_status_deleted_on_server_via_deleted_at(
         return_value=_list_response(
             [
                 _summary_dict(
-                    id_="skl_a", name="alpha", token="t1", deleted_at="2026-06-01T00:00:00Z"
+                    id_="skl_a", name="alpha", token="t1", archived_at="2026-06-01T00:00:00Z"
                 )
             ]
         )
@@ -2445,10 +2445,10 @@ def test_pull_removes_local_copy_of_deleted_workflow_when_confirmed(
     _write_skill(target_dir, "gone", body)
     state = SyncState(entries=[_tracked_entry(target_dir, id_="skl_gone", slug="gone", body=body)])
 
-    # The workflow lists as soft-deleted (deleted_at set), so it is not live.
+    # The workflow lists as soft-deleted (archived_at set), so it is not live.
     respx.get(f"{SERVER}/v1/workflows").mock(
         return_value=_list_response(
-            [_summary_dict(id_="skl_gone", name="gone", deleted_at="2026-01-01T00:00:00Z")]
+            [_summary_dict(id_="skl_gone", name="gone", archived_at="2026-01-01T00:00:00Z")]
         )
     )
     # Registered to prove no server-side delete is ever issued.
@@ -2487,7 +2487,7 @@ def test_pull_keeps_local_copy_of_deleted_workflow_when_declined(
     state = SyncState(entries=[_tracked_entry(target_dir, id_="skl_gone", slug="gone", body=body)])
     respx.get(f"{SERVER}/v1/workflows").mock(
         return_value=_list_response(
-            [_summary_dict(id_="skl_gone", name="gone", deleted_at="2026-01-01T00:00:00Z")]
+            [_summary_dict(id_="skl_gone", name="gone", archived_at="2026-01-01T00:00:00Z")]
         )
     )
     # Simulate an interactive terminal that declines the prompt: patch the
@@ -2535,7 +2535,7 @@ def test_pull_keeps_edited_local_copy_of_deleted_workflow_without_force(
     )
     respx.get(f"{SERVER}/v1/workflows").mock(
         return_value=_list_response(
-            [_summary_dict(id_="skl_gone", name="gone", deleted_at="2026-01-01T00:00:00Z")]
+            [_summary_dict(id_="skl_gone", name="gone", archived_at="2026-01-01T00:00:00Z")]
         )
     )
 
@@ -2574,7 +2574,7 @@ def test_pull_force_removes_edited_local_copy_of_deleted_workflow(
     )
     respx.get(f"{SERVER}/v1/workflows").mock(
         return_value=_list_response(
-            [_summary_dict(id_="skl_gone", name="gone", deleted_at="2026-01-01T00:00:00Z")]
+            [_summary_dict(id_="skl_gone", name="gone", archived_at="2026-01-01T00:00:00Z")]
         )
     )
 
@@ -2636,7 +2636,7 @@ def test_pull_does_not_materialize_deleted_workflow(
     config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
     respx.get(f"{SERVER}/v1/workflows").mock(
         return_value=_list_response(
-            [_summary_dict(id_="skl_d", name="ghost", deleted_at="2026-01-01T00:00:00Z")]
+            [_summary_dict(id_="skl_d", name="ghost", archived_at="2026-01-01T00:00:00Z")]
         )
     )
     # A fetch of the deleted workflow body would be a bug: it is never materialized.

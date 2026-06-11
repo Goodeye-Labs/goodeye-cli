@@ -16,6 +16,7 @@ from rich.console import Console
 from rich.table import Table
 
 from goodeye_cli.client import GoodeyeClient
+from goodeye_cli.commands.prompts import confirm_destructive
 from goodeye_cli.commands.workflows import _render_safety_check, _split_version_suffix
 from goodeye_cli.config import get_api_key, get_server
 from goodeye_cli.errors import AuthRequired, SafetyVerificationFailed, SafetyVerificationUnavailable
@@ -72,6 +73,11 @@ def list_cmd(
     limit: int = typer.Option(25, "--limit", "-l", min=1, help="Max results per page."),
     cursor: str | None = typer.Option(None, "--cursor", help="Start listing from this cursor."),
     all_pages: bool = typer.Option(False, "--all", help="Follow cursors and combine all pages."),
+    include_archived: bool = typer.Option(
+        False,
+        "--include-archived",
+        help="Also list your own archived templates (restore with `templates unarchive`).",
+    ),
 ) -> None:
     """List public templates."""
     console = Console()
@@ -83,6 +89,7 @@ def list_cmd(
                 search=search,
                 limit=limit,
                 cursor=page_cursor,
+                include_archived=include_archived,
             ),
             cursor=cursor,
             all_pages=all_pages,
@@ -324,9 +331,54 @@ def fork(
             role = ref.role or "-"
             src = ref.source_workflow_id or "-"
             console.print(
-                f"  • [cyan]{ref.name}[/cyan] → {ref.verifier_id}  "
+                f"  * [cyan]{ref.name}[/cyan] -> {ref.verifier_id}  "
                 f"[dim](role={role}, source_workflow_id={src})[/dim]"
             )
+
+
+@app.command("archive")
+def archive_cmd(
+    template_ref: str = typer.Argument(
+        ...,
+        help="Template UUID or @handle/slug.",
+    ),
+    reason: str | None = typer.Option(
+        None, "--reason", help="Optional reason recorded with the archive action."
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
+) -> None:
+    """Archive a template you own.
+
+    Archiving hides the template from public listing but keeps all versions
+    and fork lineage intact. Existing forks continue to work. Use
+    `templates unarchive` to restore. Use `templates delete` only when you
+    want permanent, irreversible removal.
+    """
+    console = Console()
+    if not confirm_destructive(f"Archive template {template_ref}?", yes=yes):
+        console.print("Cancelled.")
+        raise typer.Exit(code=0)
+    with _client(require_auth=True) as client:
+        result = client.archive_template(template_ref, archive_reason=reason)
+    console.print(f"[green]Archived[/green] template {result.template_id}")
+
+
+@app.command("unarchive")
+def unarchive_cmd(
+    template_ref: str = typer.Argument(
+        ...,
+        help="Template UUID or @handle/slug.",
+    ),
+) -> None:
+    """Restore an archived template you own.
+
+    The inverse of `templates archive`. The template becomes visible again
+    in the public catalog.
+    """
+    console = Console()
+    with _client(require_auth=True) as client:
+        result = client.unarchive_template(template_ref)
+    console.print(f"[green]Unarchived[/green] template {result.template_id}")
 
 
 @app.command("delete")
@@ -335,36 +387,90 @@ def delete_cmd(
         ...,
         help="Template UUID or @handle/slug.",
     ),
-    reason: str | None = typer.Option(
-        None, "--reason", help="Optional reason recorded in the audit log."
-    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
-    """Soft-delete a template you own.
+    """Permanently and immediately delete a template you own.
 
-    Existing forks pinned to any version keep working. The catalog hides
-    deleted templates. Pair with ``goodeye templates undelete`` to
-    restore.
+    WARNING: This is permanent. The template, all its versions, all attached
+    files, and all version verification records are removed from the live
+    system at once. There is NO recovery path.
+
+    Use `templates archive` if you want a reversible alternative. Archived
+    templates can be restored at any time with `templates unarchive`.
+
+    Serving gate: if the template is not archived AND has at least one
+    published version, deletion is refused (409). Unpublish the relevant
+    version(s) or archive the template first.
+
+    Encrypted backups age out within the platform's standard retention window
+    (up to three months), so the content is not instantly erased from all
+    systems everywhere, but it is no longer accessible through any product
+    surface after this call.
+
+    Fork lineage: forks keep their own content; their parent pointer is
+    severed. `workflows lineage` will report the source as permanently deleted.
     """
     console = Console()
+    if not confirm_destructive(
+        f"Permanently delete template {template_ref}? This cannot be undone.", yes=yes
+    ):
+        console.print("Cancelled.")
+        raise typer.Exit(code=0)
     with _client(require_auth=True) as client:
-        result = client.delete_template(template_ref, reason=reason)
-    suffix = " (idempotent)" if result.idempotent else ""
-    console.print(f"[green]Deleted[/green] template {result.template_id}.{suffix}")
+        result = client.delete_template(template_ref)
+    if result.deleted:
+        console.print(f"[green]Permanently deleted[/green] template {result.template_id}")
+    else:
+        console.print(f"[yellow]Not deleted[/yellow] template {result.template_id}")
 
 
-@app.command("undelete")
-def undelete_cmd(
+@app.command("delete-version")
+def delete_version_cmd(
     template_ref: str = typer.Argument(
         ...,
-        help="Template UUID or @handle/slug.",
+        help="Template UUID, @handle/slug, or @handle/slug@vN (version arg overrides @v).",
     ),
+    version: int = typer.Argument(..., help="Version to permanently delete."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
-    """Restore a previously deleted template you own."""
+    """Permanently and immediately delete a single template version.
+
+    WARNING: This is permanent. The version row, all its attached files, and
+    all version verification records are removed from the live system at once.
+    There is NO recovery path.
+
+    Use `templates archive` if you want a reversible alternative for the
+    whole template.
+
+    Serving gate: the version must be unpublished first (use
+    `templates unpublish`). A still-published version cannot be permanently
+    deleted because it is currently served to readers.
+
+    Encrypted backups age out within the platform's standard retention window
+    (up to three months), so the content is not instantly erased from all
+    systems everywhere, but it is no longer accessible through any product
+    surface after this call.
+
+    Version numbers remain monotonic with a gap where the deleted version was.
+    Surviving versions are not renumbered.
+    """
     console = Console()
+    if not confirm_destructive(
+        f"Permanently delete template {template_ref} version {version}? This cannot be undone.",
+        yes=yes,
+    ):
+        console.print("Cancelled.")
+        raise typer.Exit(code=0)
     with _client(require_auth=True) as client:
-        result = client.undelete_template(template_ref)
-    suffix = " (idempotent)" if result.idempotent else ""
-    console.print(f"[green]Undeleted[/green] template {result.template_id}.{suffix}")
+        result = client.delete_template_version(template_ref, version)
+    if result.deleted:
+        console.print(
+            f"[green]Permanently deleted[/green] template {result.template_id} v{result.version}"
+        )
+    else:
+        console.print(
+            f"[yellow]Not deleted[/yellow] template {result.template_id} v{result.version}"
+        )
 
 
 @app.command("deprecate-version")
@@ -393,6 +499,52 @@ def deprecate_version_cmd(
         f"[green]Deprecated[/green] template {result.template_id} v{result.version}: "
         f"{result.deprecation_message}"
     )
+
+
+@app.command("lineage")
+def lineage_cmd(
+    template_ref: str = typer.Argument(
+        ...,
+        help=(
+            "Template UUID, @handle/slug, or workflow UUID for a forked workflow's lineage. "
+            "This command resolves template-level lineage when given a template identifier."
+        ),
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Print lineage as JSON."),
+) -> None:
+    """Show a forked workflow's lineage relative to a template.
+
+    For template-level source status use `goodeye workflows lineage <workflow_id>`.
+    """
+    console = Console()
+    with _client(require_auth=True) as client:
+        result = client.lookup_workflow_lineage(template_ref)
+    if json_output:
+        typer.echo(result.model_dump_json(indent=2))
+        return
+    if result.parent_template_id is None:
+        console.print("[dim]Not a fork (no parent template).[/dim]")
+        return
+    console.print(
+        f"Forked from template {result.parent_template_id} "
+        f"pinned to v{result.parent_template_version}; "
+        f"upstream latest: v{result.upstream_latest_version}."
+    )
+    source_status = result.parent_source_status or "unknown"
+    if result.parent_permanently_deleted:
+        console.print(
+            "[red]Parent template permanently deleted[/red] "
+            "(content no longer accessible through any product surface)."
+        )
+    elif source_status == "archived":
+        archived_at = result.parent_template_archived_at or "unknown time"
+        console.print(f"[yellow]Parent template archived[/yellow] at {archived_at}.")
+    if result.parent_version_deprecated_at is not None:
+        message = result.parent_version_deprecation_message or "no message"
+        console.print(
+            f"[yellow]Pinned version deprecated[/yellow] "
+            f"at {result.parent_version_deprecated_at}: {message}."
+        )
 
 
 @app.command("check-safety")
@@ -474,14 +626,17 @@ def transfer_ownership_cmd(
 
 __all__ = [
     "app",
+    "archive_cmd",
     "check_safety",
     "delete_cmd",
+    "delete_version_cmd",
     "deprecate_version_cmd",
     "fork",
     "get_cmd",
+    "lineage_cmd",
     "list_cmd",
     "publish",
     "transfer_ownership_cmd",
-    "undelete_cmd",
+    "unarchive_cmd",
     "unpublish",
 ]

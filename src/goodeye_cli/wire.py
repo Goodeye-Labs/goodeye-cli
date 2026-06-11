@@ -94,10 +94,10 @@ class WorkflowSummary(_WireBase):
     parent_template_version: int | None = None
     effective_role: str | None = None
     version_token: str | None = None
-    # ISO-8601 timestamp for soft-deleted rows, null for live rows. Only
-    # populated for the caller's own deleted workflows, surfaced when
-    # `list_workflows` is called with `include_deleted=true`.
-    deleted_at: datetime | None = None
+    # ISO-8601 timestamp for archived rows, null for live rows. Only
+    # populated for the caller's own archived workflows, surfaced when
+    # `list_workflows` is called with `include_archived=true`.
+    archived_at: datetime | None = None
 
 
 class WorkflowList(_WireBase):
@@ -246,11 +246,21 @@ class WorkflowDeleteResult(_WireBase):
     deleted: bool
 
 
-class WorkflowUndeleteResult(_WireBase):
+class WorkflowArchiveResult(_WireBase):
     workflow_id: str
     name: str
+    archived_at: str | None = None
+
+
+class WorkflowUnarchiveResult(_WireBase):
+    workflow_id: str
+    name: str
+
+
+class WorkflowDeleteVersionResult(_WireBase):
+    workflow_id: str
+    version: int
     deleted: bool
-    idempotent: bool = False
 
 
 class WorkflowLineage(_WireBase):
@@ -259,8 +269,10 @@ class WorkflowLineage(_WireBase):
     parent_template_version: int | None = None
     upstream_latest_version: int | None = None
     is_upstream_unpublished: bool | None = None
-    parent_template_deleted_at: str | None = None
-    parent_template_delete_reason: str | None = None
+    parent_source_status: str | None = None
+    parent_permanently_deleted: bool | None = None
+    parent_template_archived_at: str | None = None
+    parent_template_archive_reason: str | None = None
     parent_version_deprecated_at: str | None = None
     parent_version_deprecation_message: str | None = None
 
@@ -404,14 +416,23 @@ class TemplateForkResult(_WireBase):
 
 class TemplateDeleteResult(_WireBase):
     template_id: str
+    slug: str | None = None
     deleted: bool
-    idempotent: bool = False
 
 
-class TemplateUndeleteResult(_WireBase):
+class TemplateArchiveResult(_WireBase):
     template_id: str
+    archived_at: str | None = None
+
+
+class TemplateUnarchiveResult(_WireBase):
+    template_id: str
+
+
+class TemplateDeleteVersionResult(_WireBase):
+    template_id: str
+    version: int
     deleted: bool
-    idempotent: bool = False
 
 
 class TemplateDeprecateVersionResult(_WireBase):
@@ -550,6 +571,12 @@ class VerifierRevokeResult(_WireBase):
     revoked: bool
 
 
+class VerifierDeleteResult(_WireBase):
+    verifier_id: str
+    name: str
+    deleted: bool
+
+
 # ----- invitations -----
 
 
@@ -665,6 +692,12 @@ class ImageGeneratorRevokeResult(_WireBase):
     generator_id: str
     name: str
     revoked: bool
+
+
+class ImageGeneratorDeleteResult(_WireBase):
+    generator_id: str
+    name: str
+    deleted: bool
 
 
 class ImageGenerationRunResult(_WireBase):

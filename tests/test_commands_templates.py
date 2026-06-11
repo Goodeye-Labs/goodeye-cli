@@ -370,31 +370,67 @@ def test_templates_fork_deprecation_warning_emits_stderr_note(
 
 
 @respx.mock
-def test_templates_delete_success(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+def test_templates_archive_success(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.delete(f"{SERVER}/v1/templates/tpl_01").mock(
-        return_value=httpx.Response(200, json={"template_id": "tpl_01", "deleted": True})
+    route = respx.post(f"{SERVER}/v1/templates/tpl_01/archive").mock(
+        return_value=httpx.Response(
+            200, json={"template_id": "tpl_01", "slug": "demo", "archived": True}
+        )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["templates", "delete", "tpl_01", "--reason", "stale"])
+    result = runner.invoke(app, ["templates", "archive", "tpl_01", "--yes"])
     assert result.exit_code == 0, result.output
-    assert "Deleted" in result.output
+    assert route.call_count == 1
+    assert "Archived" in result.output
     assert "tpl_01" in result.output
 
 
 @respx.mock
-def test_templates_delete_idempotent_suffix(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+def test_templates_archive_with_reason(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.delete(f"{SERVER}/v1/templates/tpl_01").mock(
+    route = respx.post(f"{SERVER}/v1/templates/tpl_01/archive").mock(
         return_value=httpx.Response(
-            200,
-            json={"template_id": "tpl_01", "deleted": True, "idempotent": True},
+            200, json={"template_id": "tpl_01", "slug": "demo", "archived": True}
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["templates", "delete", "tpl_01"])
+    result = runner.invoke(app, ["templates", "archive", "tpl_01", "--reason", "stale", "--yes"])
     assert result.exit_code == 0, result.output
-    assert "idempotent" in result.output
+    import json as _json
+
+    body = _json.loads(route.calls.last.request.content.decode())
+    assert body.get("archive_reason") == "stale"
+
+
+@respx.mock
+def test_templates_unarchive_success(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    route = respx.post(f"{SERVER}/v1/templates/tpl_01/unarchive").mock(
+        return_value=httpx.Response(
+            200, json={"template_id": "tpl_01", "slug": "demo", "archived": False}
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "unarchive", "tpl_01"])
+    assert result.exit_code == 0, result.output
+    assert route.call_count == 1
+    assert "Unarchived" in result.output
+    assert "tpl_01" in result.output
+
+
+@respx.mock
+def test_templates_delete_success(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.delete(f"{SERVER}/v1/templates/tpl_01").mock(
+        return_value=httpx.Response(
+            200, json={"template_id": "tpl_01", "slug": "demo", "deleted": True}
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "delete", "tpl_01", "--yes"])
+    assert result.exit_code == 0, result.output
+    assert "ermanently deleted" in result.output
+    assert "tpl_01" in result.output
 
 
 @respx.mock
@@ -406,37 +442,25 @@ def test_templates_delete_forbidden_errors(tmp_config_paths: ConfigPaths, monkey
         return_value=httpx.Response(403, json={"error": "forbidden", "message": "owner only"})
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["templates", "delete", "tpl_01"])
+    result = runner.invoke(app, ["templates", "delete", "tpl_01", "--yes"])
     assert result.exit_code != 0
     assert isinstance(result.exception, Forbidden)
 
 
 @respx.mock
-def test_templates_undelete_success(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+def test_templates_delete_version_success(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.post(f"{SERVER}/v1/templates/tpl_01/undelete").mock(
-        return_value=httpx.Response(200, json={"template_id": "tpl_01", "deleted": False})
-    )
-    runner = CliRunner()
-    result = runner.invoke(app, ["templates", "undelete", "tpl_01"])
-    assert result.exit_code == 0, result.output
-    assert "Undeleted" in result.output
-    assert "tpl_01" in result.output
-
-
-@respx.mock
-def test_templates_undelete_idempotent_suffix(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
-    _setup_creds(monkeypatch, tmp_config_paths)
-    respx.post(f"{SERVER}/v1/templates/tpl_01/undelete").mock(
+    route = respx.delete(f"{SERVER}/v1/templates/tpl_01/versions/2/permanent").mock(
         return_value=httpx.Response(
-            200,
-            json={"template_id": "tpl_01", "deleted": False, "idempotent": True},
+            200, json={"template_id": "tpl_01", "version": 2, "deleted": True}
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["templates", "undelete", "tpl_01"])
+    result = runner.invoke(app, ["templates", "delete-version", "tpl_01", "2", "--yes"])
     assert result.exit_code == 0, result.output
-    assert "idempotent" in result.output
+    assert route.call_count == 1
+    assert "ermanently deleted" in result.output
+    assert "tpl_01" in result.output
 
 
 @respx.mock

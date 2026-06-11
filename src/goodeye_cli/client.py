@@ -28,6 +28,7 @@ from goodeye_cli.wire import (
     DeviceAuthResponse,
     ExchangeResult,
     ImageGenerationRunResult,
+    ImageGeneratorDeleteResult,
     ImageGeneratorDeployResult,
     ImageGeneratorDetail,
     ImageGeneratorList,
@@ -43,22 +44,27 @@ from goodeye_cli.wire import (
     TeamDeleteResult,
     TeamList,
     TeamMember,
+    TemplateArchiveResult,
     TemplateDeleteResult,
+    TemplateDeleteVersionResult,
     TemplateDeprecateVersionResult,
     TemplateDetail,
     TemplateForkResult,
     TemplateList,
     TemplatePublishResult,
     TemplateSearchResponse,
-    TemplateUndeleteResult,
+    TemplateUnarchiveResult,
     TemplateUnpublishResult,
     UsageResponse,
+    VerifierDeleteResult,
     VerifierDeployResult,
     VerifierList,
     VerifierRevokeResult,
     VerifierRunResult,
     VerifierVersionDetail,
+    WorkflowArchiveResult,
     WorkflowDeleteResult,
+    WorkflowDeleteVersionResult,
     WorkflowDetail,
     WorkflowGrantList,
     WorkflowGrantResult,
@@ -70,7 +76,7 @@ from goodeye_cli.wire import (
     WorkflowSaveResult,
     WorkflowSearchResponse,
     WorkflowTeachResult,
-    WorkflowUndeleteResult,
+    WorkflowUnarchiveResult,
 )
 
 
@@ -238,7 +244,7 @@ class GoodeyeClient:
         search: str | None = None,
         limit: int = 50,
         cursor: str | None = None,
-        include_deleted: bool = False,
+        include_archived: bool = False,
     ) -> WorkflowList:
         params: dict[str, Any] = {"limit": limit}
         if filter_:
@@ -249,8 +255,8 @@ class GoodeyeClient:
             params["search"] = search
         if cursor:
             params["cursor"] = cursor
-        if include_deleted:
-            params["include_deleted"] = "true"
+        if include_archived:
+            params["include_archived"] = "true"
         response = self._request("GET", "/v1/workflows", params=params)
         return WorkflowList.model_validate(response.json())
 
@@ -335,13 +341,23 @@ class GoodeyeClient:
         response = self._request("POST", "/v1/workflows", json_body=payload)
         return WorkflowSaveResult.model_validate(response.json())
 
+    def archive_workflow(self, workflow_id: str) -> WorkflowArchiveResult:
+        response = self._request("POST", f"/v1/workflows/{workflow_id}/archive", json_body={})
+        return WorkflowArchiveResult.model_validate(response.json())
+
+    def unarchive_workflow(self, workflow_id: str) -> WorkflowUnarchiveResult:
+        response = self._request("POST", f"/v1/workflows/{workflow_id}/unarchive", json_body={})
+        return WorkflowUnarchiveResult.model_validate(response.json())
+
     def delete_workflow(self, workflow_id: str) -> WorkflowDeleteResult:
         response = self._request("DELETE", f"/v1/workflows/{workflow_id}")
         return WorkflowDeleteResult.model_validate(response.json())
 
-    def undelete_workflow(self, workflow_id: str) -> WorkflowUndeleteResult:
-        response = self._request("POST", f"/v1/workflows/{workflow_id}/undelete")
-        return WorkflowUndeleteResult.model_validate(response.json())
+    def delete_workflow_version(
+        self, workflow_id: str, version: int
+    ) -> WorkflowDeleteVersionResult:
+        response = self._request("DELETE", f"/v1/workflows/{workflow_id}/versions/{version}")
+        return WorkflowDeleteVersionResult.model_validate(response.json())
 
     def grant_workflow(
         self,
@@ -471,6 +487,7 @@ class GoodeyeClient:
         search: str | None = None,
         limit: int = 50,
         cursor: str | None = None,
+        include_archived: bool = False,
     ) -> TemplateList:
         params: dict[str, Any] = {"limit": limit}
         if filter_:
@@ -479,6 +496,8 @@ class GoodeyeClient:
             params["search"] = search
         if cursor:
             params["cursor"] = cursor
+        if include_archived:
+            params["include_archived"] = "true"
         response = self._request("GET", "/v1/templates", params=params)
         return TemplateList.model_validate(response.json())
 
@@ -576,22 +595,34 @@ class GoodeyeClient:
         response = self._request("POST", "/v1/templates/fork", json_body=body)
         return TemplateForkResult.model_validate(response.json())
 
-    def delete_template(
-        self, template_id: str, *, reason: str | None = None
-    ) -> TemplateDeleteResult:
+    def archive_template(
+        self, template_id: str, *, archive_reason: str | None = None
+    ) -> TemplateArchiveResult:
         body: dict[str, Any] = {}
-        if reason is not None:
-            body["reason"] = reason
+        if archive_reason is not None:
+            body["archive_reason"] = archive_reason
         response = self._request(
-            "DELETE",
-            f"/v1/templates/{template_id}",
+            "POST",
+            f"/v1/templates/{template_id}/archive",
             json_body=body if body else None,
         )
+        return TemplateArchiveResult.model_validate(response.json())
+
+    def unarchive_template(self, template_id: str) -> TemplateUnarchiveResult:
+        response = self._request("POST", f"/v1/templates/{template_id}/unarchive", json_body={})
+        return TemplateUnarchiveResult.model_validate(response.json())
+
+    def delete_template(self, template_id: str) -> TemplateDeleteResult:
+        response = self._request("DELETE", f"/v1/templates/{template_id}")
         return TemplateDeleteResult.model_validate(response.json())
 
-    def undelete_template(self, template_id: str) -> TemplateUndeleteResult:
-        response = self._request("POST", f"/v1/templates/{template_id}/undelete")
-        return TemplateUndeleteResult.model_validate(response.json())
+    def delete_template_version(
+        self, template_id: str, version: int
+    ) -> TemplateDeleteVersionResult:
+        response = self._request(
+            "DELETE", f"/v1/templates/{template_id}/versions/{version}/permanent"
+        )
+        return TemplateDeleteVersionResult.model_validate(response.json())
 
     def deprecate_template_version(
         self, template_id: str, version: int, *, message: str
@@ -744,6 +775,10 @@ class GoodeyeClient:
         response = self._request("DELETE", f"/v1/verifiers/{verifier_id}")
         return VerifierRevokeResult.model_validate(response.json())
 
+    def delete_verifier(self, verifier_id: str) -> VerifierDeleteResult:
+        response = self._request("DELETE", f"/v1/verifiers/{verifier_id}/permanent")
+        return VerifierDeleteResult.model_validate(response.json())
+
     # ----- image generators -----
 
     def deploy_image_generator(
@@ -853,6 +888,11 @@ class GoodeyeClient:
         """DELETE /v1/image-generators/{generator_id}."""
         response = self._request("DELETE", f"/v1/image-generators/{generator_id}")
         return ImageGeneratorRevokeResult.model_validate(response.json())
+
+    def delete_image_generator(self, generator_id: str) -> ImageGeneratorDeleteResult:
+        """DELETE /v1/image-generators/{generator_id}/permanent."""
+        response = self._request("DELETE", f"/v1/image-generators/{generator_id}/permanent")
+        return ImageGeneratorDeleteResult.model_validate(response.json())
 
     # ----- invitations -----
     def list_invitations(

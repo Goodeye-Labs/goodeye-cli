@@ -625,12 +625,7 @@ def _push_body(
 ) -> str:
     """A workflow body with front-matter whose name matches its slug."""
     return (
-        "---\n"
-        f"name: {slug}\n"
-        f"description: {description}\n"
-        f"outcome: {outcome}\n"
-        "---\n\n"
-        "do the work\n"
+        f"---\nname: {slug}\ndescription: {description}\noutcome: {outcome}\n---\n\ndo the work\n"
     )
 
 
@@ -847,7 +842,7 @@ def test_sync_umbrella_pulls_then_shows_status(
     _me_route()
     target_dir = tmp_path / "skills"
     _seed_target(monkeypatch, tmp_config_paths, str(target_dir))
-    # status lists with include_deleted, pull lists without; both hit the same
+    # status lists with include_archived, pull lists without; both hit the same
     # route, so one mock serves both passes.
     list_route = respx.get(f"{SERVER}/v1/workflows").mock(
         return_value=_list_response(
@@ -996,7 +991,7 @@ def test_pull_yes_removes_deleted_local_copy(
                     "name": "gone",
                     "current_version": 1,
                     "version_token": "tok",
-                    "deleted_at": "2026-01-01T00:00:00Z",
+                    "archived_at": "2026-01-01T00:00:00Z",
                 }
             ]
         )
@@ -1037,7 +1032,7 @@ def test_pull_table_hint_on_deleted_on_server(
                     "name": "gone",
                     "current_version": 1,
                     "version_token": "tok",
-                    "deleted_at": "2026-01-01T00:00:00Z",
+                    "archived_at": "2026-01-01T00:00:00Z",
                 }
             ]
         )

@@ -452,6 +452,8 @@ def revoke(
     Sets the generator to ``revoked`` and removes it from list/show/generate
     (subsequent calls return 404). Existing run rows are retained for audit.
     Irreversible: replace by deploying a fresh generator under a new name.
+
+    Use `image-generators delete` to permanently erase the generator and all its data.
     """
     console = Console()
     if not confirm_destructive(f"Revoke image generator {generator_id}?", yes=yes):
@@ -460,3 +462,45 @@ def revoke(
     with _client() as client:
         result = client.revoke_image_generator(generator_id)
     console.print(f"[green]Revoked[/green] {result.name}")
+
+
+@app.command("delete")
+def delete(
+    generator_id: str = typer.Argument(
+        ...,
+        help="Image generator UUID.",
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
+) -> None:
+    """Permanently and immediately delete an image generator you own.
+
+    WARNING: This is permanent. The generator, all its versions (provider config,
+    model, parameters), all run records, and all anonymous run records are removed
+    from the live system at once. There is NO recovery path.
+
+    Use `image-generators revoke` if you want a recoverable alternative that
+    deactivates the generator while keeping the audit trail intact. Revoking is
+    irreversible in the sense that the name cannot be reused, but the data is
+    preserved.
+
+    Serving gate: if any live published template version carries a snapshot
+    that references this generator, deletion is refused (409). Unpublish the
+    relevant template version(s) first, then retry.
+
+    Encrypted backups age out within the platform's standard retention window
+    (up to three months), so the content is not instantly erased from all
+    systems everywhere, but it is no longer accessible through any product
+    surface after this call.
+    """
+    console = Console()
+    if not confirm_destructive(
+        f"Permanently delete image generator {generator_id}? This cannot be undone.", yes=yes
+    ):
+        console.print("Cancelled.")
+        raise typer.Exit(code=0)
+    with _client() as client:
+        result = client.delete_image_generator(generator_id)
+    if result.deleted:
+        console.print(f"[green]Permanently deleted[/green] {result.name}")
+    else:
+        console.print(f"[yellow]Not deleted[/yellow] {result.name}")

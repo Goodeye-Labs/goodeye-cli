@@ -107,7 +107,7 @@ def _summary_dict(
     token: str = "tok",
     version: int = 1,
     role: str = "owner",
-    deleted_at: str | None = None,
+    archived_at: str | None = None,
 ) -> dict:
     payload: dict = {
         "id": id_,
@@ -116,8 +116,8 @@ def _summary_dict(
         "version_token": token,
         "effective_role": role,
     }
-    if deleted_at is not None:
-        payload["deleted_at"] = deleted_at
+    if archived_at is not None:
+        payload["archived_at"] = archived_at
     return payload
 
 
@@ -661,7 +661,7 @@ def test_delete_only_removes_tracked_files_keeps_untracked(
     # Workflow is gone server-side (soft-deleted).
     respx.get(f"{SERVER}/v1/workflows").mock(
         return_value=_list_response(
-            [_summary_dict(id_="wf_gone", name="gone", deleted_at="2026-01-01T00:00:00Z")]
+            [_summary_dict(id_="wf_gone", name="gone", archived_at="2026-01-01T00:00:00Z")]
         )
     )
 
@@ -745,8 +745,8 @@ def test_delete_rmdirs_only_if_empty(tmp_path: Path, tmp_config_paths: ConfigPat
     respx.get(f"{SERVER}/v1/workflows").mock(
         return_value=_list_response(
             [
-                _summary_dict(id_="wf_clean", name="clean-wf", deleted_at="2026-01-01T00:00:00Z"),
-                _summary_dict(id_="wf_dirty", name="dirty-wf", deleted_at="2026-01-01T00:00:00Z"),
+                _summary_dict(id_="wf_clean", name="clean-wf", archived_at="2026-01-01T00:00:00Z"),
+                _summary_dict(id_="wf_dirty", name="dirty-wf", archived_at="2026-01-01T00:00:00Z"),
             ]
         )
     )
@@ -822,7 +822,7 @@ def test_unpushed_sibling_edit_blocks_deletion(
     # Workflow is gone server-side.
     respx.get(f"{SERVER}/v1/workflows").mock(
         return_value=_list_response(
-            [_summary_dict(id_="wf_mod", name="modified-wf", deleted_at="2026-01-01T00:00:00Z")]
+            [_summary_dict(id_="wf_mod", name="modified-wf", archived_at="2026-01-01T00:00:00Z")]
         )
     )
 

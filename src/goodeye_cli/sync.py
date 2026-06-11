@@ -210,8 +210,7 @@ def add_target(
         raise ValidationFailed(
             slug="validation_error",
             message="Sync target must be an absolute path or under ~/.",
-            hint="Use an absolute path (e.g. /srv/skills) or a home-relative "
-            "path (e.g. ~/skills).",
+            hint="Use an absolute path (e.g. /srv/skills) or a home-relative path (e.g. ~/skills).",
         )
     stored_path = normalize_target_path(raw_path)
 
@@ -738,19 +737,19 @@ def _list_all_for_target(
     client: GoodeyeClient,
     target: SyncTarget,
     *,
-    include_deleted: bool = False,
+    include_archived: bool = False,
 ) -> list[WorkflowSummary]:
     """List every workflow visible to ``target``, following all pages.
 
-    ``include_deleted`` surfaces the caller's own soft-deleted workflows so a
-    fetch-free pass can spot a tracked workflow that was deleted server-side.
+    ``include_archived`` surfaces the caller's own archived workflows so a
+    fetch-free pass can spot a tracked workflow that was archived server-side.
     """
     from goodeye_cli.output import fetch_pages
 
     filter_ = scope_filter(target.scope)
     items, _ = fetch_pages(
         lambda page_cursor: client.list_workflows(
-            filter_=filter_, cursor=page_cursor, include_deleted=include_deleted
+            filter_=filter_, cursor=page_cursor, include_archived=include_archived
         ),
         cursor=None,
         all_pages=True,
@@ -908,7 +907,7 @@ def pull(
     whether to write it: an unchanged local copy is left alone, a locally
     edited copy is preserved unless ``force`` is set, and anything else is
     fetched and written verbatim. After materializing the live workflows, a
-    tracked entry whose workflow is gone server-side (soft-deleted or no longer
+    tracked entry whose workflow is gone server-side (archived or no longer
     visible) has its local copy removed, but only with confirmation (``yes``
     skips the prompt for agents and non-interactive callers); removing a local
     directory never touches the registry. The index is updated in memory as
@@ -929,10 +928,10 @@ def pull(
 
     try:
         for target in targets:
-            # Include the caller's soft-deleted rows so a tracked workflow that
-            # was deleted server-side is detectable without an extra fetch.
-            summaries = _list_all_for_target(client, target, include_deleted=True)
-            live = [s for s in summaries if s.deleted_at is None]
+            # Include the caller's archived rows so a tracked workflow that
+            # was archived server-side is detectable without an extra fetch.
+            summaries = _list_all_for_target(client, target, include_archived=True)
+            live = [s for s in summaries if s.archived_at is None]
             selected = select_for_target(target, live, slugs=slug_args or None)
             for summary in selected:
                 result.items.append(_pull_one(client, state, target, summary, force=force))
@@ -962,7 +961,7 @@ def _reconcile_deletions(
     """Remove local copies of tracked workflows that are gone server-side.
 
     A tracked entry for this target whose slug is in scope but whose workflow is
-    absent from the live set (soft-deleted, or no longer visible such as a
+    absent from the live set (archived, or no longer visible such as a
     revoked share) is reconciled: with confirmation its local directory is
     removed and its index entry dropped (``deleted-local``); without it the
     entry is reported as ``deleted-on-server`` and left intact. An out-of-scope
@@ -1400,7 +1399,7 @@ def _classify_tracked(
     """Classify one tracked index entry against its live summary (if any).
 
     Reads only the local body hash and the summary's ``version_token``: no body
-    is fetched. A summary that is absent or carries a ``deleted_at`` means the
+    is fetched. A summary that is absent or carries an ``archived_at`` means the
     workflow is gone server-side.
     """
     stored_target = normalize_target_path(target.path)
@@ -1416,7 +1415,7 @@ def _classify_tracked(
         next_action="none",
     )
 
-    if summary is None or summary.deleted_at is not None:
+    if summary is None or summary.archived_at is not None:
         return base.model_copy(update={"state": "deleted-on-server", "next_action": "resolve"})
 
     base = base.model_copy(update={"server_version": summary.current_version})
@@ -1448,7 +1447,7 @@ def status(
     """Report drift between the registry and the local mirror, without writing.
 
     For each target in scope this does a single listing pass (following all
-    pages, with the caller's soft-deleted workflows included so deletion is
+    pages, with the caller's archived workflows included so deletion is
     detectable fetch-free), then classifies each tracked index entry by
     comparing recorded version tokens and the local body hash. It never fetches
     a workflow body and never writes the index or any SKILL.md. Local
@@ -1468,7 +1467,7 @@ def status(
         filter_ = scope_filter(target.scope)
         summaries = listings.get(filter_)
         if summaries is None:
-            summaries = _list_all_for_target(client, target, include_deleted=True)
+            summaries = _list_all_for_target(client, target, include_archived=True)
             listings[filter_] = summaries
         result.items.extend(_status_for_target(target, summaries, state))
     return result
