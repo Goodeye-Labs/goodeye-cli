@@ -715,7 +715,11 @@ def grants(
         elif grant_row.shared_from_version is not None:
             history_cell = f"from v{grant_row.shared_from_version}"
         else:
-            history_cell = "from v?"
+            # Defensive fallback: a well-formed response always sets exactly one
+            # of the two fields above, so this only triggers if the scope fields
+            # are both absent (e.g. an older server). Label it as unknown rather
+            # than a malformed version string.
+            history_cell = "unknown"
         table.add_row(
             grant_row.grantee_identifier,
             grant_row.grantee_type,
