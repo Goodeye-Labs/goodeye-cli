@@ -653,12 +653,25 @@ def grant(
     workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
     grantee: str = typer.Argument(..., help="User or team UUID, email, or handle."),
     role: str = typer.Argument(..., help="Role to grant: view, edit, or admin."),
+    include_history: bool = typer.Option(
+        False,
+        "--include-history",
+        help=(
+            "Share the workflow's full version history"
+            " (default: only the version current at share time and later)."
+        ),
+    ),
 ) -> None:
     """Grant workflow access to a named user or team."""
     console = Console()
     with _client(require_auth=True) as client:
-        result = client.grant_workflow(workflow_id, grantee, role.lower())
-    console.print(f"[green]Granted[/green] {result.role} on {result.workflow_id} to {grantee}")
+        result = client.grant_workflow(
+            workflow_id, grantee, role.lower(), include_history=include_history
+        )
+    history_note = " (full history)" if include_history else ""
+    console.print(
+        f"[green]Granted[/green] {result.role} on {result.workflow_id} to {grantee}{history_note}"
+    )
 
 
 @app.command("revoke-grant")
@@ -695,12 +708,20 @@ def grants(
     table.add_column("Type")
     table.add_column("Role")
     table.add_column("Via team")
+    table.add_column("History")
     for grant_row in result.items:
+        if grant_row.includes_full_history:
+            history_cell = "full"
+        elif grant_row.shared_from_version is not None:
+            history_cell = f"from v{grant_row.shared_from_version}"
+        else:
+            history_cell = "from v?"
         table.add_row(
             grant_row.grantee_identifier,
             grant_row.grantee_type,
             grant_row.role,
             "yes" if grant_row.is_via_team else "no",
+            history_cell,
         )
     if not result.items:
         console.print("[dim]No grants.[/dim]")

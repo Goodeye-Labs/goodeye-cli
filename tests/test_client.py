@@ -373,6 +373,75 @@ def test_workflow_grant_client_methods() -> None:
 
 
 @respx.mock
+def test_grant_workflow_include_history_true_sends_flag() -> None:
+    grant_route = respx.post(f"{SERVER}/v1/workflows/wf_1/grants").mock(
+        return_value=httpx.Response(201, json={"workflow_id": "wf_1", "role": "view"})
+    )
+
+    with GoodeyeClient(SERVER, api_key="k") as client:
+        client.grant_workflow("wf_1", "alice@example.com", "view", include_history=True)
+
+    body = _json.loads(grant_route.calls.last.request.content.decode())
+    assert body["include_history"] is True
+
+
+@respx.mock
+def test_grant_workflow_default_include_history_sends_false() -> None:
+    grant_route = respx.post(f"{SERVER}/v1/workflows/wf_1/grants").mock(
+        return_value=httpx.Response(201, json={"workflow_id": "wf_1", "role": "view"})
+    )
+
+    with GoodeyeClient(SERVER, api_key="k") as client:
+        client.grant_workflow("wf_1", "alice@example.com", "view")
+
+    body = _json.loads(grant_route.calls.last.request.content.decode())
+    assert body["include_history"] is False
+
+
+@respx.mock
+def test_list_workflow_grants_parses_history_fields() -> None:
+    respx.get(f"{SERVER}/v1/workflows/wf_1/grants").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "grantee_type": "user",
+                        "grantee_identifier": "alice@example.com",
+                        "role": "view",
+                        "granted_by": "owner",
+                        "granted_at": "2026-05-01T00:00:00Z",
+                        "is_via_team": False,
+                        "includes_full_history": True,
+                        "shared_from_version": None,
+                    },
+                    {
+                        "grantee_type": "user",
+                        "grantee_identifier": "bob@example.com",
+                        "role": "edit",
+                        "granted_by": "owner",
+                        "granted_at": "2026-05-02T00:00:00Z",
+                        "is_via_team": False,
+                        "includes_full_history": False,
+                        "shared_from_version": 4,
+                    },
+                ]
+            },
+        )
+    )
+
+    with GoodeyeClient(SERVER, api_key="k") as client:
+        result = client.list_workflow_grants("wf_1")
+
+    alice = result.items[0]
+    bob = result.items[1]
+    assert alice.includes_full_history is True
+    assert alice.shared_from_version is None
+    assert bob.includes_full_history is False
+    assert bob.shared_from_version == 4
+
+
+@respx.mock
 def test_team_client_methods_send_identifier_payloads() -> None:
     add_route = respx.post(f"{SERVER}/v1/teams/analytics/members").mock(
         return_value=httpx.Response(201, json={"team_id": "team_1", "user_id": "user_1"})

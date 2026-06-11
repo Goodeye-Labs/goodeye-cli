@@ -344,7 +344,11 @@ class GoodeyeClient:
         return WorkflowUndeleteResult.model_validate(response.json())
 
     def grant_workflow(
-        self, workflow_id: str, grantee_email_or_at_team_handle: str, role: str
+        self,
+        workflow_id: str,
+        grantee_email_or_at_team_handle: str,
+        role: str,
+        include_history: bool = False,
     ) -> WorkflowGrantResult:
         response = self._request(
             "POST",
@@ -352,6 +356,7 @@ class GoodeyeClient:
             json_body={
                 "grantee_email_or_at_team_handle": grantee_email_or_at_team_handle,
                 "role": role,
+                "include_history": include_history,
             },
         )
         return WorkflowGrantResult.model_validate(response.json())
