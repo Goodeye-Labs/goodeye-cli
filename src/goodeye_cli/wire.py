@@ -222,6 +222,8 @@ class WorkflowGrant(_WireBase):
     granted_by: str
     granted_at: datetime | None = None
     is_via_team: bool = False
+    includes_full_history: bool = False
+    shared_from_version: int | None = None
 
 
 class WorkflowGrantList(_WireBase):

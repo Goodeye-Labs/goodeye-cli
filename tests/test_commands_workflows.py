@@ -1199,8 +1199,131 @@ def test_workflows_grants_defaults_to_compact_json_envelope(
     assert result.output == (
         '{"items":[{"grantee_type":"team","grantee_identifier":"@analytics",'
         '"role":"admin","granted_by":"owner","granted_at":"2026-04-24T00:00:00Z",'
-        '"is_via_team":true}]}\n'
+        '"is_via_team":true,"includes_full_history":false,"shared_from_version":null}]}\n'
     )
+
+
+@respx.mock
+def test_grant_include_history_flag_passes_true(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    grant_route = respx.post(f"{SERVER}/v1/workflows/wf_2/grants").mock(
+        return_value=httpx.Response(201, json={"workflow_id": "wf_2", "role": "view"})
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app, ["workflows", "grant", "wf_2", "alice@example.com", "view", "--include-history"]
+    )
+
+    assert result.exit_code == 0, result.output
+    body = _json.loads(grant_route.calls.last.request.content.decode())
+    assert body["include_history"] is True
+    assert "full history" in result.output
+
+
+@respx.mock
+def test_grant_omitting_include_history_flag_passes_false(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    grant_route = respx.post(f"{SERVER}/v1/workflows/wf_2/grants").mock(
+        return_value=httpx.Response(201, json={"workflow_id": "wf_2", "role": "view"})
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "grant", "wf_2", "alice@example.com", "view"])
+
+    assert result.exit_code == 0, result.output
+    body = _json.loads(grant_route.calls.last.request.content.decode())
+    assert body["include_history"] is False
+    assert "full history" not in result.output
+
+
+@respx.mock
+def test_grants_table_surfaces_history_scope(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.get(f"{SERVER}/v1/workflows/wf_3/grants").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "grantee_type": "user",
+                        "grantee_identifier": "alice@example.com",
+                        "role": "view",
+                        "granted_by": "owner",
+                        "granted_at": "2026-05-01T00:00:00Z",
+                        "is_via_team": False,
+                        "includes_full_history": True,
+                        "shared_from_version": None,
+                    },
+                    {
+                        "grantee_type": "user",
+                        "grantee_identifier": "bob@example.com",
+                        "role": "edit",
+                        "granted_by": "owner",
+                        "granted_at": "2026-05-02T00:00:00Z",
+                        "is_via_team": False,
+                        "includes_full_history": False,
+                        "shared_from_version": 4,
+                    },
+                ]
+            },
+        )
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "grants", "wf_3", "--table"])
+
+    assert result.exit_code == 0, result.output
+    assert "full" in result.output
+    assert "from v4" in result.output
+
+
+@respx.mock
+def test_grants_json_includes_history_fields(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.get(f"{SERVER}/v1/workflows/wf_3/grants").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "grantee_type": "user",
+                        "grantee_identifier": "alice@example.com",
+                        "role": "view",
+                        "granted_by": "owner",
+                        "granted_at": "2026-05-01T00:00:00Z",
+                        "is_via_team": False,
+                        "includes_full_history": True,
+                        "shared_from_version": None,
+                    },
+                    {
+                        "grantee_type": "user",
+                        "grantee_identifier": "bob@example.com",
+                        "role": "edit",
+                        "granted_by": "owner",
+                        "granted_at": "2026-05-02T00:00:00Z",
+                        "is_via_team": False,
+                        "includes_full_history": False,
+                        "shared_from_version": 4,
+                    },
+                ]
+            },
+        )
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "grants", "wf_3"])
+
+    assert result.exit_code == 0, result.output
+    parsed = _json.loads(result.output)
+    alice = parsed["items"][0]
+    bob = parsed["items"][1]
+    assert alice["includes_full_history"] is True
+    assert alice["shared_from_version"] is None
+    assert bob["includes_full_history"] is False
+    assert bob["shared_from_version"] == 4
 
 
 @respx.mock
