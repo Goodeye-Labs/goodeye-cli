@@ -503,22 +503,22 @@ def deprecate_version_cmd(
 
 @app.command("lineage")
 def lineage_cmd(
-    template_ref: str = typer.Argument(
+    workflow_ref: str = typer.Argument(
         ...,
-        help=(
-            "Template UUID, @handle/slug, or workflow UUID for a forked workflow's lineage. "
-            "This command resolves template-level lineage when given a template identifier."
-        ),
+        help="Forked workflow's UUID or name. This is a workflow identifier, not a template one.",
     ),
     json_output: bool = typer.Option(False, "--json", help="Print lineage as JSON."),
 ) -> None:
-    """Show a forked workflow's lineage relative to a template.
+    """Show a forked workflow's lineage relative to the template it was forked from.
 
-    For template-level source status use `goodeye workflows lineage <workflow_id>`.
+    Pass the forked workflow's id or name (not a template id or @handle/slug). The
+    output reports the parent template, the pinned version, and whether that parent
+    was later archived, permanently deleted, or had the pinned version deprecated.
+    This is the same view as `goodeye workflows lineage <workflow_ref>`.
     """
     console = Console()
     with _client(require_auth=True) as client:
-        result = client.lookup_workflow_lineage(template_ref)
+        result = client.lookup_workflow_lineage(workflow_ref)
     if json_output:
         typer.echo(result.model_dump_json(indent=2))
         return
