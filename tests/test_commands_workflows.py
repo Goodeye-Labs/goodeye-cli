@@ -975,6 +975,26 @@ def test_workflows_delete_with_yes_flag(tmp_config_paths: ConfigPaths, monkeypat
 
 
 @respx.mock
+def test_workflows_delete_noninteractive_without_yes_aborts(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    # Permanent delete must refuse to erase data when driven headlessly
+    # without an explicit --yes: no DELETE is issued, and the run fails.
+    _setup_creds(monkeypatch, tmp_config_paths)
+    route = respx.delete(f"{SERVER}/v1/workflows/skl_01").mock(
+        return_value=httpx.Response(
+            200, json={"workflow_id": "skl_01", "name": "skl_01", "deleted": True}
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "delete", "skl_01"])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ValidationFailed)
+    assert "--yes" in result.exception.message
+    assert route.call_count == 0
+
+
+@respx.mock
 def test_workflows_archive_success(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
     route = respx.post(f"{SERVER}/v1/workflows/skl_01/archive").mock(
@@ -1413,13 +1433,18 @@ def test_workflows_lineage_surfaces_archived_and_deprecated_parent(
 def test_workflows_lineage_surfaces_permanently_deleted_parent(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
+    # A permanently-deleted parent severs the FK: the server returns
+    # parent_template_id=None while still pinning the version the fork was
+    # taken from and flagging parent_permanently_deleted=true. The CLI must
+    # surface the deletion rather than mislabel the fork as "not a fork" or
+    # print "template None".
     _setup_creds(monkeypatch, tmp_config_paths)
     respx.get(f"{SERVER}/v1/workflows/wf_1/lineage").mock(
         return_value=httpx.Response(
             200,
             json={
                 "workflow_id": "wf_1",
-                "parent_template_id": "tpl_1",
+                "parent_template_id": None,
                 "parent_template_version": 2,
                 "upstream_latest_version": None,
                 "is_upstream_unpublished": None,
@@ -1436,6 +1461,9 @@ def test_workflows_lineage_surfaces_permanently_deleted_parent(
     result = runner.invoke(app, ["workflows", "lineage", "wf_1"])
     assert result.exit_code == 0, result.output
     assert "permanently deleted" in result.output.lower()
+    assert "not a fork" not in result.output.lower()
+    assert "template None" not in result.output
+    assert "v2" in result.output
 
 
 @respx.mock

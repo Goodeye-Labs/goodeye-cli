@@ -76,7 +76,10 @@ def list_cmd(
     include_archived: bool = typer.Option(
         False,
         "--include-archived",
-        help="Also list your own archived templates (restore with `templates unarchive`).",
+        help=(
+            "Also list your own archived templates (restore with `templates unarchive`). "
+            "A template still appears only while at least one of its versions is published."
+        ),
     ),
 ) -> None:
     """List public templates."""
@@ -412,7 +415,9 @@ def delete_cmd(
     """
     console = Console()
     if not confirm_destructive(
-        f"Permanently delete template {template_ref}? This cannot be undone.", yes=yes
+        f"Permanently delete template {template_ref}? This cannot be undone.",
+        yes=yes,
+        require_explicit_yes_when_noninteractive=True,
     ):
         console.print("Cancelled.")
         raise typer.Exit(code=0)
@@ -458,6 +463,7 @@ def delete_version_cmd(
     if not confirm_destructive(
         f"Permanently delete template {template_ref} version {version}? This cannot be undone.",
         yes=yes,
+        require_explicit_yes_when_noninteractive=True,
     ):
         console.print("Cancelled.")
         raise typer.Exit(code=0)
@@ -522,8 +528,23 @@ def lineage_cmd(
     if json_output:
         typer.echo(result.model_dump_json(indent=2))
         return
-    if result.parent_template_id is None:
+    # A permanently-deleted parent severs the FK, so the response carries
+    # parent_template_id=None while still pinning the version the fork was
+    # taken from. A workflow that was never a fork has neither. Only the
+    # latter is "not a fork"; gating on parent_template_id alone would
+    # mislabel a deleted-parent fork and try to print "template None".
+    if result.parent_template_id is None and result.parent_template_version is None:
         console.print("[dim]Not a fork (no parent template).[/dim]")
+        return
+    if result.parent_template_id is None:
+        console.print(
+            f"Forked from a template (now permanently deleted) "
+            f"pinned to v{result.parent_template_version}."
+        )
+        console.print(
+            "[red]Parent template permanently deleted[/red] "
+            "(content no longer accessible through any product surface)."
+        )
         return
     console.print(
         f"Forked from template {result.parent_template_id} "

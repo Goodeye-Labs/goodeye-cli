@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from unittest import mock
 
+import pytest
+
 from goodeye_cli.commands.prompts import confirm_destructive
+from goodeye_cli.errors import ValidationFailed
 
 
 def test_re_export_is_the_neutral_implementation() -> None:
@@ -49,4 +52,49 @@ def test_tty_stdin_defers_to_typer_confirm() -> None:
         stdin.isatty.return_value = True
         confirm.return_value = False
         assert confirm_destructive("delete?", yes=False) is False
+    confirm.assert_called_once_with("delete?", default=False)
+
+
+def test_permanent_delete_noninteractive_without_yes_aborts() -> None:
+    """Permanent, irreversible deletes must not auto-approve when headless:
+    a piped/agent/CI caller has to pass --yes to erase data.
+    """
+    with (
+        mock.patch("goodeye_cli.prompts.sys.stdin") as stdin,
+        mock.patch("goodeye_cli.prompts.typer.confirm") as confirm,
+    ):
+        stdin.isatty.return_value = False
+        with pytest.raises(ValidationFailed) as excinfo:
+            confirm_destructive("delete?", yes=False, require_explicit_yes_when_noninteractive=True)
+    confirm.assert_not_called()
+    assert "--yes" in excinfo.value.message
+
+
+def test_permanent_delete_yes_short_circuits_even_when_noninteractive() -> None:
+    with (
+        mock.patch("goodeye_cli.prompts.sys.stdin") as stdin,
+        mock.patch("goodeye_cli.prompts.typer.confirm") as confirm,
+    ):
+        stdin.isatty.return_value = False
+        assert (
+            confirm_destructive("delete?", yes=True, require_explicit_yes_when_noninteractive=True)
+            is True
+        )
+    confirm.assert_not_called()
+
+
+def test_permanent_delete_interactive_tty_still_prompts() -> None:
+    """The stricter flag only changes headless behavior; a real terminal
+    user keeps the normal confirmation prompt.
+    """
+    with (
+        mock.patch("goodeye_cli.prompts.sys.stdin") as stdin,
+        mock.patch("goodeye_cli.prompts.typer.confirm") as confirm,
+    ):
+        stdin.isatty.return_value = True
+        confirm.return_value = True
+        assert (
+            confirm_destructive("delete?", yes=False, require_explicit_yes_when_noninteractive=True)
+            is True
+        )
     confirm.assert_called_once_with("delete?", default=False)

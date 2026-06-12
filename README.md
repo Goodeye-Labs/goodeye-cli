@@ -299,13 +299,14 @@ goodeye auth revoke-key <key-id-or-name>
     Revoke an API key. The key stops working immediately. The argument may
     be the ID shown by `auth list-keys` or a unique key name.
 
-goodeye workflows list [--filter mine|shared-with-me|all] [--tag TAG] [--search QUERY] [--limit N] [--cursor TOKEN] [--all] [--include-deleted] [--json|--table]
+goodeye workflows list [--filter mine|shared-with-me|all] [--tag TAG] [--search QUERY] [--limit N] [--cursor TOKEN] [--all] [--include-archived] [--json|--table]
     List workflows you can access (owned + shared with you via grants). The
-    ID column is accepted by `get`, `delete`, and grant commands. When signed
-    in, you can also use your own workflow name (slug). Fetches one page by
-    default; --all follows cursors and returns a combined items envelope.
-    Pass --include-deleted to also list your own soft-deleted workflows; the
-    table then adds a "Deleted at" column (restore with `workflows undelete`).
+    ID column is accepted by `get`, `archive`, `delete`, and grant commands.
+    When signed in, you can also use your own workflow name (slug). Fetches
+    one page by default; --all follows cursors and returns a combined items
+    envelope. Pass --include-archived to also list your own archived
+    workflows; the table then adds an "Archived at" column (restore with
+    `workflows unarchive`).
 
 goodeye workflows search <query> [--filter mine|shared-with-me|all] [--tag TAG] [--limit N] [--json|--table]
     LLM-ranked natural-language search over workflows you can access.
@@ -329,13 +330,29 @@ goodeye workflows publish <file.md|-> [--name NAME] [--description TEXT] [--outc
     share publicly, run `goodeye templates publish <workflow-uuid-or-name>` as
     a separate step.
 
-goodeye workflows delete <id-or-name> [--yes]
-    Delete a workflow you own.
+goodeye workflows archive <id-or-name> [--yes]
+    Archive a workflow you own. Archiving hides it from list results and
+    grants but keeps every version and file intact. Reversible with
+    `workflows unarchive`. Prefer this over `delete` unless you truly want
+    permanent removal.
 
-goodeye workflows undelete <id-or-name>
-    Restore a soft-deleted workflow you own (the inverse of `delete`). If a
-    live workflow already holds the deleted workflow's name, delete or
-    rename that one first, then retry.
+goodeye workflows unarchive <id-or-name>
+    Restore an archived workflow you own (the inverse of `archive`). It
+    becomes visible again in list results and grants.
+
+goodeye workflows delete <id-or-name> [--yes]
+    Permanently and immediately delete a workflow you own: the workflow, all
+    its versions, all attached files, and all access grants are removed at
+    once. There is NO recovery path; use `archive` for a reversible
+    alternative. When run non-interactively (piped or in CI), --yes is
+    required.
+
+goodeye workflows delete-version <id-or-name> <version> [--yes]
+    Permanently and immediately delete a single non-current workflow version
+    and its attached files. The current (live) version cannot be removed this
+    way; use `delete` for the whole workflow. There is NO recovery path.
+    Surviving version numbers are not renumbered. When run non-interactively,
+    --yes is required.
 
 goodeye workflows teach <id-or-name> [--trigger-context JSON]
     Fetch the teach SKILL pack for an existing workflow. The pack is
@@ -345,8 +362,10 @@ goodeye workflows teach <id-or-name> [--trigger-context JSON]
 goodeye workflows lineage <id-or-name> [--json]
     Show a workflow's fork lineage (parent template, upstream latest).
 
-goodeye workflows grant <id-or-name> <grantee> <view|edit|admin>
-    Share a workflow with a user email or @team handle.
+goodeye workflows grant <id-or-name> <grantee> <view|edit|admin> [--include-history]
+    Share a workflow with a user email or @team handle. By default the
+    grantee sees the version current at share time and later; pass
+    --include-history to share the workflow's full version history.
 
 goodeye workflows revoke-grant <id-or-name> <grantee>
     Revoke a direct grant.
@@ -399,10 +418,12 @@ goodeye workflows sync push [SLUG...] [--target DIR] [--json|--table]
     is reported as a conflict and left untouched (reconcile with `sync pull`
     first). Omit slugs to push every locally edited workflow in scope.
 
-goodeye templates list [--filter all|mine] [--search QUERY] [--limit N] [--cursor TOKEN] [--all] [--json|--table]
+goodeye templates list [--filter all|mine] [--search QUERY] [--limit N] [--cursor TOKEN] [--all] [--include-archived] [--json|--table]
     Browse the public template catalog. Anonymous reads allowed. Fetches one
     page by default; --all follows cursors and returns a combined items
-    envelope.
+    envelope. Pass --include-archived to also list your own archived
+    templates (restore with `templates unarchive`); a template still appears
+    only while at least one of its versions remains published.
 
 goodeye templates search <query> [--filter all|mine] [--limit N] [--json|--table]
     LLM-ranked natural-language search over public templates. Defaults to
@@ -423,12 +444,33 @@ goodeye templates unpublish <template-ref> <version>
 goodeye templates fork <identifier> [--version N] [--name NAME]
     Fork a public template into a private workflow. Authentication required.
 
-goodeye templates delete <template-ref> [--reason TEXT]
-    Soft-delete a template you own. Existing forks keep working.
+goodeye templates archive <template-ref> [--reason TEXT] [--yes]
+    Archive a template you own. Archiving hides it from the public catalog
+    but keeps every version and fork lineage intact; existing forks keep
+    working. Reversible with `templates unarchive`. <template-ref> is a
+    template UUID or @handle/slug.
+
+goodeye templates unarchive <template-ref>
+    Restore an archived template you own (the inverse of `archive`). It
+    becomes visible again in the public catalog.
     <template-ref> is a template UUID or @handle/slug.
 
-goodeye templates undelete <template-ref>
-    Restore a previously deleted template you own.
+goodeye templates delete <template-ref> [--yes]
+    Permanently and immediately delete a template you own: the template, all
+    its versions, all attached files, and all version verification records
+    are removed at once. There is NO recovery path; use `archive` for a
+    reversible alternative. A template that is not archived and still has a
+    published version is refused (unpublish those versions or archive it
+    first). Forks keep their own content; their parent pointer is severed and
+    `workflows lineage` reports the source as permanently deleted. When run
+    non-interactively, --yes is required. <template-ref> is a template UUID or
+    @handle/slug.
+
+goodeye templates delete-version <template-ref> <version> [--yes]
+    Permanently and immediately delete a single template version, its files,
+    and its verification records. The version must be unpublished first (use
+    `templates unpublish`). There is NO recovery path. Surviving version
+    numbers are not renumbered. When run non-interactively, --yes is required.
     <template-ref> is a template UUID or @handle/slug.
 
 goodeye templates deprecate-version <template-ref> <version> --message TEXT

@@ -518,8 +518,23 @@ def lineage(
     if json_output:
         typer.echo(result.model_dump_json(indent=2))
         return
-    if result.parent_template_id is None:
+    # A permanently-deleted parent severs the FK, so the response carries
+    # parent_template_id=None while still pinning the version the fork was
+    # taken from. A workflow that was never a fork has neither. Only the
+    # latter is "not a fork"; gating on parent_template_id alone would
+    # mislabel a deleted-parent fork and try to print "template None".
+    if result.parent_template_id is None and result.parent_template_version is None:
         console.print("[dim]Not a fork (no parent template).[/dim]")
+        return
+    if result.parent_template_id is None:
+        console.print(
+            f"Forked from a template (now permanently deleted) "
+            f"pinned to v{result.parent_template_version}."
+        )
+        console.print(
+            "[red]Parent template permanently deleted[/red] "
+            "(content no longer accessible through any product surface)."
+        )
         return
     console.print(
         f"Forked from template {result.parent_template_id} "
@@ -600,7 +615,9 @@ def delete(
     """
     console = Console()
     if not confirm_destructive(
-        f"Permanently delete workflow {workflow_id}? This cannot be undone.", yes=yes
+        f"Permanently delete workflow {workflow_id}? This cannot be undone.",
+        yes=yes,
+        require_explicit_yes_when_noninteractive=True,
     ):
         console.print("Cancelled.")
         raise typer.Exit(code=0)
@@ -640,6 +657,7 @@ def delete_version(
     if not confirm_destructive(
         f"Permanently delete workflow {workflow_id} version {version}? This cannot be undone.",
         yes=yes,
+        require_explicit_yes_when_noninteractive=True,
     ):
         console.print("Cancelled.")
         raise typer.Exit(code=0)
