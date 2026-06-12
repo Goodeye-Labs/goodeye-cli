@@ -417,7 +417,6 @@ def delete_cmd(
     if not confirm_destructive(
         f"Permanently delete template {template_ref}? This cannot be undone.",
         yes=yes,
-        require_explicit_yes_when_noninteractive=True,
     ):
         console.print("Cancelled.")
         raise typer.Exit(code=0)
@@ -463,7 +462,6 @@ def delete_version_cmd(
     if not confirm_destructive(
         f"Permanently delete template {template_ref} version {version}? This cannot be undone.",
         yes=yes,
-        require_explicit_yes_when_noninteractive=True,
     ):
         console.print("Cancelled.")
         raise typer.Exit(code=0)

@@ -975,26 +975,6 @@ def test_workflows_delete_with_yes_flag(tmp_config_paths: ConfigPaths, monkeypat
 
 
 @respx.mock
-def test_workflows_delete_noninteractive_without_yes_aborts(
-    tmp_config_paths: ConfigPaths, monkeypatch
-) -> None:
-    # Permanent delete must refuse to erase data when driven headlessly
-    # without an explicit --yes: no DELETE is issued, and the run fails.
-    _setup_creds(monkeypatch, tmp_config_paths)
-    route = respx.delete(f"{SERVER}/v1/workflows/skl_01").mock(
-        return_value=httpx.Response(
-            200, json={"workflow_id": "skl_01", "name": "skl_01", "deleted": True}
-        )
-    )
-    runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "delete", "skl_01"])
-    assert result.exit_code != 0
-    assert isinstance(result.exception, ValidationFailed)
-    assert "--yes" in result.exception.message
-    assert route.call_count == 0
-
-
-@respx.mock
 def test_workflows_archive_success(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
     route = respx.post(f"{SERVER}/v1/workflows/skl_01/archive").mock(

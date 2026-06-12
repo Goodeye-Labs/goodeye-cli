@@ -344,15 +344,13 @@ goodeye workflows delete <id-or-name> [--yes]
     Permanently and immediately delete a workflow you own: the workflow, all
     its versions, all attached files, and all access grants are removed at
     once. There is NO recovery path; use `archive` for a reversible
-    alternative. When run non-interactively (piped or in CI), --yes is
-    required.
+    alternative.
 
 goodeye workflows delete-version <id-or-name> <version> [--yes]
     Permanently and immediately delete a single non-current workflow version
     and its attached files. The current (live) version cannot be removed this
     way; use `delete` for the whole workflow. There is NO recovery path.
-    Surviving version numbers are not renumbered. When run non-interactively,
-    --yes is required.
+    Surviving version numbers are not renumbered.
 
 goodeye workflows teach <id-or-name> [--trigger-context JSON]
     Fetch the teach SKILL pack for an existing workflow. The pack is
@@ -462,16 +460,15 @@ goodeye templates delete <template-ref> [--yes]
     reversible alternative. A template that is not archived and still has a
     published version is refused (unpublish those versions or archive it
     first). Forks keep their own content; their parent pointer is severed and
-    `workflows lineage` reports the source as permanently deleted. When run
-    non-interactively, --yes is required. <template-ref> is a template UUID or
-    @handle/slug.
+    `workflows lineage` reports the source as permanently deleted.
+    <template-ref> is a template UUID or @handle/slug.
 
 goodeye templates delete-version <template-ref> <version> [--yes]
     Permanently and immediately delete a single template version, its files,
     and its verification records. The version must be unpublished first (use
     `templates unpublish`). There is NO recovery path. Surviving version
-    numbers are not renumbered. When run non-interactively, --yes is required.
-    <template-ref> is a template UUID or @handle/slug.
+    numbers are not renumbered. <template-ref> is a template UUID or
+    @handle/slug.
 
 goodeye templates deprecate-version <template-ref> <version> --message TEXT
     Flag a single template version as deprecated, with a message shown

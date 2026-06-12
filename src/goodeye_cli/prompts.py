@@ -17,40 +17,15 @@ import sys
 
 import typer
 
-from goodeye_cli.errors import ValidationFailed
 
-
-def confirm_destructive(
-    message: str,
-    *,
-    yes: bool,
-    require_explicit_yes_when_noninteractive: bool = False,
-) -> bool:
+def confirm_destructive(message: str, *, yes: bool) -> bool:
     """Return ``True`` when the destructive action should proceed.
 
     Skips the prompt when ``yes`` is set or when stdin is not a TTY so
     agents and CI invocations never block on input. At an interactive
     terminal, defers to ``typer.confirm`` with a no-default so a stray
     Enter does not approve.
-
-    ``require_explicit_yes_when_noninteractive`` raises the safety bar for
-    irreversible actions (permanent delete): when stdin is not a TTY the
-    helper no longer auto-approves. Instead it raises so a piped, agent, or
-    CI invocation must pass ``--yes`` to erase data, while ``--yes`` and
-    interactive prompts behave exactly as before. Recoverable or idempotent
-    actions (archive, unarchive, leave) leave this off and keep the standard
-    auto-approve-when-headless behavior.
     """
-    if yes:
-        return True
-    if not sys.stdin.isatty():
-        if require_explicit_yes_when_noninteractive:
-            raise ValidationFailed(
-                slug="confirmation_required",
-                message=(
-                    "This action permanently deletes data and cannot be undone. "
-                    "Re-run with --yes to confirm non-interactively."
-                ),
-            )
+    if yes or not sys.stdin.isatty():
         return True
     return typer.confirm(message, default=False)
