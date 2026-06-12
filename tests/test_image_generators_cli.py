@@ -743,6 +743,57 @@ def test_image_generators_revoke_human_decline_exits_zero(
 
 
 # ---------------------------------------------------------------------------
+# delete (permanent)
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_image_generators_delete_calls_permanent_route(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """Permanent delete hits DELETE /v1/image-generators/{id}/permanent
+    (distinct from the recoverable revoke route) and reports the erasure.
+    """
+    _setup_creds(monkeypatch, tmp_config_paths)
+    route = respx.delete(f"{SERVER}/v1/image-generators/{GENERATOR_UUID}/permanent").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "generator_id": GENERATOR_UUID,
+                "name": "my-generator",
+                "deleted": True,
+            },
+        )
+    )
+    result = runner.invoke(app, ["image-generators", "delete", GENERATOR_UUID])
+    assert result.exit_code == 0, result.output
+    assert route.call_count == 1
+    assert "ermanently deleted" in result.output
+    assert "my-generator" in result.output
+
+
+def test_image_generators_delete_human_decline_exits_zero(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """User-cancel is exit 0; the permanent-delete call does not fire."""
+    from unittest import mock
+
+    _setup_creds(monkeypatch, tmp_config_paths)
+    with mock.patch(
+        "goodeye_cli.commands.image_generators.confirm_destructive", return_value=False
+    ):
+        result = runner.invoke(app, ["image-generators", "delete", GENERATOR_UUID])
+    assert result.exit_code == 0, result.output
+    assert "Cancelled" in result.output
+
+
+def test_image_generators_delete_requires_auth(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _setup_no_creds(monkeypatch, tmp_config_paths)
+    result = runner.invoke(app, ["image-generators", "delete", GENERATOR_UUID])
+    assert result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
 # auth-required paths
 # ---------------------------------------------------------------------------
 

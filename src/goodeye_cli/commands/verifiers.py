@@ -423,6 +423,8 @@ def revoke(
     Sets the verifier to `revoked` and removes it from list/show/run
     (subsequent calls return 404). Existing run rows are retained for audit.
     Irreversible: replace by deploying a fresh verifier under a new name.
+
+    Use `verifiers delete` to permanently erase the verifier and all its data.
     """
     console = Console()
     if not confirm_destructive(f"Revoke verifier {verifier_id}?", yes=yes):
@@ -431,3 +433,44 @@ def revoke(
     with _client() as client:
         result = client.revoke_verifier(verifier_id)
     console.print(f"[green]Revoked[/green] {result.name}")
+
+
+@app.command("delete")
+def delete(
+    verifier_id: str = typer.Argument(
+        ...,
+        help="Verifier UUID for a caller-owned verifier.",
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
+) -> None:
+    """Permanently and immediately delete a verifier you own.
+
+    WARNING: This is permanent. The verifier, all its versions (criterion,
+    calibration examples, input contracts), all run records, and all access
+    grants are removed from the live system at once. There is NO recovery path.
+
+    Use `verifiers revoke` if you want a recoverable alternative that deactivates
+    the verifier while keeping the audit trail intact. Revoking is irreversible
+    in the sense that the name cannot be reused, but the data is preserved.
+
+    Serving gate: if any live published template version carries a snapshot
+    that references this verifier, deletion is refused (409). Unpublish the
+    relevant template version(s) first, then retry.
+
+    Encrypted backups age out within the platform's standard retention window
+    (up to three months), so the content is not instantly erased from all
+    systems everywhere, but it is no longer accessible through any product
+    surface after this call.
+    """
+    console = Console()
+    if not confirm_destructive(
+        f"Permanently delete verifier {verifier_id}? This cannot be undone.", yes=yes
+    ):
+        console.print("Cancelled.")
+        raise typer.Exit(code=0)
+    with _client() as client:
+        result = client.delete_verifier(verifier_id)
+    if result.deleted:
+        console.print(f"[green]Permanently deleted[/green] {result.name}")
+    else:
+        console.print(f"[yellow]Not deleted[/yellow] {result.name}")

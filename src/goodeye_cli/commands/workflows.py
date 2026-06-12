@@ -75,10 +75,10 @@ def list_cmd(
     limit: int = typer.Option(25, "--limit", "-l", min=1, help="Max results per page."),
     cursor: str | None = typer.Option(None, "--cursor", help="Start listing from this cursor."),
     all_pages: bool = typer.Option(False, "--all", help="Follow cursors and combine all pages."),
-    include_deleted: bool = typer.Option(
+    include_archived: bool = typer.Option(
         False,
-        "--include-deleted",
-        help="Also list your own soft-deleted workflows (restore with `workflows undelete`).",
+        "--include-archived",
+        help="Also list your own archived workflows (restore with `workflows unarchive`).",
     ),
 ) -> None:
     """List workflows you own."""
@@ -92,7 +92,7 @@ def list_cmd(
                 search=search,
                 limit=limit,
                 cursor=page_cursor,
-                include_deleted=include_deleted,
+                include_archived=include_archived,
             ),
             cursor=cursor,
             all_pages=all_pages,
@@ -108,19 +108,19 @@ def list_cmd(
     table.add_column("Version", justify="right")
     table.add_column("Fork of", no_wrap=True)
     table.add_column("Description")
-    # The deleted-at column is only meaningful (and only carries values)
-    # when the caller asked to include their soft-deleted workflows.
-    if include_deleted:
-        table.add_column("Deleted at", no_wrap=True)
+    # The archived-at column is only meaningful (and only carries values)
+    # when the caller asked to include their archived workflows.
+    if include_archived:
+        table.add_column("Archived at", no_wrap=True)
     for item in items:
         fork_cell = ""
         if item.parent_template_id:
             fork_cell = f"tpl {item.parent_template_id[:8]}...@v{item.parent_template_version}"
         cells = [item.id, item.name, str(item.current_version), fork_cell, item.description]
-        if include_deleted:
+        if include_archived:
             cells.append(
-                f"[yellow]{item.deleted_at.isoformat()}[/yellow]"
-                if item.deleted_at is not None
+                f"[yellow]{item.archived_at.isoformat()}[/yellow]"
+                if item.archived_at is not None
                 else "[dim]live[/dim]"
             )
         table.add_row(*cells)
@@ -138,7 +138,7 @@ def list_cmd(
                 ("--tag", tag),
                 ("--search", search),
             ),
-            bool_flags=("--include-deleted",) if include_deleted else (),
+            bool_flags=("--include-archived",) if include_archived else (),
         )
         console.print(f"[dim]{hint}[/dim]")
 
@@ -527,12 +527,15 @@ def lineage(
         f"upstream latest: v{result.upstream_latest_version}; "
         f"upstream unpublished at pinned version: {result.is_upstream_unpublished}."
     )
-    if result.parent_template_deleted_at is not None:
-        reason = result.parent_template_delete_reason or "no reason given"
+    source_status = result.parent_source_status or "unknown"
+    if result.parent_permanently_deleted:
         console.print(
-            f"[yellow]Parent template deleted[/yellow] "
-            f"at {result.parent_template_deleted_at} ({reason})."
+            "[red]Parent template permanently deleted[/red] "
+            "(content no longer accessible through any product surface)."
         )
+    elif source_status == "archived":
+        archived_at = result.parent_template_archived_at or "unknown time"
+        console.print(f"[yellow]Parent template archived[/yellow] at {archived_at}.")
     if result.parent_version_deprecated_at is not None:
         message = result.parent_version_deprecation_message or "no message"
         console.print(
@@ -541,73 +544,39 @@ def lineage(
         )
 
 
-@app.command("teach")
-def teach(
-    workflow_id: str = typer.Argument(..., help="Workflow UUID or name to teach"),
+@app.command("archive")
+def archive(
+    workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
-    """Fetch the teach SKILL pack for an existing workflow.
+    """Archive a workflow you own.
 
-    The command returns the pack content; the agent (or you, working from
-    a script) follows the pack to run the teach session and persist the
-    result via `goodeye workflows publish - --name <name>
-    --description <description> --outcome <outcome> --source teach
-    --expected-version-token <captured at stage 2>`.
+    Archiving hides the workflow from list results and grants but keeps all
+    versions and content intact. Use `workflows unarchive` to restore.
+    Use `workflows delete` only when you want permanent, irreversible removal.
     """
-    stderr = Console(stderr=True)
+    console = Console()
+    if not confirm_destructive(f"Archive workflow {workflow_id}?", yes=yes):
+        console.print("Cancelled.")
+        raise typer.Exit(code=0)
     with _client(require_auth=True) as client:
-        result = client.teach_workflow(workflow_id)
-    stderr.print(f"[bold]workflow_id:[/bold] {result.workflow_id}")
-    # Write skill_md raw to stdout so markdown link syntax (`[text](url)`) is not
-    # parsed as Rich markup, line wrapping is left to the caller, and piping into
-    # an agent or file produces a clean SKILL.md.
-    sys.stdout.write(result.skill_md)
-    if not result.skill_md.endswith("\n"):
-        sys.stdout.write("\n")
+        result = client.archive_workflow(workflow_id)
+    console.print(f"[green]Archived[/green] {result.name} (workflow_id={result.workflow_id})")
 
 
-@app.command("optimize")
-def optimize(
-    workflow_id: str = typer.Argument(..., help="Workflow UUID or name to optimize"),
-    max_iterations: int | None = typer.Option(
-        None,
-        "--max-iterations",
-        help=(
-            "Optimization loop budget. Defaults to 20 when omitted. "
-            "Accepted range 1 to 1000; the upper bound is a safety cap, "
-            "not a recommended setting (most runs converge well before that)."
-        ),
-        min=1,
-        max=1000,
-    ),
+@app.command("unarchive")
+def unarchive(
+    workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
 ) -> None:
-    """Fetch the optimize SKILL pack for an existing workflow.
+    """Restore an archived workflow you own.
 
-    The command returns the pack content; the agent (or you, working from
-    a script) follows the pack to run the optimization loop, then persists
-    the final version via:
-
-    \b
-        goodeye workflows publish - --name <name> --description <description>
-            --outcome <outcome> --source optimization
-            --expected-version-token <captured at stage 1>
-
-    only after explicit user approval. The loop never auto-saves.
+    The inverse of `workflows archive`. The workflow becomes visible again in
+    list results and grants.
     """
-    stderr = Console(stderr=True)
+    console = Console()
     with _client(require_auth=True) as client:
-        result = client.optimize_workflow(workflow_id, max_iterations=max_iterations)
-    stderr.print(f"[bold]workflow_id:[/bold] {result.workflow_id}")
-    stderr.print(f"[bold]max_iterations:[/bold] {result.max_iterations}")
-    # Stream skill_md raw to stdout so markdown link syntax (`[text](url)`) is
-    # not parsed as Rich markup. Reference files are appended as labeled
-    # sub-sections so a piped agent sees the full pack in order, matching the
-    # rendering used by `goodeye design`.
-    sys.stdout.write(result.skill_md.rstrip() + "\n")
-    if result.references:
-        sys.stdout.write("\n---\n\n# Reference files\n")
-        for path in sorted(result.references):
-            body = result.references[path]
-            sys.stdout.write(f"\n## {path}\n\n{body.rstrip()}\n")
+        result = client.unarchive_workflow(workflow_id)
+    console.print(f"[green]Unarchived[/green] workflow {result.workflow_id}")
 
 
 @app.command("delete")
@@ -615,37 +584,75 @@ def delete(
     workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
-    """Delete a workflow you own."""
+    """Permanently and immediately delete a workflow you own.
+
+    WARNING: This is permanent. The workflow, all its versions, all attached
+    files, and all access grants are removed from the live system at once.
+    There is NO recovery path.
+
+    Use `workflows archive` if you want a reversible alternative. Archived
+    workflows can be restored at any time with `workflows unarchive`.
+
+    Encrypted backups age out within the platform's standard retention window
+    (up to three months), so the content is not instantly erased from all
+    systems everywhere, but it is no longer accessible through any product
+    surface after this call.
+    """
     console = Console()
-    if not confirm_destructive(f"Delete workflow {workflow_id}?", yes=yes):
+    if not confirm_destructive(
+        f"Permanently delete workflow {workflow_id}? This cannot be undone.", yes=yes
+    ):
         console.print("Cancelled.")
         raise typer.Exit(code=0)
     with _client(require_auth=True) as client:
         result = client.delete_workflow(workflow_id)
     if result.deleted:
-        console.print(f"[green]Deleted[/green] {result.name}")
+        console.print(f"[green]Permanently deleted[/green] {result.name}")
     else:
         console.print(f"[yellow]Not deleted[/yellow] {result.name}")
 
 
-@app.command("undelete")
-def undelete(
+@app.command("delete-version")
+def delete_version(
     workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
+    version: int = typer.Argument(..., help="Version number to permanently delete."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
-    """Restore a soft-deleted workflow you own.
+    """Permanently and immediately delete a single non-current workflow version.
 
-    The inverse of ``goodeye workflows delete``. List your deleted
-    workflows first with ``goodeye workflows list --include-deleted``.
+    WARNING: This is permanent. The version row and all its attached files are
+    removed from the live system at once. There is NO recovery path. The current
+    (live) version cannot be deleted with this command; use `workflows delete`
+    to remove the entire workflow including its current version.
 
-    If a live workflow already holds the deleted workflow's name (slug),
-    the server reports a conflict: delete or rename that workflow first,
-    then retry.
+    Use `workflows archive` if you want a reversible alternative for the whole
+    workflow.
+
+    Encrypted backups age out within the platform's standard retention window
+    (up to three months), so the content is not instantly erased from all
+    systems everywhere, but it is no longer accessible through any product
+    surface after this call.
+
+    Version numbers remain monotonic with a gap where the deleted version was.
+    Surviving versions are not renumbered.
     """
     console = Console()
+    if not confirm_destructive(
+        f"Permanently delete workflow {workflow_id} version {version}? This cannot be undone.",
+        yes=yes,
+    ):
+        console.print("Cancelled.")
+        raise typer.Exit(code=0)
     with _client(require_auth=True) as client:
-        result = client.undelete_workflow(workflow_id)
-    suffix = " (idempotent)" if result.idempotent else ""
-    console.print(f"[green]Undeleted[/green] {result.name}.{suffix}")
+        result = client.delete_workflow_version(workflow_id, version)
+    if result.deleted:
+        console.print(
+            f"[green]Permanently deleted[/green] workflow {result.workflow_id} v{result.version}"
+        )
+    else:
+        console.print(
+            f"[yellow]Not deleted[/yellow] workflow {result.workflow_id} v{result.version}"
+        )
 
 
 @app.command("grant")
@@ -878,11 +885,82 @@ def transfer_ownership(
         console.print("No-op: target is already the owner.")
 
 
+@app.command("teach")
+def teach(
+    workflow_id: str = typer.Argument(..., help="Workflow UUID or name to teach"),
+) -> None:
+    """Fetch the teach SKILL pack for an existing workflow.
+
+    The command returns the pack content; the agent (or you, working from
+    a script) follows the pack to run the teach session and persist the
+    result via `goodeye workflows publish - --name <name>
+    --description <description> --outcome <outcome> --source teach
+    --expected-version-token <captured at stage 2>`.
+    """
+    stderr = Console(stderr=True)
+    with _client(require_auth=True) as client:
+        result = client.teach_workflow(workflow_id)
+    stderr.print(f"[bold]workflow_id:[/bold] {result.workflow_id}")
+    # Write skill_md raw to stdout so markdown link syntax (`[text](url)`) is not
+    # parsed as Rich markup, line wrapping is left to the caller, and piping into
+    # an agent or file produces a clean SKILL.md.
+    sys.stdout.write(result.skill_md)
+    if not result.skill_md.endswith("\n"):
+        sys.stdout.write("\n")
+
+
+@app.command("optimize")
+def optimize(
+    workflow_id: str = typer.Argument(..., help="Workflow UUID or name to optimize"),
+    max_iterations: int | None = typer.Option(
+        None,
+        "--max-iterations",
+        help=(
+            "Optimization loop budget. Defaults to 20 when omitted. "
+            "Accepted range 1 to 1000; the upper bound is a safety cap, "
+            "not a recommended setting (most runs converge well before that)."
+        ),
+        min=1,
+        max=1000,
+    ),
+) -> None:
+    """Fetch the optimize SKILL pack for an existing workflow.
+
+    The command returns the pack content; the agent (or you, working from
+    a script) follows the pack to run the optimization loop, then persists
+    the final version via:
+
+    \b
+        goodeye workflows publish - --name <name> --description <description>
+            --outcome <outcome> --source optimization
+            --expected-version-token <captured at stage 1>
+
+    only after explicit user approval. The loop never auto-saves.
+    """
+    stderr = Console(stderr=True)
+    with _client(require_auth=True) as client:
+        result = client.optimize_workflow(workflow_id, max_iterations=max_iterations)
+    stderr.print(f"[bold]workflow_id:[/bold] {result.workflow_id}")
+    stderr.print(f"[bold]max_iterations:[/bold] {result.max_iterations}")
+    # Stream skill_md raw to stdout so markdown link syntax (`[text](url)`) is
+    # not parsed as Rich markup. Reference files are appended as labeled
+    # sub-sections so a piped agent sees the full pack in order, matching the
+    # rendering used by `goodeye design`.
+    sys.stdout.write(result.skill_md.rstrip() + "\n")
+    if result.references:
+        sys.stdout.write("\n---\n\n# Reference files\n")
+        for path in sorted(result.references):
+            body = result.references[path]
+            sys.stdout.write(f"\n## {path}\n\n{body.rstrip()}\n")
+
+
 __all__ = [
     "_parse_front_matter",
     "app",
+    "archive",
     "check_safety",
     "delete",
+    "delete_version",
     "get_cmd",
     "grant",
     "grants",
@@ -894,5 +972,5 @@ __all__ = [
     "revoke_grant",
     "teach",
     "transfer_ownership",
-    "undelete",
+    "unarchive",
 ]

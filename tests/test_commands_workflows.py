@@ -89,7 +89,7 @@ def test_workflows_list_defaults_to_one_compact_json_page(
         '"description":"","outcome":"","tags":[],"updated_at":null,'
         '"owner_user_id":null,"parent_template_id":null,'
         '"parent_template_version":null,"effective_role":null,'
-        '"version_token":null,"deleted_at":null}],"next_cursor":"c1"}\n'
+        '"version_token":null,"archived_at":null}],"next_cursor":"c1"}\n'
     )
     params = dict(route.calls.last.request.url.params)
     assert params["filter"] == "all"
@@ -158,12 +158,12 @@ def test_workflows_list_table_prints_next_page_hint(
     assert "--filter all" in result.output
     assert "--tag ops" in result.output
     assert "--search triage" in result.output
-    # Without --include-deleted the hint must not suggest it.
-    assert "--include-deleted" not in result.output
+    # Without --include-archived the hint must not suggest it.
+    assert "--include-archived" not in result.output
 
 
 @respx.mock
-def test_workflows_list_next_page_hint_keeps_include_deleted(
+def test_workflows_list_next_page_hint_keeps_include_archived(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
@@ -182,13 +182,13 @@ def test_workflows_list_next_page_hint_keeps_include_deleted(
     runner = CliRunner()
     result = runner.invoke(
         app,
-        ["workflows", "list", "--filter", "all", "--include-deleted", "--table"],
+        ["workflows", "list", "--filter", "all", "--include-archived", "--table"],
     )
     assert result.exit_code == 0, result.output
     assert "--cursor c1" in result.output
-    # The next-page hint must carry --include-deleted so following it does not
-    # silently drop the deleted rows and the "Deleted at" column mid-pagination.
-    assert "--include-deleted" in result.output
+    # The next-page hint must carry --include-archived so following it does not
+    # silently drop archived rows and the "Archived at" column mid-pagination.
+    assert "--include-archived" in result.output
 
 
 @respx.mock
@@ -971,89 +971,59 @@ def test_workflows_delete_with_yes_flag(tmp_config_paths: ConfigPaths, monkeypat
     runner = CliRunner()
     result = runner.invoke(app, ["workflows", "delete", "skl_01", "--yes"])
     assert result.exit_code == 0, result.output
-    assert "Deleted" in result.output
+    assert "ermanently deleted" in result.output
 
 
 @respx.mock
-def test_workflows_undelete_success(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+def test_workflows_archive_success(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    route = respx.post(f"{SERVER}/v1/workflows/skl_01/undelete").mock(
+    route = respx.post(f"{SERVER}/v1/workflows/skl_01/archive").mock(
         return_value=httpx.Response(
-            200, json={"workflow_id": "skl_01", "name": "skl_01", "deleted": False}
+            200, json={"workflow_id": "skl_01", "name": "skl_01", "archived": True}
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "undelete", "skl_01"])
+    result = runner.invoke(app, ["workflows", "archive", "skl_01", "--yes"])
     assert result.exit_code == 0, result.output
     assert route.call_count == 1
-    assert "Undeleted" in result.output
+    assert "Archived" in result.output
     assert "skl_01" in result.output
 
 
 @respx.mock
-def test_workflows_undelete_idempotent_suffix(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+def test_workflows_unarchive_success(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.post(f"{SERVER}/v1/workflows/skl_01/undelete").mock(
+    route = respx.post(f"{SERVER}/v1/workflows/skl_01/unarchive").mock(
         return_value=httpx.Response(
-            200,
-            json={
-                "workflow_id": "skl_01",
-                "name": "skl_01",
-                "deleted": False,
-                "idempotent": True,
-            },
+            200, json={"workflow_id": "skl_01", "name": "skl_01", "archived": False}
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "undelete", "skl_01"])
+    result = runner.invoke(app, ["workflows", "unarchive", "skl_01"])
     assert result.exit_code == 0, result.output
-    assert "idempotent" in result.output
+    assert route.call_count == 1
+    assert "Unarchived" in result.output
+    assert "skl_01" in result.output
 
 
 @respx.mock
-def test_workflows_undelete_conflict_surfaces_message(
-    tmp_config_paths: ConfigPaths, monkeypatch
-) -> None:
-    from goodeye_cli.errors import Conflict
-
+def test_workflows_delete_version_with_yes_flag(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.post(f"{SERVER}/v1/workflows/skl_01/undelete").mock(
+    route = respx.delete(f"{SERVER}/v1/workflows/skl_01/versions/3").mock(
         return_value=httpx.Response(
-            409,
-            json={
-                "error": "conflict",
-                "message": (
-                    "A live workflow already holds the slug 'skl_01'. "
-                    "Delete or rename it first, then retry."
-                ),
-            },
+            200, json={"workflow_id": "skl_01", "version": 3, "deleted": True}
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "undelete", "skl_01"])
-    assert result.exit_code != 0
-    assert isinstance(result.exception, Conflict)
-    assert "Delete or rename it first" in str(result.exception)
+    result = runner.invoke(app, ["workflows", "delete-version", "skl_01", "3", "--yes"])
+    assert result.exit_code == 0, result.output
+    assert route.call_count == 1
+    assert "ermanently deleted" in result.output
+    assert "skl_01" in result.output
 
 
 @respx.mock
-def test_workflows_undelete_not_found_errors(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
-    from goodeye_cli.errors import NotFound
-
-    _setup_creds(monkeypatch, tmp_config_paths)
-    respx.post(f"{SERVER}/v1/workflows/skl_missing/undelete").mock(
-        return_value=httpx.Response(
-            404, json={"error": "not_found", "message": "Workflow not found."}
-        )
-    )
-    runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "undelete", "skl_missing"])
-    assert result.exit_code != 0
-    assert isinstance(result.exception, NotFound)
-
-
-@respx.mock
-def test_workflows_list_include_deleted_sends_param_and_marks_rows(
+def test_workflows_list_include_archived_sends_param_and_marks_rows(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
@@ -1067,14 +1037,14 @@ def test_workflows_list_include_deleted_sends_param_and_marks_rows(
                         "name": "live-one",
                         "current_version": 2,
                         "description": "a live workflow",
-                        "deleted_at": None,
+                        "archived_at": None,
                     },
                     {
                         "id": "skl_gone",
                         "name": "gone-one",
                         "current_version": 1,
-                        "description": "a deleted workflow",
-                        "deleted_at": "2026-05-01T12:00:00Z",
+                        "description": "an archived workflow",
+                        "archived_at": "2026-05-01T12:00:00Z",
                     },
                 ],
                 "next_cursor": None,
@@ -1083,19 +1053,19 @@ def test_workflows_list_include_deleted_sends_param_and_marks_rows(
     )
     runner = CliRunner()
     result = runner.invoke(
-        app, ["workflows", "list", "--filter", "mine", "--include-deleted", "--table"]
+        app, ["workflows", "list", "--filter", "mine", "--include-archived", "--table"]
     )
     assert result.exit_code == 0, result.output
     assert route.call_count == 1
-    assert dict(route.calls.last.request.url.params)["include_deleted"] == "true"
-    assert "Deleted at" in result.output
+    assert dict(route.calls.last.request.url.params)["include_archived"] == "true"
+    assert "Archived at" in result.output
     assert "2026-05-01" in result.output
     assert "skl_live" in result.output
     assert "skl_gone" in result.output
 
 
 @respx.mock
-def test_workflows_list_omits_deleted_column_by_default(
+def test_workflows_list_omits_archived_column_by_default(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
@@ -1109,7 +1079,7 @@ def test_workflows_list_omits_deleted_column_by_default(
                         "name": "live-one",
                         "current_version": 1,
                         "description": "a live workflow",
-                        "deleted_at": None,
+                        "archived_at": None,
                     }
                 ],
                 "next_cursor": None,
@@ -1119,8 +1089,8 @@ def test_workflows_list_omits_deleted_column_by_default(
     runner = CliRunner()
     result = runner.invoke(app, ["workflows", "list", "--filter", "mine", "--table"])
     assert result.exit_code == 0, result.output
-    assert "include_deleted" not in dict(route.calls.last.request.url.params)
-    assert "Deleted at" not in result.output
+    assert "include_archived" not in dict(route.calls.last.request.url.params)
+    assert "Archived at" not in result.output
 
 
 @respx.mock
@@ -1363,8 +1333,10 @@ def test_workflows_lineage_renders_not_a_fork(tmp_config_paths: ConfigPaths, mon
                 "parent_template_version": None,
                 "upstream_latest_version": None,
                 "is_upstream_unpublished": None,
-                "parent_template_deleted_at": None,
-                "parent_template_delete_reason": None,
+                "parent_source_status": None,
+                "parent_permanently_deleted": False,
+                "parent_template_archived_at": None,
+                "parent_template_archive_reason": None,
                 "parent_version_deprecated_at": None,
                 "parent_version_deprecation_message": None,
             },
@@ -1388,8 +1360,10 @@ def test_workflows_lineage_renders_clean_fork(tmp_config_paths: ConfigPaths, mon
                 "parent_template_version": 2,
                 "upstream_latest_version": 3,
                 "is_upstream_unpublished": False,
-                "parent_template_deleted_at": None,
-                "parent_template_delete_reason": None,
+                "parent_source_status": "live",
+                "parent_permanently_deleted": False,
+                "parent_template_archived_at": None,
+                "parent_template_archive_reason": None,
                 "parent_version_deprecated_at": None,
                 "parent_version_deprecation_message": None,
             },
@@ -1399,12 +1373,13 @@ def test_workflows_lineage_renders_clean_fork(tmp_config_paths: ConfigPaths, mon
     result = runner.invoke(app, ["workflows", "lineage", "wf_1"])
     assert result.exit_code == 0, result.output
     assert "tpl_1" in result.output
-    assert "deleted" not in result.output.lower()
+    assert "archived" not in result.output.lower()
+    assert "permanently deleted" not in result.output.lower()
     assert "deprecated" not in result.output.lower()
 
 
 @respx.mock
-def test_workflows_lineage_surfaces_deleted_and_deprecated_parent(
+def test_workflows_lineage_surfaces_archived_and_deprecated_parent(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
@@ -1417,8 +1392,10 @@ def test_workflows_lineage_surfaces_deleted_and_deprecated_parent(
                 "parent_template_version": 2,
                 "upstream_latest_version": 3,
                 "is_upstream_unpublished": False,
-                "parent_template_deleted_at": "2026-04-01T00:00:00Z",
-                "parent_template_delete_reason": "retired",
+                "parent_source_status": "archived",
+                "parent_permanently_deleted": False,
+                "parent_template_archived_at": "2026-04-01T00:00:00Z",
+                "parent_template_archive_reason": "retired",
                 "parent_version_deprecated_at": "2026-03-15T00:00:00Z",
                 "parent_version_deprecation_message": "please move to v3",
             },
@@ -1427,10 +1404,38 @@ def test_workflows_lineage_surfaces_deleted_and_deprecated_parent(
     runner = CliRunner()
     result = runner.invoke(app, ["workflows", "lineage", "wf_1"])
     assert result.exit_code == 0, result.output
-    assert "deleted" in result.output.lower()
-    assert "retired" in result.output
+    assert "archived" in result.output.lower()
     assert "deprecated" in result.output.lower()
     assert "please move to v3" in result.output
+
+
+@respx.mock
+def test_workflows_lineage_surfaces_permanently_deleted_parent(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.get(f"{SERVER}/v1/workflows/wf_1/lineage").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "workflow_id": "wf_1",
+                "parent_template_id": "tpl_1",
+                "parent_template_version": 2,
+                "upstream_latest_version": None,
+                "is_upstream_unpublished": None,
+                "parent_source_status": "permanently_deleted",
+                "parent_permanently_deleted": True,
+                "parent_template_archived_at": None,
+                "parent_template_archive_reason": None,
+                "parent_version_deprecated_at": None,
+                "parent_version_deprecation_message": None,
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "lineage", "wf_1"])
+    assert result.exit_code == 0, result.output
+    assert "permanently deleted" in result.output.lower()
 
 
 @respx.mock
@@ -1447,8 +1452,10 @@ def test_workflows_lineage_json_includes_all_fields(
                 "parent_template_version": 2,
                 "upstream_latest_version": 3,
                 "is_upstream_unpublished": False,
-                "parent_template_deleted_at": "2026-04-01T00:00:00Z",
-                "parent_template_delete_reason": "retired",
+                "parent_source_status": "archived",
+                "parent_permanently_deleted": False,
+                "parent_template_archived_at": "2026-04-01T00:00:00Z",
+                "parent_template_archive_reason": "retired",
                 "parent_version_deprecated_at": "2026-03-15T00:00:00Z",
                 "parent_version_deprecation_message": "please move to v3",
             },
@@ -1458,8 +1465,10 @@ def test_workflows_lineage_json_includes_all_fields(
     result = runner.invoke(app, ["workflows", "lineage", "wf_1", "--json"])
     assert result.exit_code == 0, result.output
     payload = _json.loads(result.output)
-    assert payload["parent_template_deleted_at"] == "2026-04-01T00:00:00Z"
-    assert payload["parent_template_delete_reason"] == "retired"
+    assert payload["parent_source_status"] == "archived"
+    assert payload["parent_permanently_deleted"] is False
+    assert payload["parent_template_archived_at"] == "2026-04-01T00:00:00Z"
+    assert payload["parent_template_archive_reason"] == "retired"
     assert payload["parent_version_deprecated_at"] == "2026-03-15T00:00:00Z"
     assert payload["parent_version_deprecation_message"] == "please move to v3"
 
