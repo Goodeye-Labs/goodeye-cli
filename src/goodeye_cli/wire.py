@@ -192,6 +192,10 @@ class WorkflowSaveResult(_WireBase):
     name: str
     version_token: str
     verifiers: list[WorkflowVerifierRefWire] = Field(default_factory=list)
+    # Advisory notes about a saved workflow's demo (e.g. a demo image that was
+    # referenced but not attached, or a video host that will not embed).
+    # Defaults to empty so responses from older servers still parse.
+    authoring_notes: list[str] = Field(default_factory=list)
 
 
 class SaveWorkflowInput(_WireBase):
@@ -377,6 +381,10 @@ class TemplatePublishResult(_WireBase):
     version: int
     publishing_handle: str
     safety_verification: TemplateSafetyVerification | None = None
+    # Advisory notes about the published template's demo (e.g. a demo image that
+    # was referenced but not attached, or a video host that will not embed).
+    # Defaults to empty so responses from older servers still parse.
+    authoring_notes: list[str] = Field(default_factory=list)
 
 
 class SafetyCheckVerifierRun(_WireBase):

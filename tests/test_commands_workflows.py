@@ -354,6 +354,72 @@ def test_publish_minimal_front_matter(
 
 
 @respx.mock
+def test_publish_surfaces_authoring_notes_to_stderr(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """Save-time authoring notes are advisory and print to stderr, not stdout."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    markdown = (
+        "---\n"
+        "name: demo-with-notes\n"
+        "description: A workflow that carries a demo README. Use when authoring.\n"
+        "outcome: Help authors preview their demo.\n"
+        "---\n"
+        "# Body\n"
+    )
+    respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "workflow_id": "wf_notes",
+                "version": 1,
+                "version_token": "tok-1",
+                "name": "demo-with-notes",
+                "authoring_notes": [
+                    "An image referenced in demo/README.md was not found among the files.",
+                ],
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "publish", "-"], input=markdown)
+    assert result.exit_code == 0, result.output
+    assert "Saved" in result.stdout
+    assert "An image referenced in demo/README.md was not found among the files." in result.stderr
+    # Advisory notes must not land on stdout.
+    assert "demo/README.md" not in result.stdout
+
+
+@respx.mock
+def test_publish_no_authoring_notes_is_silent(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    markdown = (
+        "---\n"
+        "name: quiet-demo\n"
+        "description: A workflow with no demo notes. Use when authoring.\n"
+        "outcome: Keep authoring quiet.\n"
+        "---\n"
+        "# Body\n"
+    )
+    respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "workflow_id": "wf_quiet",
+                "version": 1,
+                "version_token": "tok-1",
+                "name": "quiet-demo",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "publish", "-"], input=markdown)
+    assert result.exit_code == 0, result.output
+    assert "Saved" in result.stdout
+    assert result.stderr == ""
+
+
+@respx.mock
 def test_publish_reads_markdown_from_stdin(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
     markdown = (

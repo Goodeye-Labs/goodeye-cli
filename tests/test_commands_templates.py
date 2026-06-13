@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import httpx
 import respx
@@ -243,6 +244,61 @@ def test_templates_get_json_skips_wrappers(tmp_config_paths: ConfigPaths, monkey
     assert '"slug": "example"' in result.output
     assert "# Goodeye workflow" not in result.output
     assert "# End of Goodeye workflow." not in result.output
+
+
+@respx.mock
+def test_templates_get_file_writes_raw_bytes_to_output(
+    tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
+) -> None:
+    """`templates get-file` writes the raw bytes from the server to the output path."""
+    _setup_no_creds(monkeypatch, tmp_config_paths)
+    png_bytes = b"\x89PNG\r\n\x1a\n\x00\x00fake-demo-asset"
+    route = respx.get(f"{SERVER}/v1/templates/@h/example/files").mock(
+        return_value=httpx.Response(
+            200,
+            content=png_bytes,
+            headers={"content-type": "image/png"},
+        )
+    )
+    out_path = tmp_path / "downloads" / "preview.png"
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "templates",
+            "get-file",
+            "@h/example",
+            "demo/preview.png",
+            "--output",
+            str(out_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert out_path.read_bytes() == png_bytes
+    params = dict(route.calls.last.request.url.params)
+    assert params["path"] == "demo/preview.png"
+    assert params["format"] == "raw"
+    # The confirmation prints to stderr; the raw bytes must NOT reach stdout.
+    assert "fake-demo-asset" not in result.output
+
+
+@respx.mock
+def test_templates_get_file_does_not_print_bytes_to_stdout(
+    tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
+) -> None:
+    _setup_no_creds(monkeypatch, tmp_config_paths)
+    respx.get(f"{SERVER}/v1/templates/@h/example/files").mock(
+        return_value=httpx.Response(200, content=b"raw-bytes-here")
+    )
+    out_path = tmp_path / "asset.bin"
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["templates", "get-file", "@h/example", "demo/asset.bin", "-o", str(out_path)],
+    )
+    assert result.exit_code == 0, result.output
+    assert result.stdout == ""
+    assert out_path.read_bytes() == b"raw-bytes-here"
 
 
 @respx.mock
@@ -775,6 +831,57 @@ def test_templates_publish_no_safety_block_is_silent(
     assert result.exit_code == 0, result.output
     assert "Published" in result.output
     assert "safety" not in result.output.lower()
+
+
+@respx.mock
+def test_templates_publish_surfaces_authoring_notes_to_stderr(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.post(f"{SERVER}/v1/templates").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "template_id": "tpl_notes",
+                "version": 1,
+                "publishing_handle": "h",
+                "authoring_notes": [
+                    "A video link in demo/README.md points to a host that will not embed.",
+                    "An image referenced in demo/README.md was not found among the files.",
+                ],
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "publish", "my-workflow"])
+    assert result.exit_code == 0, result.output
+    assert "Published" in result.stdout
+    assert "A video link in demo/README.md points to a host that will not embed." in result.stderr
+    assert "An image referenced in demo/README.md was not found among the files." in result.stderr
+    # Notes are advisory and must not pollute stdout.
+    assert "demo/README.md" not in result.stdout
+
+
+@respx.mock
+def test_templates_publish_no_authoring_notes_is_silent(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.post(f"{SERVER}/v1/templates").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "template_id": "tpl_quiet",
+                "version": 1,
+                "publishing_handle": "h",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "publish", "my-workflow"])
+    assert result.exit_code == 0, result.output
+    assert "Published" in result.stdout
+    assert result.stderr == ""
 
 
 @respx.mock

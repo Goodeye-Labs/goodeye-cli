@@ -602,6 +602,23 @@ class GoodeyeClient:
             result = TemplateDetail.model_validate(response.json())
         return result, final_identifier
 
+    def get_template_file_raw(self, identifier: str, path: str) -> bytes:
+        """GET /v1/templates/{identifier}/files?path=<path>&format=raw.
+
+        Returns the file's raw bytes (the response body), for pulling a
+        template's demo asset (or any attached file) verbatim. ``identifier``
+        accepts the same forms as the other template methods (UUID,
+        ``@handle/slug``, or ``@handle/slug@vN``). Redirects are followed so a
+        renamed publishing handle still resolves.
+        """
+        response = self._request(
+            "GET",
+            f"/v1/templates/{identifier}/files",
+            params={"path": path, "format": "raw"},
+            follow_redirects=True,
+        )
+        return response.content
+
     def publish_template_version(
         self, workflow_id: str, *, release_notes: str | None = None
     ) -> TemplatePublishResult:
