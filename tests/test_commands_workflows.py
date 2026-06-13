@@ -1570,6 +1570,13 @@ def test_parse_workflow_verifier_flags_rejects_deploy_incompatible_names() -> No
         _parse_workflow_verifier_flags(["tone_check=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"])
 
 
+def test_parse_workflow_verifier_flags_preserves_version_pin() -> None:
+    vid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    assert _parse_workflow_verifier_flags([f"tone={vid}@2"]) == [
+        {"name": "tone", "verifier_id": f"{vid}@2"}
+    ]
+
+
 def test_split_version_suffix_returns_no_version_when_absent() -> None:
     assert _split_version_suffix("my-workflow") == ("my-workflow", None)
 

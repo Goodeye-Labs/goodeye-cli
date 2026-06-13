@@ -242,7 +242,11 @@ _extract_discovery_facets = extract_discovery_facets
 
 
 def _parse_workflow_verifier_flags(values: list[str]) -> list[dict[str, str]]:
-    """Parse ``--verifier logical-name=verifier_uuid`` into API wire dicts."""
+    """Parse ``--verifier logical-name=verifier_uuid[@version]`` into API wire dicts.
+
+    The optional ``@version`` suffix rides through untouched as part of
+    ``verifier_id``; the server parses and stores the pin.
+    """
     rows: list[dict[str, str]] = []
     for raw in values:
         if "=" not in raw:
@@ -361,8 +365,10 @@ def publish(
         typer.Option(
             "--verifier",
             help=(
-                "Lowercase-kebab name=verifier UUID binding (repeatable). "
-                "Forwarded in save payload."
+                "Verifier binding: name=verifier_id (repeatable). Append "
+                "@version (name=verifier_id@version) to pin a specific version; "
+                "unpinned uses the verifier's current version when the workflow "
+                "is published as a template."
             ),
         ),
     ] = None,
