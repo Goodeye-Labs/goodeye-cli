@@ -63,6 +63,7 @@ from goodeye_cli.wire import (
     VerifierRunResult,
     VerifierVersionDetail,
     WorkflowArchiveResult,
+    WorkflowAuditResult,
     WorkflowDeleteResult,
     WorkflowDeleteVersionResult,
     WorkflowDetail,
@@ -452,6 +453,19 @@ class GoodeyeClient:
             params=params or None,
         )
         return WorkflowOptimizeResult.model_validate(response.json())
+
+    def audit_workflow(self, workflow_id: str | None = None) -> WorkflowAuditResult:
+        """Fetch the audit SKILL pack.
+
+        With a workflow_id, POST /v1/workflows/{id}/audit returns the pack plus
+        the workflow id. Without one, GET /v1/audit/workflow-prompt returns the
+        pack for auditing a local skill that is not on Goodeye yet.
+        """
+        if workflow_id is not None:
+            response = self._request("POST", f"/v1/workflows/{workflow_id}/audit")
+        else:
+            response = self._request("GET", "/v1/audit/workflow-prompt")
+        return WorkflowAuditResult.model_validate(response.json())
 
     def check_workflow_safety(
         self, workflow_id: str, *, version: int | None = None
