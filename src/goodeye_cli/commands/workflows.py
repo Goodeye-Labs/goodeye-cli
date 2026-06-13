@@ -339,8 +339,8 @@ def publish(
         None,
         "--source",
         help=(
-            "Optional provenance marker: 'manual', 'teach', 'optimization', or "
-            "'description_optimization'. Defaults to NULL."
+            "Optional provenance marker: 'manual', 'teach', 'optimization', "
+            "'description_optimization', or 'audit'. Defaults to NULL."
         ),
     ),
     verifier: Annotated[
@@ -1022,10 +1022,51 @@ def optimize_description(
             sys.stdout.write(f"\n## {path}\n\n{body.rstrip()}\n")
 
 
+@app.command("audit")
+def audit(
+    workflow_id: str | None = typer.Argument(
+        None,
+        help=(
+            "Workflow UUID, slug, or name to audit. Omit to audit a local "
+            "skill that is not on Goodeye yet."
+        ),
+    ),
+) -> None:
+    """Fetch the audit SKILL pack for a workflow or a local skill.
+
+    The command returns the pack content; the agent (or you, working from a
+    script) follows the pack to run the audit, then applies the fixes you
+    approve and syncs the result via:
+
+    \b
+        goodeye workflows publish - --name <name> --description <description>
+            --outcome <outcome> --source audit
+            --expected-version-token <captured during the audit>
+
+    Without a workflow id, the pack audits a local skill and recommends saving
+    it to Goodeye.
+    """
+    stderr = Console(stderr=True)
+    with _client(require_auth=True) as client:
+        result = client.audit_workflow(workflow_id)
+    if result.workflow_id:
+        stderr.print(f"[bold]workflow_id:[/bold] {result.workflow_id}")
+    # Stream skill_md raw to stdout so markdown link syntax is not parsed as
+    # Rich markup. Reference files are appended as labeled sub-sections so a
+    # piped agent sees the full pack in order, matching goodeye workflows optimize.
+    sys.stdout.write(result.skill_md.rstrip() + "\n")
+    if result.references:
+        sys.stdout.write("\n---\n\n# Reference files\n")
+        for path in sorted(result.references):
+            body = result.references[path]
+            sys.stdout.write(f"\n## {path}\n\n{body.rstrip()}\n")
+
+
 __all__ = [
     "_parse_front_matter",
     "app",
     "archive",
+    "audit",
     "check_safety",
     "delete",
     "delete_version",
