@@ -17,7 +17,11 @@ from rich.table import Table
 
 from goodeye_cli.client import GoodeyeClient
 from goodeye_cli.commands.prompts import confirm_destructive
-from goodeye_cli.commands.workflows import _render_safety_check, _split_version_suffix
+from goodeye_cli.commands.workflows import (
+    _print_authoring_notes,
+    _render_safety_check,
+    _split_version_suffix,
+)
 from goodeye_cli.config import get_api_key, get_server
 from goodeye_cli.errors import AuthRequired, SafetyVerificationFailed, SafetyVerificationUnavailable
 from goodeye_cli.output import (
@@ -303,8 +307,7 @@ def publish(
             console.print("[dim]Safety:[/dim] [yellow]advisory concerns flagged[/yellow]")
             if sv.advisory_reasoning:
                 console.print(f"[dim]{sv.advisory_reasoning}[/dim]")
-    for note in result.authoring_notes:
-        stderr.print(note)
+    _print_authoring_notes(result.authoring_notes)
 
 
 @app.command("unpublish")
