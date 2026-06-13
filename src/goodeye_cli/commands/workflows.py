@@ -338,7 +338,10 @@ def publish(
     source: str | None = typer.Option(
         None,
         "--source",
-        help="Optional provenance marker: 'manual', 'teach', or 'optimization'. Defaults to NULL.",
+        help=(
+            "Optional provenance marker: 'manual', 'teach', 'optimization', or "
+            "'description_optimization'. Defaults to NULL."
+        ),
     ),
     verifier: Annotated[
         list[str] | None,
@@ -970,6 +973,55 @@ def optimize(
             sys.stdout.write(f"\n## {path}\n\n{body.rstrip()}\n")
 
 
+@app.command("optimize-description")
+def optimize_description(
+    workflow_id: str = typer.Argument(
+        ..., help="Workflow UUID or name whose description to optimize"
+    ),
+    max_iterations: int | None = typer.Option(
+        None,
+        "--max-iterations",
+        help=(
+            "Optimization loop budget. Defaults to 10 when omitted. "
+            "Accepted range 1 to 1000; the upper bound is a safety cap, "
+            "not a recommended setting (most runs converge well before that)."
+        ),
+        min=1,
+        max=1000,
+    ),
+) -> None:
+    """Fetch the description-optimize SKILL pack for an existing workflow.
+
+    The pack guides an agent (or you, working from a script) through tuning
+    the workflow's description, the text that decides when the workflow
+    fires, for trigger accuracy. Only the description changes; the body,
+    outcome, tags, and sibling files carry forward. After explicit user
+    approval the final version is persisted via:
+
+    \b
+        goodeye workflows publish - --name <name> --description <description>
+            --outcome <outcome> --source description_optimization
+            --expected-version-token <captured at stage 1>
+
+    The loop never auto-saves.
+    """
+    stderr = Console(stderr=True)
+    with _client(require_auth=True) as client:
+        result = client.optimize_description(workflow_id, max_iterations=max_iterations)
+    stderr.print(f"[bold]workflow_id:[/bold] {result.workflow_id}")
+    stderr.print(f"[bold]max_iterations:[/bold] {result.max_iterations}")
+    # Stream skill_md raw to stdout so markdown link syntax (`[text](url)`) is
+    # not parsed as Rich markup. Reference files are appended as labeled
+    # sub-sections so a piped agent sees the full pack in order, matching the
+    # rendering used by `goodeye workflows optimize`.
+    sys.stdout.write(result.skill_md.rstrip() + "\n")
+    if result.references:
+        sys.stdout.write("\n---\n\n# Reference files\n")
+        for path in sorted(result.references):
+            body = result.references[path]
+            sys.stdout.write(f"\n## {path}\n\n{body.rstrip()}\n")
+
+
 __all__ = [
     "_parse_front_matter",
     "app",
@@ -984,6 +1036,7 @@ __all__ = [
     "lineage",
     "list_cmd",
     "optimize",
+    "optimize_description",
     "publish",
     "revoke_grant",
     "teach",
