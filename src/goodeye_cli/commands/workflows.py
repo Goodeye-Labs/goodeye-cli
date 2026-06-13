@@ -294,6 +294,19 @@ def _read_markdown_input(source: str) -> str:
         ) from exc
 
 
+def _print_authoring_notes(notes: list[str]) -> None:
+    """Print advisory demo authoring notes to stderr (one per line).
+
+    Notes are advisory and never block. They go to stderr so machine-readable
+    stdout (e.g. piped output) stays clean.
+    """
+    if not notes:
+        return
+    stderr = Console(stderr=True)
+    for note in notes:
+        stderr.print(note)
+
+
 def _is_skill_directory(source: str) -> bool:
     """Return True when *source* points to a directory containing SKILL.md."""
     p = Path(source)
@@ -507,6 +520,7 @@ def publish(
         f"[green]Saved[/green] {result.name} v{result.version} "
         f"(workflow_id={result.workflow_id}, version_token={result.version_token})"
     )
+    _print_authoring_notes(result.authoring_notes)
 
 
 @app.command("lineage")

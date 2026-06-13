@@ -182,6 +182,27 @@ def test_get_workflow_file_fetches_single() -> None:
 
 
 @respx.mock
+def test_get_template_file_raw_returns_bytes() -> None:
+    """get_template_file_raw must GET the template file endpoint with format=raw and
+    return the response body as raw bytes (not parsed JSON)."""
+    png_bytes = b"\x89PNG\r\n\x1a\n\x00\x00fake-demo-image"
+    route = respx.get(f"{SERVER}/v1/templates/@h/example/files").mock(
+        return_value=httpx.Response(
+            200,
+            content=png_bytes,
+            headers={"content-type": "image/png"},
+        )
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE_xxx") as client:
+        data = client.get_template_file_raw("@h/example", "demo/preview.png")
+
+    assert data == png_bytes
+    params = dict(route.calls.last.request.url.params)
+    assert params["path"] == "demo/preview.png"
+    assert params["format"] == "raw"
+
+
+@respx.mock
 def test_get_workflow_files_fetches_batch() -> None:
     """get_workflow_files must hit /v1/workflows/{id}/files with repeated paths= params."""
     route = respx.get(f"{SERVER}/v1/workflows/wf_1/files").mock(

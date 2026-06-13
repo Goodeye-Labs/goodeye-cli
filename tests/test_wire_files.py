@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from goodeye_cli.wire import ClientConfig, WorkflowDetail, WorkflowFileEntry
+from goodeye_cli.wire import (
+    ClientConfig,
+    TemplatePublishResult,
+    WorkflowDetail,
+    WorkflowFileEntry,
+    WorkflowSaveResult,
+)
 
 
 def test_workflow_detail_parses_files_manifest() -> None:
@@ -116,3 +122,58 @@ def test_workflow_detail_ignores_extra_unknown_fields() -> None:
     assert detail.name == "future"
     assert detail.files == []
     assert not hasattr(detail, "totally_new_field")
+
+
+def test_workflow_save_result_parses_authoring_notes() -> None:
+    result = WorkflowSaveResult.model_validate(
+        {
+            "workflow_id": "wf_1",
+            "version": 2,
+            "name": "demo",
+            "version_token": "tok",
+            "authoring_notes": [
+                "An image referenced in demo/README.md was not found in the workflow files.",
+            ],
+        }
+    )
+    assert result.authoring_notes == [
+        "An image referenced in demo/README.md was not found in the workflow files.",
+    ]
+
+
+def test_workflow_save_result_defaults_authoring_notes_empty() -> None:
+    """An older server with no authoring_notes field still parses (defaults to [])."""
+    result = WorkflowSaveResult.model_validate(
+        {
+            "workflow_id": "wf_1",
+            "version": 1,
+            "name": "demo",
+            "version_token": "tok",
+        }
+    )
+    assert result.authoring_notes == []
+
+
+def test_template_publish_result_parses_authoring_notes() -> None:
+    result = TemplatePublishResult.model_validate(
+        {
+            "template_id": "tpl_1",
+            "version": 3,
+            "publishing_handle": "h",
+            "authoring_notes": ["A video host in demo/README.md is not on the allowlist."],
+        }
+    )
+    assert result.authoring_notes == [
+        "A video host in demo/README.md is not on the allowlist.",
+    ]
+
+
+def test_template_publish_result_defaults_authoring_notes_empty() -> None:
+    result = TemplatePublishResult.model_validate(
+        {
+            "template_id": "tpl_1",
+            "version": 1,
+            "publishing_handle": "h",
+        }
+    )
+    assert result.authoring_notes == []

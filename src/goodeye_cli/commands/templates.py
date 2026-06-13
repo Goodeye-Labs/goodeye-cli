@@ -236,6 +236,34 @@ def get_cmd(
         sys.stdout.write("\n# End of Goodeye workflow.\n")
 
 
+@app.command("get-file")
+def get_file_cmd(
+    identifier: str = typer.Argument(..., help="Template UUID, @handle/slug, or @handle/slug@vN."),
+    remote_path: str = typer.Argument(
+        ..., help="Path of the file within the template (e.g. demo/preview.png)."
+    ),
+    output: Path = typer.Option(
+        ...,
+        "--output",
+        "-o",
+        help="Local path to write the file's raw bytes to.",
+    ),
+) -> None:
+    """Download one template file as raw bytes and write it to a local path.
+
+    Use this to pull a template's demo asset (or any attached file) verbatim,
+    for example a demo preview image. The bytes are written to the path given
+    by --output; nothing is printed to stdout.
+    """
+    console = Console(stderr=True)
+    with _client(require_auth=False) as client:
+        data = client.get_template_file_raw(identifier, remote_path)
+    if output.parent != Path():
+        output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(data)
+    console.print(f"[green]Wrote[/green] {output} ({len(data)} bytes)")
+
+
 @app.command("publish")
 def publish(
     workflow_ref: str = typer.Argument(
@@ -275,6 +303,8 @@ def publish(
             console.print("[dim]Safety:[/dim] [yellow]advisory concerns flagged[/yellow]")
             if sv.advisory_reasoning:
                 console.print(f"[dim]{sv.advisory_reasoning}[/dim]")
+    for note in result.authoring_notes:
+        stderr.print(note)
 
 
 @app.command("unpublish")
@@ -652,6 +682,7 @@ __all__ = [
     "deprecate_version_cmd",
     "fork",
     "get_cmd",
+    "get_file_cmd",
     "lineage_cmd",
     "list_cmd",
     "publish",
