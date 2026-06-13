@@ -432,6 +432,27 @@ class GoodeyeClient:
         )
         return WorkflowOptimizeResult.model_validate(response.json())
 
+    def optimize_description(
+        self, workflow_id: str, *, max_iterations: int | None = None
+    ) -> WorkflowOptimizeResult:
+        """POST /v1/workflows/{id}/optimize-description with optional max_iterations.
+
+        Returns the SKILL pack (skill_md + references), the workflow id, and
+        the validated iteration cap for the description-tuning loop. The server
+        defaults max_iterations to 10 and accepts values from 1 to 1000. The
+        response shape matches the optimize pack, so it reuses
+        WorkflowOptimizeResult.
+        """
+        params: dict[str, Any] = {}
+        if max_iterations is not None:
+            params["max_iterations"] = max_iterations
+        response = self._request(
+            "POST",
+            f"/v1/workflows/{workflow_id}/optimize-description",
+            params=params or None,
+        )
+        return WorkflowOptimizeResult.model_validate(response.json())
+
     def check_workflow_safety(
         self, workflow_id: str, *, version: int | None = None
     ) -> SafetyCheckResult:
