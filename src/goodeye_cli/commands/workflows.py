@@ -339,8 +339,8 @@ def publish(
         None,
         "--source",
         help=(
-            "Optional provenance marker: 'manual', 'teach', 'optimization', or "
-            "'description_optimization'. Defaults to NULL."
+            "Optional provenance marker: 'manual', 'teach', 'optimization', "
+            "'description_optimization', or 'audit'. Defaults to NULL."
         ),
     ),
     verifier: Annotated[
