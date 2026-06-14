@@ -88,6 +88,31 @@ The rest of the workflow body goes here.
 EOF
 ```
 
+### Run a template end to end (no account)
+
+Browsing, fetching, and running a template need no account. Here is the full loop
+on a real public template that emits an artifact gated by a real verifier:
+
+```sh
+# Fetch the body (anonymous). Your agent then follows it as the runbook:
+# it finds a public dataset, renders chart.png, and runs the template's
+# pinned design verifier, revising until the chart passes.
+goodeye templates get @randalolson/high-signal-chart-workflow
+
+# Following the body, the agent uploads the finished chart and runs that
+# verifier, anonymously:
+goodeye verifiers run 89dcc843-d056-44d9-ae34-ebcff4903885 \
+  --version 1 --media-url '<chart-image-url>' --anonymous
+# -> PASS verifier_run_id=...
+#    Direct labeling, titled axes with units, a takeaway annotation, no overlaps.
+
+ls signal-chart-run-*/    # chart.png, chart.py, and the raw dataset
+```
+
+The anonymous verifier run draws on a small per-network credit grant that covers
+Goodeye-metered work (verifier and safety runs), not the model usage your agent
+incurs while executing the body.
+
 ### Workflow input
 
 For AI agents generating a workflow body, prefer stdin so no intermediate file is left in the user's working directory:
