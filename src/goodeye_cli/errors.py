@@ -86,6 +86,14 @@ class BudgetExhausted(GoodeyeError):
     """Caller's monthly credit budget has been exhausted (HTTP 402, slug=budget_exhausted)."""
 
 
+class AnonymousDailyCapReached(GoodeyeError):
+    """Shared daily cap on anonymous usage was reached (HTTP 402, slug=anonymous_daily_cap).
+
+    Distinct from BudgetExhausted: there is no account here, and the platform's
+    daily limit on total anonymous usage is reached. Sign in to use your own credits.
+    """
+
+
 class SafetyVerificationFailed(GoodeyeError):
     """Publish blocked: the hard-block safety rubric rejected the template body.
 
@@ -117,6 +125,7 @@ _SLUG_MAP: dict[str, type[GoodeyeError]] = {
     "internal_error": ServerError,
     "account_suspended": AccountSuspended,
     "budget_exhausted": BudgetExhausted,
+    "anonymous_daily_cap": AnonymousDailyCapReached,
     "safety_verification_failed": SafetyVerificationFailed,
     "safety_verification_unavailable": SafetyVerificationUnavailable,
 }
