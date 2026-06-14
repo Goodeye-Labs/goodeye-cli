@@ -256,16 +256,27 @@ def get_file_cmd(
         "-o",
         help="Local path to write the file's raw bytes to.",
     ),
+    sha256: str | None = typer.Option(
+        None,
+        "--sha256",
+        help=(
+            "Expected content address of the file. When set, the file is "
+            "resolved by path and confirmed to match; a stale or mismatched "
+            "address returns not found."
+        ),
+    ),
 ) -> None:
     """Download one template file as raw bytes and write it to a local path.
 
     Use this to pull a template's demo asset (or any attached file) verbatim,
     for example a demo preview image. The bytes are written to the path given
-    by --output; nothing is printed to stdout.
+    by --output; nothing is printed to stdout. Pass --sha256 to content-address
+    the fetch so a republished or removed file no longer resolves at a stale
+    address.
     """
     console = Console(stderr=True)
     with _client(require_auth=False) as client:
-        data = client.get_template_file_raw(identifier, remote_path)
+        data = client.get_template_file_raw(identifier, remote_path, sha256=sha256)
     if output.parent != Path():
         output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(data)

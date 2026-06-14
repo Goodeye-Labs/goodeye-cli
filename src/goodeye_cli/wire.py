@@ -135,6 +135,18 @@ class WorkflowVerifierRefWire(_WireBase):
     source_workflow_id: str | None = None
 
 
+class WorkflowImageGeneratorRefWire(_WireBase):
+    """Image generator binding on a workflow.
+
+    ``generator_ref`` is a system tier (``system:<tier>``), a deployed
+    generator UUID, or a pinned ``<uuid>@<version>``. ``name`` is the local
+    handle used in the workflow's generation steps.
+    """
+
+    name: str
+    generator_ref: str
+
+
 class WorkflowFileEntry(_WireBase):
     """One row in the file manifest returned by GET /v1/workflows/{id}."""
 
@@ -182,8 +194,12 @@ class WorkflowDetail(_WireBase):
     effective_role: str | None = None
     version_token: str | None = None
     verifiers: list[WorkflowVerifierRefWire] = Field(default_factory=list)
+    image_generators: list[WorkflowImageGeneratorRefWire] = Field(default_factory=list)
     files: list[WorkflowFileEntry] = Field(default_factory=list)
     safety_verification_status: str | None = None
+    # ISO-8601 timestamp for an archived workflow, null for a live one. Only
+    # the owner can fetch an archived workflow, so this is null for grantees.
+    archived_at: datetime | None = None
 
 
 class WorkflowSaveResult(_WireBase):
@@ -192,6 +208,7 @@ class WorkflowSaveResult(_WireBase):
     name: str
     version_token: str
     verifiers: list[WorkflowVerifierRefWire] = Field(default_factory=list)
+    image_generators: list[WorkflowImageGeneratorRefWire] = Field(default_factory=list)
     # Advisory notes about a saved workflow's demo (e.g. a demo image that was
     # referenced but not attached, or a video host that will not embed).
     # Defaults to empty so responses from older servers still parse.
@@ -209,6 +226,7 @@ class SaveWorkflowInput(_WireBase):
     tags: list[str] = Field(default_factory=list)
     source: str | None = None
     verifiers: list[WorkflowVerifierRefWire] = Field(default_factory=list)
+    image_generators: list[WorkflowImageGeneratorRefWire] = Field(default_factory=list)
     # None means omit from the payload (server carries the tree forward).
     # An empty list explicitly clears the file tree on the server.
     files: list[FileEntryWire] | None = None
@@ -350,6 +368,23 @@ class TemplateVerifierSnapshotWire(_WireBase):
     config_hash: str | None = None
 
 
+class TemplateImageGeneratorSnapshotWire(_WireBase):
+    """Public metadata for an image generator attached to a template version.
+
+    A system-tier binding carries only ``name`` and ``system_name``; a deployed
+    binding carries the pinned config fields. ``extra="ignore"`` (via the base)
+    keeps the model forgiving across snapshot shapes.
+    """
+
+    name: str
+    system_name: str | None = None
+    generator_version: int | None = None
+    provider: str | None = None
+    model: str | None = None
+    generation_contract: str | None = None
+    config_hash: str | None = None
+
+
 class TemplateSafetyVerification(_WireBase):
     status: str = "unverified"
     advisory_run_id: str | None = None
@@ -373,7 +408,13 @@ class TemplateDetail(_WireBase):
     safety_verification: TemplateSafetyVerification | None = None
     published_at: datetime | None = None
     unpublished_at: datetime | None = None
+    # ISO-8601 timestamp for an archived template, null for a live one.
+    archived_at: datetime | None = None
     verifier_snapshots: list[TemplateVerifierSnapshotWire] = Field(default_factory=list)
+    image_generator_snapshots: list[TemplateImageGeneratorSnapshotWire] = Field(
+        default_factory=list
+    )
+    files: list[WorkflowFileEntry] = Field(default_factory=list)
 
 
 class TemplatePublishResult(_WireBase):
