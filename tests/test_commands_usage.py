@@ -12,6 +12,7 @@ from goodeye_cli.commands.usage import format_usage_summary
 from goodeye_cli.config import ConfigPaths
 from goodeye_cli.errors import (
     AccountSuspended,
+    AnonymousDailyCapReached,
     BudgetExhausted,
     error_from_body,
 )
@@ -168,6 +169,22 @@ def test_error_from_body_maps_budget_exhausted() -> None:
     assert err.status_code == 402
     assert err.slug == "budget_exhausted"
     assert "exhausted" in err.message
+
+
+def test_error_from_body_maps_anonymous_daily_cap() -> None:
+    err = error_from_body(
+        402,
+        {
+            "error": "anonymous_daily_cap",
+            "message": "Goodeye's anonymous usage limit for today has been reached.",
+            "resets_at": "2026-06-15T00:00:00+00:00",
+        },
+    )
+    assert isinstance(err, AnonymousDailyCapReached)
+    assert err.status_code == 402
+    assert err.slug == "anonymous_daily_cap"
+    assert "anonymous" in err.message.lower()
+    assert err.extras["resets_at"] == "2026-06-15T00:00:00+00:00"
 
 
 @respx.mock
