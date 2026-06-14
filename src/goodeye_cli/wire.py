@@ -374,14 +374,19 @@ class TemplateImageGeneratorSnapshotWire(_WireBase):
     A system-tier binding carries only ``name`` and ``system_name``; a deployed
     binding carries the pinned config fields. ``extra="ignore"`` (via the base)
     keeps the model forgiving across snapshot shapes.
+
+    ``generator_id`` is present on a deployed binding for both owners and
+    non-owners; ``default_params`` is returned to owners only.
     """
 
     name: str
     system_name: str | None = None
+    generator_id: str | None = None
     generator_version: int | None = None
     provider: str | None = None
     model: str | None = None
     generation_contract: str | None = None
+    default_params: dict[str, Any] = Field(default_factory=dict)
     config_hash: str | None = None
 
 

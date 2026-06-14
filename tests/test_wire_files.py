@@ -224,10 +224,12 @@ def test_template_detail_parses_image_generator_snapshots_files_and_archived_at(
             {"name": "hero", "system_name": "image-standard"},
             {
                 "name": "banner",
+                "generator_id": "gen-123",
                 "generator_version": 3,
                 "provider": "fal",
                 "model": "some/model",
                 "generation_contract": "text_image",
+                "default_params": {"steps": 30},
                 "config_hash": "abc",
             },
         ],
@@ -237,8 +239,13 @@ def test_template_detail_parses_image_generator_snapshots_files_and_archived_at(
     assert detail.archived_at is not None
     assert detail.image_generator_snapshots[0].name == "hero"
     assert detail.image_generator_snapshots[0].system_name == "image-standard"
+    assert detail.image_generator_snapshots[1].generator_id == "gen-123"
     assert detail.image_generator_snapshots[1].generator_version == 3
     assert detail.image_generator_snapshots[1].model == "some/model"
+    assert detail.image_generator_snapshots[1].default_params == {"steps": 30}
+    # A system-tier binding carries neither field.
+    assert detail.image_generator_snapshots[0].generator_id is None
+    assert detail.image_generator_snapshots[0].default_params == {}
     assert detail.files[0].path == "demo/preview.png"
 
 
