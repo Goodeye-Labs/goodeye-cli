@@ -68,6 +68,16 @@ class ServerError(GoodeyeError):
     """Generic 5xx or unknown error from the server."""
 
 
+class NetworkError(GoodeyeError):
+    """The server could not be reached at all (offline, DNS, proxy, timeout).
+
+    Raised when the underlying transport fails before any HTTP response is
+    received, so there is no status code or server error body to translate.
+    Distinct from ``httpx``'s own transport exceptions: those are caught at
+    the request boundary and re-raised as this humane, exit-coded error.
+    """
+
+
 class AccountSuspended(GoodeyeError):
     """Caller's account has been suspended (HTTP 403, slug=account_suspended)."""
 

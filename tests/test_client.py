@@ -8,10 +8,11 @@ import httpx
 import pytest
 import respx
 
-from goodeye_cli.client import GoodeyeClient
+from goodeye_cli.client import GoodeyeClient, request_device_authorization
 from goodeye_cli.errors import (
     AuthRequired,
     InvalidCredentials,
+    NetworkError,
     NotFound,
     RateLimited,
     ServerError,
@@ -152,6 +153,40 @@ def test_error_translation_not_found() -> None:
     )
     with GoodeyeClient(SERVER, api_key="k") as client, pytest.raises(NotFound):
         client.get_workflow("nope")
+
+
+@respx.mock
+def test_transport_error_becomes_network_error() -> None:
+    # A raw transport failure (offline, DNS, proxy, timeout) must surface as a
+    # humane NetworkError, not a multi-frame httpx traceback.
+    respx.get(f"{SERVER}/v1/me").mock(side_effect=httpx.ConnectError("boom"))
+    with GoodeyeClient(SERVER, api_key="k") as client, pytest.raises(NetworkError) as exc_info:
+        client.get_me()
+    assert exc_info.value.slug == "network_error"
+    assert "Could not reach Goodeye" in exc_info.value.message
+    assert SERVER in (exc_info.value.hint or "")
+    assert exc_info.value.exit_code == 1
+    # The original httpx exception is preserved on the chain for debugging.
+    assert isinstance(exc_info.value.__cause__, httpx.ConnectError)
+
+
+@respx.mock
+def test_timeout_becomes_network_error() -> None:
+    respx.get(f"{SERVER}/v1/me").mock(side_effect=httpx.ConnectTimeout("slow"))
+    with GoodeyeClient(SERVER, api_key="k") as client, pytest.raises(NetworkError):
+        client.get_me()
+
+
+@respx.mock
+def test_device_authorization_transport_error_becomes_network_error() -> None:
+    # The device-login flow talks to WorkOS directly with its own client; a
+    # network failure there must also be humane, not a raw traceback.
+    uri = "https://auth.example.test/device_authorization"
+    respx.post(uri).mock(side_effect=httpx.ConnectError("boom"))
+    with pytest.raises(NetworkError) as exc_info:
+        request_device_authorization(uri, "client_abc")
+    assert exc_info.value.slug == "network_error"
+    assert uri in (exc_info.value.hint or "")
 
 
 @respx.mock

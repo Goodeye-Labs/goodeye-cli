@@ -162,7 +162,11 @@ def search_cmd(
     """LLM-ranked search over templates (not lexical list filtering)."""
     console = Console()
     mode = resolve_output_mode(json_output=json_output, table_output=table_output)
-    with _client(require_auth=True) as client:
+    # Anonymous reads, like `templates list` and `get`: the server route is
+    # public and bills any LLM ranking against the per-IP anonymous grant.
+    # `--filter mine` for an anonymous caller returns no candidates server-side
+    # (no spend), matching `templates list --filter mine`.
+    with _client(require_auth=False) as client:
         result = client.search_templates(
             query=query,
             filter_=filter_.lower(),
