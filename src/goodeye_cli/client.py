@@ -18,7 +18,7 @@ import httpx
 
 from goodeye_cli import __version__
 from goodeye_cli.config import get_request_timeout_seconds
-from goodeye_cli.errors import GoodeyeError, error_from_body
+from goodeye_cli.errors import GoodeyeError, NetworkError, error_from_body
 from goodeye_cli.wire import (
     ApiKeyCreated,
     ApiKeyList,
@@ -83,6 +83,21 @@ from goodeye_cli.wire import (
 
 def _user_agent() -> str:
     return f"goodeye-cli/{__version__}"
+
+
+def _network_error(server: str, exc: httpx.RequestError) -> NetworkError:
+    """Translate a raw transport failure into a humane, exit-coded error.
+
+    ``httpx.RequestError`` is the base for every transport-level failure
+    (connect refused, DNS, proxy, read/connect timeout). They are raised
+    before any response exists, so ``_raise_for_status`` never sees them and
+    callers would otherwise get a multi-frame ``httpx`` traceback.
+    """
+    return NetworkError(
+        slug="network_error",
+        message="Could not reach Goodeye. Check your connection and try again.",
+        hint=f"server: {server}",
+    )
 
 
 def _raise_for_status(response: httpx.Response) -> None:
@@ -172,7 +187,10 @@ class GoodeyeClient:
             for header_name in list(request.headers.keys()):
                 if header_name.lower() == "authorization":
                     del request.headers[header_name]
-        response = self._http.send(request, follow_redirects=follow_redirects)
+        try:
+            response = self._http.send(request, follow_redirects=follow_redirects)
+        except httpx.RequestError as exc:
+            raise _network_error(self.server, exc) from exc
         _raise_for_status(response)
         return response
 
@@ -1001,7 +1019,10 @@ def request_device_authorization(
     with httpx.Client(
         timeout=timeout, transport=transport, headers={"User-Agent": _user_agent()}
     ) as http:
-        response = http.post(device_authorization_uri, data={"client_id": client_id})
+        try:
+            response = http.post(device_authorization_uri, data={"client_id": client_id})
+        except httpx.RequestError as exc:
+            raise _network_error(device_authorization_uri, exc) from exc
     if response.is_error:
         body: dict[str, Any] | None
         try:
@@ -1030,14 +1051,17 @@ def poll_device_token(
     with httpx.Client(
         timeout=timeout, transport=transport, headers={"User-Agent": _user_agent()}
     ) as http:
-        response = http.post(
-            token_uri,
-            data={
-                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-                "client_id": client_id,
-                "device_code": device_code,
-            },
-        )
+        try:
+            response = http.post(
+                token_uri,
+                data={
+                    "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                    "client_id": client_id,
+                    "device_code": device_code,
+                },
+            )
+        except httpx.RequestError as exc:
+            raise _network_error(token_uri, exc) from exc
     try:
         parsed = response.json()
         body: dict[str, Any] = parsed if isinstance(parsed, dict) else {}

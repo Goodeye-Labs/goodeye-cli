@@ -104,14 +104,27 @@ def test_templates_list_table_flag_renders_table(
 
 
 @respx.mock
-def test_templates_search_requires_auth(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
-    from goodeye_cli.errors import AuthRequired
-
+def test_templates_search_allows_anonymous(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    # Search is a public read like `list` and `get`: an un-signed-up user must
+    # not be bounced by a client-only gate, and no Authorization header should
+    # be sent when there are no credentials on file.
     _setup_no_creds(monkeypatch, tmp_config_paths)
+    route = respx.post(f"{SERVER}/v1/templates/search").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [],
+                "query": "chart critique",
+                "limit": 5,
+                "search_mode": "llm",
+            },
+        )
+    )
     runner = CliRunner()
     result = runner.invoke(app, ["templates", "search", "chart critique"])
-    assert result.exit_code != 0
-    assert isinstance(result.exception, AuthRequired)
+    assert result.exit_code == 0, result.output
+    assert route.call_count == 1
+    assert "authorization" not in {k.lower() for k in route.calls[0].request.headers}
 
 
 @respx.mock

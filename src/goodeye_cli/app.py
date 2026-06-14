@@ -121,4 +121,21 @@ def main() -> None:
         console.print(f"[bold red]{exc.slug}[/bold red]: {exc.message}")
         if exc.hint:
             console.print(f"[dim]hint: {exc.hint}[/dim]")
+        # Under GOODEYE_DEBUG, surface the underlying cause (e.g. the exact
+        # transport failure behind a network_error: DNS vs timeout vs cert) so
+        # the humane message does not hide what a debugger needs.
+        if os.environ.get("GOODEYE_DEBUG") and exc.__cause__ is not None:
+            cause = exc.__cause__
+            console.print(f"[dim]debug: {type(cause).__name__}: {cause}[/dim]")
         sys.exit(exc.exit_code)
+    except Exception as exc:
+        # Backstop so no command ever dumps a raw traceback on a first run.
+        # Expected transport failures are already translated to NetworkError
+        # (a GoodeyeError) above; this catches anything genuinely unexpected.
+        # SystemExit and KeyboardInterrupt are BaseException, so normal exits,
+        # `--help`, and Ctrl-C pass straight through.
+        if os.environ.get("GOODEYE_DEBUG"):
+            raise
+        console.print(f"[bold red]unexpected error[/bold red]: {type(exc).__name__}: {exc}")
+        console.print("[dim]hint: re-run with GOODEYE_DEBUG=1 to see the full traceback[/dim]")
+        sys.exit(1)
