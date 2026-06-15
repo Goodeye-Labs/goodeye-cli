@@ -15,6 +15,7 @@ work only when the gate passed.
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import os
 import sys
@@ -103,10 +104,8 @@ def _acquire_lock(lock_file: Path, *, now: float) -> bool:
 
 def _release_lock(lock_file: Path) -> None:
     """Remove the automatic-pull lock, ignoring an already-gone file."""
-    try:
+    with contextlib.suppress(OSError):
         lock_file.unlink()
-    except OSError:
-        pass
 
 
 def format_auto_pull_summary(result: sync.PullResult) -> str | None:
@@ -119,9 +118,7 @@ def format_auto_pull_summary(result: sync.PullResult) -> str | None:
     """
     pulled = sum(1 for i in result.items if i.action == "pulled")
     incomplete = sum(1 for i in result.items if i.action == "pulled-incomplete")
-    skipped = sum(
-        1 for i in result.items if i.action in ("skipped-modified", "skipped-conflict")
-    )
+    skipped = sum(1 for i in result.items if i.action in ("skipped-modified", "skipped-conflict"))
     gone = sum(1 for i in result.items if i.action == "deleted-on-server")
     up_to_date = sum(1 for i in result.items if i.action == "up-to-date")
 
@@ -140,7 +137,7 @@ def format_auto_pull_summary(result: sync.PullResult) -> str | None:
     if skipped:
         summary += f"; {skipped} skipped (local edits)"
         follow_up = " Next: goodeye workflows sync status"
-    if gone and not skipped:
+    if gone:
         summary += f"; {gone} gone from the registry"
         follow_up = " Next: goodeye workflows sync status"
     return summary + follow_up

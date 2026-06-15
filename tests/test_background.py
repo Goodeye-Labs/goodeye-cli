@@ -162,6 +162,17 @@ def test_summary_surfaces_skipped_with_follow_up() -> None:
     assert "goodeye workflows sync status" in summary
 
 
+def test_summary_reports_gone_alongside_skipped() -> None:
+    # Gone workflows must always be surfaced, even when skipped local edits also
+    # exist; the gone count is never dropped because a skip is present.
+    result = sync.PullResult(items=[_item("skipped-modified"), _item("deleted-on-server", "b")])
+    summary = background_sync.format_auto_pull_summary(result)
+    assert summary is not None
+    assert "1 skipped (local edits)" in summary
+    assert "1 gone from the registry" in summary
+    assert "goodeye workflows sync status" in summary
+
+
 # ----- tail -----
 
 
@@ -176,9 +187,7 @@ def _list_response(items: list[dict], next_cursor: str | None = None) -> httpx.R
 
 
 @respx.mock
-def test_tail_claims_window_and_pulls(
-    tmp_config_paths: ConfigPaths, tmp_path, capsys
-) -> None:
+def test_tail_claims_window_and_pulls(tmp_config_paths: ConfigPaths, tmp_path, capsys) -> None:
     _me_route()
     target_dir = tmp_path / "skills"
     config = sync.SyncConfig(
@@ -224,9 +233,7 @@ def test_tail_claims_window_and_pulls(
     assert not tmp_config_paths.sync_lock_file.exists()
 
 
-def test_tail_swallows_failure_and_claims_window(
-    tmp_config_paths: ConfigPaths, capsys
-) -> None:
+def test_tail_swallows_failure_and_claims_window(tmp_config_paths: ConfigPaths, capsys) -> None:
     # No HTTP routes registered and a real (unreachable) server: the network call
     # fails, but the tail must not raise and the window is already claimed so it
     # waits out the next interval instead of retrying every command.
@@ -305,7 +312,7 @@ def test_entry_registers_tail_for_eligible_invocation(
     sync.save_sync_config(_enabled_config(), tmp_config_paths)
 
     registered: list[object] = []
-    monkeypatch.setattr(app_module.atexit, "register", lambda fn: registered.append(fn))
+    monkeypatch.setattr(app_module.atexit, "register", registered.append)
 
     result = CliRunner().invoke(app, ["logout"])
     assert result.exit_code == 0, result.output
@@ -321,7 +328,7 @@ def test_entry_does_not_register_when_disabled(
     # No sync.json at all: auto disabled by default.
 
     registered: list[object] = []
-    monkeypatch.setattr(app_module.atexit, "register", lambda fn: registered.append(fn))
+    monkeypatch.setattr(app_module.atexit, "register", registered.append)
 
     result = CliRunner().invoke(app, ["logout"])
     assert result.exit_code == 0, result.output
@@ -347,7 +354,7 @@ def test_entry_does_not_register_for_suppressed_invocations(
     sync.save_sync_config(_enabled_config(), tmp_config_paths)
 
     registered: list[object] = []
-    monkeypatch.setattr(app_module.atexit, "register", lambda fn: registered.append(fn))
+    monkeypatch.setattr(app_module.atexit, "register", registered.append)
 
     CliRunner().invoke(app, args)
     assert registered == []
