@@ -12,9 +12,33 @@ from rich.console import Console
 
 from goodeye_cli.client import GoodeyeClient
 from goodeye_cli.config import get_api_key, get_server
-from goodeye_cli.errors import AuthRequired
+from goodeye_cli.errors import AuthRequired, GoodeyeError
 
 app = typer.Typer(help="View and redeem referral codes.", no_args_is_help=True)
+
+
+def _maybe_redeem_referral(
+    server: str, api_key: str, referral_code: str | None, console: Console
+) -> None:
+    """Redeem a referral code after authentication, if one was supplied.
+
+    Non-fatal: a redeem failure prints a warning but does not abort the
+    sign-in flow. The caller should invoke this only after credentials are
+    already saved.
+    """
+    if not referral_code:
+        return
+    try:
+        with GoodeyeClient(server, api_key=api_key) as client:
+            result = client.redeem_referral_code(referral_code)
+    except GoodeyeError as err:
+        console.print(f"[yellow]Referral code not applied:[/yellow] {err.message}")
+        if err.hint:
+            console.print(f"[dim]{err.hint}[/dim]")
+        return
+    console.print(
+        f"[green]Referral bonus applied:[/green] ${result.credits_granted_usd} in credits."
+    )
 
 
 def _require_client() -> GoodeyeClient:
@@ -93,4 +117,4 @@ def redeem(
     console.print(f"Expires at: {result.expires_at.isoformat()}")
 
 
-__all__ = ["app", "redeem", "status"]
+__all__ = ["_maybe_redeem_referral", "app", "redeem", "status"]
