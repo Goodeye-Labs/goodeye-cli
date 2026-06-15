@@ -95,6 +95,81 @@ def test_save_payload_sends_empty_files_list() -> None:
 
 
 @respx.mock
+def test_save_payload_omits_image_generators_when_none() -> None:
+    """When `image_generators` is not passed, the POST body must NOT contain the key."""
+    route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "workflow_id": "wf_ig0",
+                "version": 1,
+                "version_token": "tok",
+                "name": "example",
+            },
+        )
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE_xxx") as client:
+        client.save_workflow(name="example", description="desc", body="body")
+
+    body = _json.loads(route.calls.last.request.content.decode())
+    assert "image_generators" not in body
+
+
+@respx.mock
+def test_save_payload_sends_image_generators_when_present() -> None:
+    """A non-empty `image_generators` list is forwarded verbatim, and the saved
+    result parses the bindings back."""
+    route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "workflow_id": "wf_ig1",
+                "version": 1,
+                "version_token": "tok",
+                "name": "with-ig",
+                "image_generators": [{"name": "hero", "generator_ref": "system:image-standard"}],
+            },
+        )
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE_xxx") as client:
+        result = client.save_workflow(
+            name="with-ig",
+            description="desc",
+            body="body",
+            image_generators=[{"name": "hero", "generator_ref": "system:image-standard"}],
+        )
+
+    body = _json.loads(route.calls.last.request.content.decode())
+    assert body["image_generators"] == [{"name": "hero", "generator_ref": "system:image-standard"}]
+    assert result.image_generators[0].name == "hero"
+    assert result.image_generators[0].generator_ref == "system:image-standard"
+
+
+@respx.mock
+def test_save_payload_sends_empty_image_generators_list() -> None:
+    """Passing `image_generators=[]` sends the key with an empty list (clears bindings)."""
+    route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "workflow_id": "wf_ig2",
+                "version": 2,
+                "version_token": "tok",
+                "name": "cleared-ig",
+                "image_generators": [],
+            },
+        )
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE_xxx") as client:
+        client.save_workflow(
+            name="cleared-ig", description="desc", body="body", image_generators=[]
+        )
+
+    body = _json.loads(route.calls.last.request.content.decode())
+    assert body["image_generators"] == []
+
+
+@respx.mock
 def test_client_config_parses_ignore_defaults() -> None:
     respx.get(f"{SERVER}/.well-known/goodeye-client-config").mock(
         return_value=httpx.Response(

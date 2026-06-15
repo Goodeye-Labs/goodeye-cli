@@ -327,6 +327,7 @@ class GoodeyeClient:
         expected_version_token: str | None = None,
         source: str | None = None,
         verifiers: list[dict[str, Any]] | None = None,
+        image_generators: list[dict[str, Any]] | None = None,
         files: list[dict[str, Any]] | None = None,
     ) -> WorkflowSaveResult:
         """POST /v1/workflows with the flat ``save_workflow`` payload.
@@ -340,6 +341,10 @@ class GoodeyeClient:
         ``files`` controls the workflow file tree. Omit it (``None``) to carry
         the existing tree forward unchanged. Pass an empty list to clear the
         tree. Pass a non-empty list to replace the tree with the supplied files.
+
+        ``image_generators`` binds image generators to the workflow, each entry
+        ``{"name", "generator_ref"}``. Omit it (``None``) to carry the existing
+        bindings forward; pass an empty list to clear them.
         """
         payload: dict[str, Any] = {
             "name": name,
@@ -355,6 +360,8 @@ class GoodeyeClient:
             payload["source"] = source
         if verifiers is not None:
             payload["verifiers"] = list(verifiers)
+        if image_generators is not None:
+            payload["image_generators"] = list(image_generators)
         if files is not None:
             payload["files"] = list(files)
         response = self._request("POST", "/v1/workflows", json_body=payload)
@@ -620,7 +627,9 @@ class GoodeyeClient:
             result = TemplateDetail.model_validate(response.json())
         return result, final_identifier
 
-    def get_template_file_raw(self, identifier: str, path: str) -> bytes:
+    def get_template_file_raw(
+        self, identifier: str, path: str, *, sha256: str | None = None
+    ) -> bytes:
         """GET /v1/templates/{identifier}/files?path=<path>&format=raw.
 
         Returns the file's raw bytes (the response body), for pulling a
@@ -628,11 +637,18 @@ class GoodeyeClient:
         accepts the same forms as the other template methods (UUID,
         ``@handle/slug``, or ``@handle/slug@vN``). Redirects are followed so a
         renamed publishing handle still resolves.
+
+        Pass ``sha256`` to content-address the fetch: the file is resolved by
+        path and then confirmed to match the address, so a republished or
+        removed file no longer resolves at a stale address (returns not found).
         """
+        params: dict[str, str] = {"path": path, "format": "raw"}
+        if sha256 is not None:
+            params["sha256"] = sha256
         response = self._request(
             "GET",
             f"/v1/templates/{identifier}/files",
-            params={"path": path, "format": "raw"},
+            params=params,
             follow_redirects=True,
         )
         return response.content

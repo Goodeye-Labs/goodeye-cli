@@ -270,6 +270,38 @@ def _parse_workflow_verifier_flags(values: list[str]) -> list[dict[str, str]]:
     return rows
 
 
+def _parse_workflow_image_generator_flags(values: list[str]) -> list[dict[str, str]]:
+    """Parse ``--image-generator logical-name=generator_ref`` into API wire dicts.
+
+    ``generator_ref`` is a system tier (``system:<tier>``), a deployed generator
+    UUID, or a pinned ``<uuid>@<version>``; it rides through untouched and the
+    server validates it.
+    """
+    rows: list[dict[str, str]] = []
+    for raw in values:
+        if "=" not in raw:
+            raise ValidationFailed(
+                slug="validation_error",
+                message=f"Each --image-generator must be name=generator_ref (got {raw!r}).",
+            )
+        name, ref = raw.split("=", 1)
+        name, ref = name.strip(), ref.strip()
+        if not name or not ref:
+            raise ValidationFailed(
+                slug="validation_error",
+                message=f"Each --image-generator needs non-empty name and ref (got {raw!r}).",
+            )
+        if not _WORKFLOW_VERIFIER_NAME_RE.fullmatch(name):
+            raise ValidationFailed(
+                slug="validation_error",
+                message=(
+                    "Each --image-generator name must use lowercase letters, digits, and hyphens."
+                ),
+            )
+        rows.append({"name": name, "generator_ref": ref})
+    return rows
+
+
 def _read_markdown_input(source: str) -> str:
     if source == "-":
         return sys.stdin.read()
@@ -377,6 +409,22 @@ def publish(
         "--clear-verifiers",
         help="Send an explicit empty verifier binding list, removing existing bindings.",
     ),
+    image_generator: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--image-generator",
+            help=(
+                "Image generator binding: name=generator_ref (repeatable). "
+                "generator_ref is a quality tier (system:<tier>), a deployed "
+                "generator UUID, or uuid@version to pin a specific version."
+            ),
+        ),
+    ] = None,
+    clear_image_generators: bool = typer.Option(
+        False,
+        "--clear-image-generators",
+        help="Send an explicit empty image generator binding list, removing existing bindings.",
+    ),
     clear_files: bool = typer.Option(
         False,
         "--clear-files",
@@ -483,6 +531,16 @@ def publish(
     verifiers = _parse_workflow_verifier_flags(list(verifier or []))
     verifier_payload: list[dict[str, str]] | None = [] if clear_verifiers else verifiers or None
 
+    if clear_image_generators and image_generator:
+        raise ValidationFailed(
+            slug="validation_error",
+            message="Use either --clear-image-generators or --image-generator, not both.",
+        )
+    image_generators = _parse_workflow_image_generator_flags(list(image_generator or []))
+    image_generator_payload: list[dict[str, str]] | None = (
+        [] if clear_image_generators else image_generators or None
+    )
+
     # Build the files payload.
     # Directory mode: upload the full tree (everything is inline since there is
     # no recorded state to compare against).
@@ -519,6 +577,7 @@ def publish(
             expected_version_token=expected_version_token,
             source=source,
             verifiers=verifier_payload,
+            image_generators=image_generator_payload,
             files=files_payload,
         )
 

@@ -155,7 +155,7 @@ def deploy(
       name                    Required. Lowercase letters/digits/hyphens, max 128.
                               Unique per owner among non-revoked verifiers.
       description             Required. 1 to 1024 chars.
-      criterion               Required. Rubric prose the judge applies. Max 8000 chars.
+      criterion               Required. Rubric prose the judge applies. Max 20000 chars.
       input_contract          Required. One of "text", "text_image", "image".
       input_fields            Required for text and text_image; must be empty for image.
                               List of input names the judge sees at run time.

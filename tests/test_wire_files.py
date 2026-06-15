@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from goodeye_cli.wire import (
     ClientConfig,
+    TemplateDetail,
     TemplatePublishResult,
     WorkflowDetail,
     WorkflowFileEntry,
@@ -177,3 +178,91 @@ def test_template_publish_result_defaults_authoring_notes_empty() -> None:
         }
     )
     assert result.authoring_notes == []
+
+
+def test_workflow_detail_parses_image_generators_and_archived_at() -> None:
+    payload = {
+        "id": "wf_ig",
+        "name": "img-gen",
+        "version": 1,
+        "body": "body",
+        "description": "desc",
+        "image_generators": [
+            {"name": "hero", "generator_ref": "system:image-standard"},
+            {"name": "banner", "generator_ref": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee@2"},
+        ],
+        "archived_at": "2026-06-14T00:00:00Z",
+    }
+    detail = WorkflowDetail.model_validate(payload)
+    assert detail.image_generators[0].name == "hero"
+    assert detail.image_generators[0].generator_ref == "system:image-standard"
+    assert detail.image_generators[1].generator_ref.endswith("@2")
+    assert detail.archived_at is not None
+
+
+def test_workflow_detail_defaults_image_generators_empty() -> None:
+    """An older server without `image_generators` / `archived_at` still parses."""
+    detail = WorkflowDetail.model_validate(
+        {"id": "wf_old", "name": "legacy", "version": 1, "body": "b", "description": "d"}
+    )
+    assert detail.image_generators == []
+    assert detail.archived_at is None
+
+
+def test_template_detail_parses_image_generator_snapshots_files_and_archived_at() -> None:
+    payload = {
+        "id": "tpl_ig",
+        "slug": "img-gen",
+        "name": "img-gen",
+        "handle": "h",
+        "owner_user_id": "u1",
+        "version": 1,
+        "body": "body",
+        "publishing_handle": "h",
+        "archived_at": "2026-06-14T00:00:00Z",
+        "image_generator_snapshots": [
+            {"name": "hero", "system_name": "image-standard"},
+            {
+                "name": "banner",
+                "generator_id": "gen-123",
+                "generator_version": 3,
+                "provider": "fal",
+                "model": "some/model",
+                "generation_contract": "text_image",
+                "default_params": {"steps": 30},
+                "config_hash": "abc",
+            },
+        ],
+        "files": [{"path": "demo/preview.png", "sha256": "abc", "size_bytes": 10}],
+    }
+    detail = TemplateDetail.model_validate(payload)
+    assert detail.archived_at is not None
+    assert detail.image_generator_snapshots[0].name == "hero"
+    assert detail.image_generator_snapshots[0].system_name == "image-standard"
+    assert detail.image_generator_snapshots[1].generator_id == "gen-123"
+    assert detail.image_generator_snapshots[1].generator_version == 3
+    assert detail.image_generator_snapshots[1].model == "some/model"
+    assert detail.image_generator_snapshots[1].default_params == {"steps": 30}
+    # A system-tier binding carries neither field.
+    assert detail.image_generator_snapshots[0].generator_id is None
+    assert detail.image_generator_snapshots[0].default_params == {}
+    assert detail.files[0].path == "demo/preview.png"
+
+
+def test_template_detail_defaults_new_fields_empty() -> None:
+    """An older server without the new fields still parses with empty defaults."""
+    detail = TemplateDetail.model_validate(
+        {
+            "id": "tpl_old",
+            "slug": "legacy",
+            "name": "legacy",
+            "handle": "h",
+            "owner_user_id": "u1",
+            "version": 1,
+            "body": "b",
+            "publishing_handle": "h",
+        }
+    )
+    assert detail.archived_at is None
+    assert detail.image_generator_snapshots == []
+    assert detail.files == []

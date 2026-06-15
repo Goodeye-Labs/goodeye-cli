@@ -296,6 +296,37 @@ def test_templates_get_file_writes_raw_bytes_to_output(
 
 
 @respx.mock
+def test_templates_get_file_forwards_sha256(
+    tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
+) -> None:
+    """`templates get-file --sha256` content-addresses the fetch via the query param."""
+    _setup_no_creds(monkeypatch, tmp_config_paths)
+    sha = "a" * 64
+    route = respx.get(f"{SERVER}/v1/templates/@h/example/files").mock(
+        return_value=httpx.Response(200, content=b"bytes", headers={"content-type": "image/png"})
+    )
+    out_path = tmp_path / "preview.png"
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "templates",
+            "get-file",
+            "@h/example",
+            "demo/preview.png",
+            "--output",
+            str(out_path),
+            "--sha256",
+            sha,
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    params = dict(route.calls.last.request.url.params)
+    assert params["sha256"] == sha
+    assert params["format"] == "raw"
+
+
+@respx.mock
 def test_templates_get_file_does_not_print_bytes_to_stdout(
     tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
 ) -> None:

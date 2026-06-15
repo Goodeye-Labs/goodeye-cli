@@ -13,6 +13,7 @@ from typer.testing import CliRunner
 from goodeye_cli.app import app
 from goodeye_cli.commands.workflows import (
     _parse_front_matter,
+    _parse_workflow_image_generator_flags,
     _parse_workflow_verifier_flags,
     _split_version_suffix,
 )
@@ -686,6 +687,132 @@ def test_publish_clear_verifiers_sends_explicit_empty_list(
     assert result.exit_code == 0, result.output
     sent = _json.loads(route.calls.last.request.content.decode())
     assert sent["verifiers"] == []
+
+
+@respx.mock
+def test_publish_sends_image_generator_bindings(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    workflow_file = tmp_path / "hello.md"
+    workflow_file.write_text(
+        "---\nname: hello\ndescription: Say hi.\noutcome: Greet users.\n---\n# Hello\n"
+    )
+    route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "workflow_id": "skl_v1",
+                "version": 1,
+                "version_token": "tok-v",
+                "name": "hello",
+            },
+        )
+    )
+    gid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "workflows",
+            "publish",
+            str(workflow_file),
+            "--image-generator",
+            f"hero={gid}@2",
+            "--image-generator",
+            "banner=system:image-standard",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    sent = _json.loads(route.calls.last.request.content.decode())
+    assert sent["image_generators"] == [
+        {"name": "hero", "generator_ref": f"{gid}@2"},
+        {"name": "banner", "generator_ref": "system:image-standard"},
+    ]
+
+
+@respx.mock
+def test_publish_update_without_image_generator_flags_preserves_bindings(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    workflow_file = tmp_path / "hello.md"
+    workflow_file.write_text(
+        "---\nname: hello\ndescription: Say hi.\noutcome: Greet users.\n---\n# Hello\n"
+    )
+    route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "workflow_id": "skl_01",
+                "version": 2,
+                "version_token": "new-token",
+                "name": "hello",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "publish", str(workflow_file)])
+    assert result.exit_code == 0, result.output
+    sent = _json.loads(route.calls.last.request.content.decode())
+    assert "image_generators" not in sent
+
+
+@respx.mock
+def test_publish_clear_image_generators_sends_explicit_empty_list(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    workflow_file = tmp_path / "hello.md"
+    workflow_file.write_text(
+        "---\nname: hello\ndescription: Say hi.\noutcome: Greet users.\n---\n# Hello\n"
+    )
+    route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "workflow_id": "skl_01",
+                "version": 2,
+                "version_token": "new-token",
+                "name": "hello",
+                "image_generators": [],
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["workflows", "publish", str(workflow_file), "--clear-image-generators"],
+    )
+    assert result.exit_code == 0, result.output
+    sent = _json.loads(route.calls.last.request.content.decode())
+    assert sent["image_generators"] == []
+
+
+@respx.mock
+def test_publish_rejects_clear_and_set_image_generators_together(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    workflow_file = tmp_path / "hello.md"
+    workflow_file.write_text(
+        "---\nname: hello\ndescription: Say hi.\noutcome: Greet users.\n---\n# Hello\n"
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "workflows",
+            "publish",
+            str(workflow_file),
+            "--clear-image-generators",
+            "--image-generator",
+            "hero=system:image-standard",
+        ],
+    )
+    # ValidationFailed bubbles up as an exception under CliRunner.
+    assert isinstance(result.exception, ValidationFailed)
+    assert "either --clear-image-generators or --image-generator" in str(result.exception)
 
 
 @respx.mock
@@ -1575,6 +1702,31 @@ def test_parse_workflow_verifier_flags_preserves_version_pin() -> None:
     assert _parse_workflow_verifier_flags([f"tone={vid}@2"]) == [
         {"name": "tone", "verifier_id": f"{vid}@2"}
     ]
+
+
+def test_parse_workflow_image_generator_flags_parses_refs() -> None:
+    gid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    assert _parse_workflow_image_generator_flags(
+        [f"hero={gid}@2", "banner=system:image-standard"]
+    ) == [
+        {"name": "hero", "generator_ref": f"{gid}@2"},
+        {"name": "banner", "generator_ref": "system:image-standard"},
+    ]
+
+
+def test_parse_workflow_image_generator_flags_rejects_missing_equals() -> None:
+    with pytest.raises(ValidationFailed, match="name=generator_ref"):
+        _parse_workflow_image_generator_flags(["system:image-standard"])
+
+
+def test_parse_workflow_image_generator_flags_rejects_empty_ref() -> None:
+    with pytest.raises(ValidationFailed, match="non-empty"):
+        _parse_workflow_image_generator_flags(["hero="])
+
+
+def test_parse_workflow_image_generator_flags_rejects_unsafe_names() -> None:
+    with pytest.raises(ValidationFailed, match="name"):
+        _parse_workflow_image_generator_flags(["hero/image=system:image-standard"])
 
 
 def test_split_version_suffix_returns_no_version_when_absent() -> None:
