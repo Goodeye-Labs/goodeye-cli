@@ -6,6 +6,7 @@ import typer
 from rich.console import Console
 
 from goodeye_cli.client import GoodeyeClient
+from goodeye_cli.commands.referrals import _maybe_redeem_referral
 from goodeye_cli.config import get_server, save_credentials
 
 
@@ -33,7 +34,8 @@ def register(
     console.print("Check your email for next steps.")
     console.print(
         f"[dim]Non-interactive registration started. Finish with: "
-        f"goodeye register-verify --email {email} --code <code>[/dim]"
+        f"goodeye register-verify --email {email} --code <code>"
+        f" (add --referral-code <code> to claim a referral bonus)[/dim]"
     )
 
 
@@ -50,6 +52,11 @@ def register_verify(
         "-c",
         help="One-time code sent to your email.",
     ),
+    referral_code: str | None = typer.Option(
+        None,
+        "--referral-code",
+        help="Referral code to claim a bonus after registering.",
+    ),
 ) -> None:
     """Complete non-interactive registration and save local credentials."""
     console = Console()
@@ -58,3 +65,4 @@ def register_verify(
         result = client.register_verify(email, code)
     path = save_credentials({"api_key": result.api_key, "server": server})
     console.print(f"[green]Account registered.[/green] Credentials saved to {path}")
+    _maybe_redeem_referral(server, result.api_key, referral_code, console)

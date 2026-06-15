@@ -9,6 +9,7 @@ from rich.console import Console
 
 from goodeye_cli.auth_flows import device_code_login
 from goodeye_cli.client import GoodeyeClient
+from goodeye_cli.commands.referrals import _maybe_redeem_referral
 from goodeye_cli.config import get_server, save_client_config, save_credentials
 
 
@@ -21,6 +22,11 @@ def login(
             "Start non-interactive email-code login. "
             "Use `goodeye login-verify --email <email> --code <code>` to finish."
         ),
+    ),
+    referral_code: str | None = typer.Option(
+        None,
+        "--referral-code",
+        help="Referral code to claim a bonus after signing in.",
     ),
 ) -> None:
     """Sign in to Goodeye on this machine.
@@ -38,7 +44,8 @@ def login(
         console.print("Check your email for next steps.")
         console.print(
             f"[dim]Non-interactive login started. Finish with: "
-            f"goodeye login-verify --email {email} --code <code>[/dim]"
+            f"goodeye login-verify --email {email} --code <code>"
+            f" (add --referral-code <code> to claim a referral bonus)[/dim]"
         )
         return
 
@@ -57,6 +64,7 @@ def login(
 
     path = save_credentials({"api_key": api_key, "server": server})
     console.print(f"[green]Signed in.[/green] Credentials saved to {path}")
+    _maybe_redeem_referral(server, api_key, referral_code, console)
 
 
 def login_verify(
@@ -72,6 +80,11 @@ def login_verify(
         "-c",
         help="One-time code sent to your email.",
     ),
+    referral_code: str | None = typer.Option(
+        None,
+        "--referral-code",
+        help="Referral code to claim a bonus after signing in.",
+    ),
 ) -> None:
     """Complete non-interactive email-code login and save local credentials."""
     console = Console()
@@ -80,3 +93,4 @@ def login_verify(
         result = client.login_verify(email, code)
     path = save_credentials({"api_key": result.api_key, "server": server})
     console.print(f"[green]Signed in.[/green] Credentials saved to {path}")
+    _maybe_redeem_referral(server, result.api_key, referral_code, console)

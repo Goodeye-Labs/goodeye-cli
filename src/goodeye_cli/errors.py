@@ -128,6 +128,10 @@ _SLUG_MAP: dict[str, type[GoodeyeError]] = {
     "anonymous_daily_cap": AnonymousDailyCapReached,
     "safety_verification_failed": SafetyVerificationFailed,
     "safety_verification_unavailable": SafetyVerificationUnavailable,
+    "referral_code_not_found": NotFound,
+    "self_referral": Conflict,
+    "already_referred": Conflict,
+    "referral_not_eligible": Conflict,
 }
 
 
