@@ -38,6 +38,8 @@ from goodeye_cli.wire import (
     InvitationDeclineResult,
     InvitationList,
     MeResponse,
+    RedeemResponse,
+    ReferralStatusResponse,
     RenameHandleResult,
     SafetyCheckResult,
     TeamCreated,
@@ -232,6 +234,14 @@ class GoodeyeClient:
     def get_usage(self) -> UsageResponse:
         response = self._request("GET", "/v1/me/usage")
         return UsageResponse.model_validate(response.json())
+
+    def get_referral_status(self) -> ReferralStatusResponse:
+        response = self._request("GET", "/v1/referrals/me")
+        return ReferralStatusResponse.model_validate(response.json())
+
+    def redeem_referral_code(self, code: str) -> RedeemResponse:
+        response = self._request("POST", "/v1/referrals/redeem", json_body={"code": code})
+        return RedeemResponse.model_validate(response.json())
 
     def claim_handle(self, handle: str) -> ClaimHandleResult:
         response = self._request("PATCH", "/v1/me", json_body={"handle": handle})

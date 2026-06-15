@@ -776,3 +776,26 @@ class ImageGenerationRunResult(_WireBase):
     created_at: str
     error_code: str | None = None
     error_message: str | None = None
+
+
+# ----- referrals -----
+
+
+class ReferralStatusResponse(_WireBase):
+    """Response from GET /v1/referrals/me."""
+
+    code: str
+    instructions: str
+    redeemed_count: int
+    qualified_count: int
+    credits_earned_usd: str
+    slots_remaining: int
+
+
+class RedeemResponse(_WireBase):
+    """Response from POST /v1/referrals/redeem."""
+
+    status: str
+    credits_granted_usd: str
+    expires_at: datetime
+    referrer_handle: str

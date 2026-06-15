@@ -22,6 +22,7 @@ from goodeye_cli.commands import invitations as invitations_cmds
 from goodeye_cli.commands import login as login_cmd
 from goodeye_cli.commands import logout as logout_cmd
 from goodeye_cli.commands import me as me_cmds
+from goodeye_cli.commands import referrals as referrals_cmds
 from goodeye_cli.commands import register as register_cmd
 from goodeye_cli.commands import teams as teams_cmds
 from goodeye_cli.commands import templates as templates_cmds
@@ -65,6 +66,7 @@ app.add_typer(
     help="Deploy and run image generators.",
 )
 app.add_typer(invitations_cmds.app, name="invitations", help="Manage invitations.")
+app.add_typer(referrals_cmds.app, name="referral", help="View and redeem referral codes.")
 
 
 def _version_callback(value: bool) -> None:
