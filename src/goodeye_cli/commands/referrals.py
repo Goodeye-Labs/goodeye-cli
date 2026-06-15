@@ -59,7 +59,7 @@ def status(
     """Show your referral code and how many people have used it.
 
     Prints your personal referral code, instructions for sharing it, how many
-    people have redeemed it, how many have qualified for credits, and how much
+    people have redeemed it, how many have activated their account, and how much
     you have earned so far.
     """
     console = Console()
@@ -71,7 +71,7 @@ def status(
             "code": result.code,
             "instructions": result.instructions,
             "redeemed_count": result.redeemed_count,
-            "qualified_count": result.qualified_count,
+            "activated_count": result.activated_count,
             "credits_earned_usd": result.credits_earned_usd,
             "slots_remaining": result.slots_remaining,
         }
@@ -81,7 +81,7 @@ def status(
     console.print(f"Your referral code: [bold]{result.code}[/bold]")
     console.print(f"Instructions: {result.instructions}")
     console.print(f"Redeemed: {result.redeemed_count}")
-    console.print(f"Qualified: {result.qualified_count}")
+    console.print(f"Activated: {result.activated_count}")
     console.print(f"Credits earned: ${result.credits_earned_usd}")
     console.print(f"Slots remaining: {result.slots_remaining}")
 
@@ -111,7 +111,7 @@ def redeem(
         typer.echo(_json.dumps(payload))
         return
 
-    console.print(f"[green]Referral redeemed[/green] (status: {result.status})")
+    console.print("[green]Referral redeemed[/green]")
     console.print(f"Credits granted: ${result.credits_granted_usd}")
     if result.referrer_handle:
         console.print(f"Referred by: @{result.referrer_handle}")

@@ -787,7 +787,7 @@ class ReferralStatusResponse(_WireBase):
     code: str
     instructions: str
     redeemed_count: int
-    qualified_count: int
+    activated_count: int
     credits_earned_usd: str
     slots_remaining: int
 

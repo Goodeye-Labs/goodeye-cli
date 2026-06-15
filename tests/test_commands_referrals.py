@@ -28,7 +28,7 @@ _STATUS_BODY = {
     "code": "GOODEYE-ABC123",
     "instructions": "Share this code with a friend to earn credits.",
     "redeemed_count": 2,
-    "qualified_count": 1,
+    "activated_count": 1,
     "credits_earned_usd": "5.00",
     "slots_remaining": 8,
 }
@@ -63,7 +63,7 @@ def test_referral_status_human(tmp_config_paths: ConfigPaths, monkeypatch) -> No
     assert "GOODEYE-ABC123" in result.output
     assert "Share this code" in result.output
     assert "Redeemed: 2" in result.output
-    assert "Qualified: 1" in result.output
+    assert "Activated: 1" in result.output
     assert "$5.00" in result.output
     assert "Slots remaining: 8" in result.output
 
@@ -78,7 +78,7 @@ def test_referral_status_json(tmp_config_paths: ConfigPaths, monkeypatch) -> Non
     data = json.loads(result.output.strip())
     assert data["code"] == "GOODEYE-ABC123"
     assert data["redeemed_count"] == 2
-    assert data["qualified_count"] == 1
+    assert data["activated_count"] == 1
     assert data["credits_earned_usd"] == "5.00"
     assert data["slots_remaining"] == 8
     assert "instructions" in data
@@ -105,9 +105,10 @@ def test_referral_redeem_human(tmp_config_paths: ConfigPaths, monkeypatch) -> No
     result = runner.invoke(app, ["referrals", "redeem", "GOODEYE-ABC123"])
     assert result.exit_code == 0, result.output
     assert "redeemed" in result.output.lower()
-    assert "pending" in result.output
     assert "$5.00" in result.output
     assert "@alice" in result.output
+    # The raw status value is JSON-only and must not leak into human output.
+    assert "pending" not in result.output
 
 
 @respx.mock
