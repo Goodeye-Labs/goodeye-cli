@@ -56,6 +56,7 @@ class ConfigPaths:
     update_check_file: Path
     sync_file: Path
     sync_state_file: Path
+    sync_lock_file: Path
 
 
 def get_config_paths(env: dict[str, str] | None = None) -> ConfigPaths:
@@ -75,6 +76,7 @@ def get_config_paths(env: dict[str, str] | None = None) -> ConfigPaths:
         update_check_file=config_dir / "update-check.json",
         sync_file=config_dir / "sync.json",
         sync_state_file=config_dir / "sync-state.json",
+        sync_lock_file=config_dir / "sync.lock",
     )
 
 

@@ -180,3 +180,48 @@ def test_should_not_suppress_background_notice_for_plain_text_commands(
 
     assert should_suppress is not None
     assert should_suppress(args, env) is False
+
+
+@pytest.mark.parametrize(
+    "args,env",
+    [
+        # Inherits every background-notice suppression case.
+        (["--version"], {}),
+        (["--help"], {}),
+        (["whoami", "--json"], {}),
+        (["logout"], {"CI": "1"}),
+        # Plus any explicit `workflows sync ...` command: never auto-pull while
+        # the user is running sync by hand.
+        (["workflows", "sync"], {}),
+        (["workflows", "sync", "pull"], {}),
+        (["workflows", "sync", "push"], {}),
+        (["workflows", "sync", "status"], {}),
+        (["workflows", "sync", "auto", "on"], {}),
+        (["workflows", "sync", "target", "list"], {}),
+    ],
+)
+def test_should_suppress_auto_pull_for_meta_and_sync_commands(
+    args: list[str],
+    env: dict[str, str],
+) -> None:
+    should_suppress = getattr(update_module, "should_suppress_auto_pull", None)
+
+    assert should_suppress is not None
+    assert should_suppress(args, env) is True
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["logout"],
+        ["workflows", "list"],
+        # A non-sync workflows subcommand is eligible for an automatic pull tail.
+        ["workflows", "get", "some-slug"],
+        ["templates", "list"],
+    ],
+)
+def test_should_not_suppress_auto_pull_for_ordinary_commands(args: list[str]) -> None:
+    should_suppress = getattr(update_module, "should_suppress_auto_pull", None)
+
+    assert should_suppress is not None
+    assert should_suppress(args, {}) is False

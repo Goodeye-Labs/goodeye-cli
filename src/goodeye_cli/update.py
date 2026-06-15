@@ -53,6 +53,20 @@ def should_suppress_background_notice(args: Sequence[str], env: Mapping[str, str
     return first_arg in {"--version", "help", "update", "upgrade"}
 
 
+def should_suppress_auto_pull(args: Sequence[str], env: Mapping[str, str]) -> bool:
+    """Return whether a CLI invocation should skip the best-effort automatic pull.
+
+    Suppressed for the same machine-readable and meta invocations the background
+    update notice skips (CI, ``--json``, ``--help``/``-h``, ``--version``, and
+    the bare/``help``/``update`` forms), plus any explicit ``workflows sync ...``
+    command: an automatic pull must never shadow a sync the user is running by
+    hand (pull, push, status, or a target edit).
+    """
+    if should_suppress_background_notice(args, env):
+        return True
+    return len(args) >= 2 and args[0] == "workflows" and args[1] == "sync"
+
+
 def format_update_notice(result: UpdateCheckResult) -> str:
     """Format the concise stderr notice for an available update."""
     return f"goodeye {result.latest_version} is available; run: goodeye update"
