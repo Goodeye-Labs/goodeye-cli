@@ -66,7 +66,7 @@ app.add_typer(
     help="Deploy and run image generators.",
 )
 app.add_typer(invitations_cmds.app, name="invitations", help="Manage invitations.")
-app.add_typer(referrals_cmds.app, name="referral", help="View and redeem referral codes.")
+app.add_typer(referrals_cmds.app, name="referrals", help="View and redeem referral codes.")
 
 
 def _version_callback(value: bool) -> None:

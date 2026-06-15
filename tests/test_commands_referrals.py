@@ -1,4 +1,4 @@
-"""Tests for the `goodeye referral ...` subcommand group.
+"""Tests for the `goodeye referrals ...` subcommand group.
 
 Covers happy-path status and redeem, --json output, all four error slugs,
 and missing credentials.
@@ -58,7 +58,7 @@ def test_referral_status_human(tmp_config_paths: ConfigPaths, monkeypatch) -> No
     _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE_key")
     respx.get(f"{SERVER}/v1/referrals/me").mock(return_value=httpx.Response(200, json=_STATUS_BODY))
     runner = CliRunner()
-    result = runner.invoke(app, ["referral", "status"])
+    result = runner.invoke(app, ["referrals", "status"])
     assert result.exit_code == 0, result.output
     assert "GOODEYE-ABC123" in result.output
     assert "Share this code" in result.output
@@ -73,7 +73,7 @@ def test_referral_status_json(tmp_config_paths: ConfigPaths, monkeypatch) -> Non
     _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE_key")
     respx.get(f"{SERVER}/v1/referrals/me").mock(return_value=httpx.Response(200, json=_STATUS_BODY))
     runner = CliRunner()
-    result = runner.invoke(app, ["referral", "status", "--json"])
+    result = runner.invoke(app, ["referrals", "status", "--json"])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output.strip())
     assert data["code"] == "GOODEYE-ABC123"
@@ -87,7 +87,7 @@ def test_referral_status_json(tmp_config_paths: ConfigPaths, monkeypatch) -> Non
 def test_referral_status_no_credentials(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _env(monkeypatch, tmp_config_paths, api_key=None)
     runner = CliRunner()
-    result = runner.invoke(app, ["referral", "status"])
+    result = runner.invoke(app, ["referrals", "status"])
     assert result.exit_code != 0
     assert isinstance(result.exception, AuthRequired)
 
@@ -102,7 +102,7 @@ def test_referral_redeem_human(tmp_config_paths: ConfigPaths, monkeypatch) -> No
         return_value=httpx.Response(200, json=_REDEEM_BODY)
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["referral", "redeem", "GOODEYE-ABC123"])
+    result = runner.invoke(app, ["referrals", "redeem", "GOODEYE-ABC123"])
     assert result.exit_code == 0, result.output
     assert "redeemed" in result.output.lower()
     assert "pending" in result.output
@@ -119,7 +119,7 @@ def test_referral_redeem_human_blank_referrer_handle(
     body = {**_REDEEM_BODY, "referrer_handle": ""}
     respx.post(f"{SERVER}/v1/referrals/redeem").mock(return_value=httpx.Response(200, json=body))
     runner = CliRunner()
-    result = runner.invoke(app, ["referral", "redeem", "GOODEYE-ABC123"])
+    result = runner.invoke(app, ["referrals", "redeem", "GOODEYE-ABC123"])
     assert result.exit_code == 0, result.output
     assert "redeemed" in result.output.lower()
     assert "$5.00" in result.output
@@ -134,7 +134,7 @@ def test_referral_redeem_json(tmp_config_paths: ConfigPaths, monkeypatch) -> Non
         return_value=httpx.Response(200, json=_REDEEM_BODY)
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["referral", "redeem", "GOODEYE-ABC123", "--json"])
+    result = runner.invoke(app, ["referrals", "redeem", "GOODEYE-ABC123", "--json"])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output.strip())
     assert data["status"] == "pending"
@@ -146,7 +146,7 @@ def test_referral_redeem_json(tmp_config_paths: ConfigPaths, monkeypatch) -> Non
 def test_referral_redeem_no_credentials(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _env(monkeypatch, tmp_config_paths, api_key=None)
     runner = CliRunner()
-    result = runner.invoke(app, ["referral", "redeem", "GOODEYE-ABC123"])
+    result = runner.invoke(app, ["referrals", "redeem", "GOODEYE-ABC123"])
     assert result.exit_code != 0
     assert isinstance(result.exception, AuthRequired)
 
@@ -206,7 +206,7 @@ def test_referral_redeem_surfaces_self_referral_error(
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["referral", "redeem", "MYCODE"])
+    result = runner.invoke(app, ["referrals", "redeem", "MYCODE"])
     assert result.exit_code != 0
     assert isinstance(result.exception, Conflict)
     assert result.exception.slug == "self_referral"
@@ -224,7 +224,7 @@ def test_referral_redeem_surfaces_already_referred_error(
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["referral", "redeem", "SOMEREF"])
+    result = runner.invoke(app, ["referrals", "redeem", "SOMEREF"])
     assert result.exit_code != 0
     assert isinstance(result.exception, Conflict)
     assert result.exception.slug == "already_referred"
@@ -248,7 +248,7 @@ def test_referral_redeem_surfaces_code_not_found_error(
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["referral", "redeem", "BADCODE"])
+    result = runner.invoke(app, ["referrals", "redeem", "BADCODE"])
     assert result.exit_code != 0
     assert isinstance(result.exception, NotFound)
     assert result.exception.slug == "referral_code_not_found"
@@ -269,7 +269,7 @@ def test_referral_redeem_surfaces_not_eligible_error(
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["referral", "redeem", "EXPIREDCODE"])
+    result = runner.invoke(app, ["referrals", "redeem", "EXPIREDCODE"])
     assert result.exit_code != 0
     assert isinstance(result.exception, Conflict)
     assert result.exception.slug == "referral_not_eligible"

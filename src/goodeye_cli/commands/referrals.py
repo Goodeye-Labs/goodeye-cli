@@ -1,4 +1,4 @@
-"""`goodeye referral ...` subcommand group.
+"""`goodeye referrals ...` subcommand group.
 
 Covers viewing your referral code and redeeming a referral from another user.
 """
