@@ -421,6 +421,14 @@ goodeye workflows sync target list [--json|--table]
 goodeye workflows sync target remove <DIR>
     Remove a configured local sync target by its directory.
 
+goodeye workflows sync auto [on [--interval SECONDS] | off] [--json|--table]
+    Turn opt-in automatic background pulls on or off, or (with no argument)
+    show the current setting and the last automatic-pull time. When on, the
+    CLI keeps the safe set of your configured targets (new and behind-registry
+    workflows) fresh in the background after a command finishes, no more often
+    than the interval (default 3600 seconds). It never overwrites local edits,
+    never deletes a local copy, and never blocks your command. Off by default.
+
 goodeye workflows sync pull [SLUG...] [--target DIR] [--force] [--yes] [--json|--table]
     Pull registry workflows down to the configured directories, each written
     to <target>/<slug>/SKILL.md. Omit slugs to pull everything in scope. A

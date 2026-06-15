@@ -341,6 +341,128 @@ def target_remove(
         console.print(f"[yellow]No sync target[/yellow] found for {stored_path}")
 
 
+auto_app = typer.Typer(
+    help="Turn automatic background pulls on or off, or show the current setting.",
+    invoke_without_command=True,
+)
+app.add_typer(auto_app, name="auto")
+
+
+def _auto_status_payload(config: sync.SyncConfig, state: sync.SyncState) -> dict[str, object]:
+    """Build the reportable view of the automatic-pull setting and last run."""
+    last = state.last_auto_pull_at
+    return {
+        "enabled": config.auto.enabled,
+        "interval_seconds": config.auto.interval_seconds,
+        "last_auto_pull_at": last.isoformat() if last is not None else None,
+    }
+
+
+@auto_app.callback(invoke_without_command=True)
+def _auto_root(
+    ctx: typer.Context,
+    json_output: bool = typer.Option(False, "--json", help="Print the setting as JSON."),
+    table_output: bool = typer.Option(False, "--table", help="Print the setting as a table."),
+) -> None:
+    """Show whether automatic background pulls are on, with the interval and last run.
+
+    Automatic pull is off by default. When on, the CLI refreshes the safe set of
+    your configured targets (new and behind-registry workflows) in the
+    background after a command finishes, no more often than the interval. It
+    never overwrites local edits, never deletes a local copy, and never blocks
+    your command. Run with `on` or `off` to change the setting.
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+
+    mode = resolve_output_mode(json_output=json_output, table_output=table_output)
+    paths = get_config_paths()
+    config = sync.load_sync_config(paths)
+    state = sync.load_sync_state(paths)
+    payload = _auto_status_payload(config, state)
+
+    if mode == "json":
+        echo_json(payload)
+        return
+
+    console = Console()
+    status_word = "on" if config.auto.enabled else "off"
+    color = "green" if config.auto.enabled else "yellow"
+    console.print(f"Automatic pull is [{color}]{status_word}[/{color}].")
+    console.print(f"Interval: {config.auto.interval_seconds} seconds.")
+    last = payload["last_auto_pull_at"]
+    console.print(f"Last automatic pull: {last if last is not None else 'never'}.")
+
+
+@auto_app.command("on")
+def auto_on(
+    interval: int | None = typer.Option(
+        None,
+        "--interval",
+        help="Minimum seconds between automatic pulls (defaults to the current setting).",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Print the setting as JSON."),
+    table_output: bool = typer.Option(False, "--table", help="Print the setting as a table."),
+) -> None:
+    """Turn automatic background pulls on, optionally setting the interval.
+
+    Once on, the CLI keeps the safe set of your configured targets fresh in the
+    background. Local edits are always preserved and nothing is ever deleted
+    automatically. Requires at least one configured sync target to do anything.
+    """
+    if interval is not None and interval <= 0:
+        raise ValidationFailed(
+            slug="validation_error",
+            message="--interval must be a positive number of seconds.",
+        )
+    mode = resolve_output_mode(json_output=json_output, table_output=table_output)
+    paths = get_config_paths()
+    config = sync.load_sync_config(paths)
+    config.auto.enabled = True
+    if interval is not None:
+        config.auto.interval_seconds = interval
+    sync.save_sync_config(config, paths)
+    state = sync.load_sync_state(paths)
+
+    if mode == "json":
+        echo_json(_auto_status_payload(config, state))
+        return
+
+    console = Console()
+    console.print(
+        f"[green]Automatic pull is on[/green] (interval: {config.auto.interval_seconds} seconds)."
+    )
+    if not config.targets:
+        console.print(
+            "[yellow]Next:[/yellow] add a target with "
+            "`goodeye workflows sync target add <dir>` so there is something to keep fresh."
+        )
+
+
+@auto_app.command("off")
+def auto_off(
+    json_output: bool = typer.Option(False, "--json", help="Print the setting as JSON."),
+    table_output: bool = typer.Option(False, "--table", help="Print the setting as a table."),
+) -> None:
+    """Turn automatic background pulls off.
+
+    The interval setting is kept so turning it back on resumes the same cadence.
+    """
+    mode = resolve_output_mode(json_output=json_output, table_output=table_output)
+    paths = get_config_paths()
+    config = sync.load_sync_config(paths)
+    config.auto.enabled = False
+    sync.save_sync_config(config, paths)
+    state = sync.load_sync_state(paths)
+
+    if mode == "json":
+        echo_json(_auto_status_payload(config, state))
+        return
+
+    console = Console()
+    console.print("[yellow]Automatic pull is off.[/yellow]")
+
+
 _SKIPPED_ACTIONS = frozenset({"skipped-modified", "skipped-conflict"})
 
 
@@ -641,6 +763,9 @@ def push(
 
 __all__ = [
     "app",
+    "auto_app",
+    "auto_off",
+    "auto_on",
     "pull",
     "push",
     "status",

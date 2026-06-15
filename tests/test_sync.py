@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -15,6 +16,7 @@ from goodeye_cli.config import ConfigPaths
 from goodeye_cli.errors import Conflict, NotFound, ServerError, ValidationFailed
 from goodeye_cli.sync import (
     PRESETS,
+    AutoConfig,
     FileState,
     PushItem,
     SyncConfig,
@@ -24,6 +26,7 @@ from goodeye_cli.sync import (
     SyncVerifierBinding,
     add_target,
     append_to_allowlist,
+    auto_is_due,
     body_sha256,
     ensure_identity,
     expand_target_path,
@@ -47,6 +50,7 @@ from goodeye_cli.sync import (
     select_for_target,
     server_moved,
     slug_in_target_scope,
+    stamp_auto_pull,
     status,
     untracked_local_slugs,
     upsert_entry,
@@ -3256,3 +3260,282 @@ def test_append_to_allowlist_deduplicates_input_entries() -> None:
     assert added == ["new"]
     assert already_present == ["existing"]
     assert config.targets[0].selected == ["existing", "new"]
+
+
+# ----- auto config + state model -----
+
+
+def test_auto_config_defaults_off() -> None:
+    auto = AutoConfig()
+    assert auto.enabled is False
+    assert auto.interval_seconds == 3600
+
+
+def test_sync_config_defaults_auto_block() -> None:
+    config = SyncConfig()
+    assert config.auto == AutoConfig()
+    assert config.auto.enabled is False
+
+
+def test_older_config_without_auto_loads_clean(tmp_config_paths: ConfigPaths) -> None:
+    # A config written before automatic pull existed has no `auto` key. It must
+    # load with the feature off rather than failing validation.
+    tmp_config_paths.sync_file.parent.mkdir(parents=True, exist_ok=True)
+    tmp_config_paths.sync_file.write_text(
+        json.dumps({"version": 1, "targets": [{"path": "~/skills", "scope": "owned"}]}),
+        encoding="utf-8",
+    )
+    config = load_sync_config(tmp_config_paths)
+    assert config.auto.enabled is False
+    assert config.auto.interval_seconds == 3600
+    assert len(config.targets) == 1
+
+
+def test_auto_config_roundtrips_through_sync_json(tmp_config_paths: ConfigPaths) -> None:
+    config = SyncConfig(
+        targets=[SyncTarget(path="~/skills", scope="owned")],
+        auto=AutoConfig(enabled=True, interval_seconds=120),
+    )
+    save_sync_config(config, tmp_config_paths)
+    reloaded = load_sync_config(tmp_config_paths)
+    assert reloaded.auto.enabled is True
+    assert reloaded.auto.interval_seconds == 120
+
+
+def test_state_defaults_last_auto_pull_at_none() -> None:
+    assert SyncState().last_auto_pull_at is None
+
+
+def test_older_state_without_last_auto_pull_at_loads_clean(tmp_config_paths: ConfigPaths) -> None:
+    tmp_config_paths.sync_state_file.parent.mkdir(parents=True, exist_ok=True)
+    tmp_config_paths.sync_state_file.write_text(
+        json.dumps({"version": 1, "identity": "owner@example.com", "entries": []}),
+        encoding="utf-8",
+    )
+    state = load_sync_state(tmp_config_paths)
+    assert state.last_auto_pull_at is None
+    assert state.identity == "owner@example.com"
+
+
+def test_stamp_auto_pull_roundtrips_through_state(tmp_config_paths: ConfigPaths) -> None:
+    now = datetime(2026, 6, 14, 17, 2, 11, tzinfo=UTC)
+    state = SyncState()
+    stamp_auto_pull(state, now)
+    assert state.last_auto_pull_at == now
+    save_sync_state(state, tmp_config_paths)
+    reloaded = load_sync_state(tmp_config_paths)
+    assert reloaded.last_auto_pull_at == now
+
+
+# ----- auto_is_due boundary behavior -----
+
+
+def test_auto_is_due_when_never_run() -> None:
+    config = SyncConfig(auto=AutoConfig(enabled=True, interval_seconds=3600))
+    state = SyncState()
+    assert auto_is_due(state, config, datetime(2026, 6, 14, 12, 0, tzinfo=UTC)) is True
+
+
+def test_auto_is_due_false_before_interval() -> None:
+    now = datetime(2026, 6, 14, 12, 0, tzinfo=UTC)
+    config = SyncConfig(auto=AutoConfig(enabled=True, interval_seconds=3600))
+    state = SyncState(last_auto_pull_at=now - timedelta(seconds=3599))
+    assert auto_is_due(state, config, now) is False
+
+
+def test_auto_is_due_true_at_exact_interval() -> None:
+    now = datetime(2026, 6, 14, 12, 0, tzinfo=UTC)
+    config = SyncConfig(auto=AutoConfig(enabled=True, interval_seconds=3600))
+    state = SyncState(last_auto_pull_at=now - timedelta(seconds=3600))
+    assert auto_is_due(state, config, now) is True
+
+
+def test_auto_is_due_true_after_interval() -> None:
+    now = datetime(2026, 6, 14, 12, 0, tzinfo=UTC)
+    config = SyncConfig(auto=AutoConfig(enabled=True, interval_seconds=3600))
+    state = SyncState(last_auto_pull_at=now - timedelta(seconds=7200))
+    assert auto_is_due(state, config, now) is True
+
+
+def test_auto_is_due_tolerates_naive_last_timestamp() -> None:
+    # A legacy index could store a tz-naive timestamp; the comparison must not raise.
+    now = datetime(2026, 6, 14, 12, 0, tzinfo=UTC)
+    config = SyncConfig(auto=AutoConfig(enabled=True, interval_seconds=3600))
+    state = SyncState(last_auto_pull_at=datetime(2026, 6, 14, 10, 0))
+    assert auto_is_due(state, config, now) is True
+
+
+# ----- auto-mode pull engine -----
+
+
+@respx.mock
+def test_pull_auto_writes_safe_set(tmp_path: Path, tmp_config_paths: ConfigPaths) -> None:
+    # Auto mode writes new and behind-server workflows exactly like a force=False
+    # manual pull does.
+    _me_route()
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response(
+            [{"id": "skl_new", "name": "fresh", "current_version": 1, "version_token": "t1"}]
+        )
+    )
+    respx.get(f"{SERVER}/v1/workflows/skl_new").mock(
+        return_value=_detail_response(id_="skl_new", name="fresh", body="body", token="t1")
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = pull(
+            client,
+            config,
+            SyncState(),
+            slugs=[],
+            target_path=None,
+            force=False,
+            yes=False,
+            auto=True,
+            paths=tmp_config_paths,
+        )
+    assert [(i.slug, i.action) for i in result.items] == [("fresh", "pulled")]
+    assert (target_dir / "fresh" / "SKILL.md").read_text(encoding="utf-8") == "body"
+
+
+@respx.mock
+def test_pull_auto_skips_modified_local(tmp_path: Path, tmp_config_paths: ConfigPaths) -> None:
+    # Auto never passes force, so a locally edited workflow is preserved and
+    # reported skipped, never clobbered.
+    _me_route()
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    _write_skill(target_dir, "alpha", "locally edited")
+    state = SyncState(
+        entries=[
+            _tracked_entry(
+                target_dir, id_="skl_a", slug="alpha", body="server original", token="t1"
+            )
+        ]
+    )
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response(
+            [{"id": "skl_a", "name": "alpha", "current_version": 1, "version_token": "t1"}]
+        )
+    )
+    detail_route = respx.get(f"{SERVER}/v1/workflows/skl_a")
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = pull(
+            client,
+            config,
+            state,
+            slugs=[],
+            target_path=None,
+            force=False,
+            yes=False,
+            auto=True,
+            paths=tmp_config_paths,
+        )
+    assert [(i.slug, i.action) for i in result.items] == [("alpha", "skipped-modified")]
+    assert (target_dir / "alpha" / "SKILL.md").read_text(encoding="utf-8") == "locally edited"
+    assert detail_route.call_count == 0
+
+
+@respx.mock
+def test_pull_auto_skips_conflict(tmp_path: Path, tmp_config_paths: ConfigPaths) -> None:
+    _me_route()
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    _write_skill(target_dir, "alpha", "locally edited")
+    state = SyncState(
+        entries=[
+            _tracked_entry(
+                target_dir, id_="skl_a", slug="alpha", body="server original", token="t1"
+            )
+        ]
+    )
+    # Both sides moved: local edited AND server token advanced -> conflict.
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response(
+            [{"id": "skl_a", "name": "alpha", "current_version": 2, "version_token": "t2"}]
+        )
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = pull(
+            client,
+            config,
+            state,
+            slugs=[],
+            target_path=None,
+            force=False,
+            yes=False,
+            auto=True,
+            paths=tmp_config_paths,
+        )
+    assert [(i.slug, i.action) for i in result.items] == [("alpha", "skipped-conflict")]
+    assert (target_dir / "alpha" / "SKILL.md").read_text(encoding="utf-8") == "locally edited"
+
+
+@respx.mock
+def test_pull_auto_reports_deleted_on_server_but_never_removes(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    # In auto mode a workflow gone server-side is reported deleted-on-server, but
+    # its local directory is kept and confirm_destructive is never called -- even
+    # with yes=False on a non-TTY where the confirm would otherwise auto-approve.
+    _me_route()
+    target_dir = tmp_path / "skills"
+    target = SyncTarget(path=str(target_dir), scope="owned")
+    config = SyncConfig(targets=[target])
+    body = "registry body"
+    _write_skill(target_dir, "gone", body)
+    state = SyncState(entries=[_tracked_entry(target_dir, id_="skl_gone", slug="gone", body=body)])
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response(
+            [_summary_dict(id_="skl_gone", name="gone", archived_at="2026-01-01T00:00:00Z")]
+        )
+    )
+
+    def _boom(*_a: object, **_k: object) -> bool:
+        raise AssertionError("confirm_destructive must not be called in auto mode")
+
+    monkeypatch.setattr("goodeye_cli.sync.confirm_destructive", _boom)
+
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = pull(
+            client,
+            config,
+            state,
+            slugs=[],
+            target_path=None,
+            force=False,
+            yes=False,
+            auto=True,
+            paths=tmp_config_paths,
+        )
+    assert [(i.slug, i.action) for i in result.items] == [("gone", "deleted-on-server")]
+    # The local copy survives and the entry stays tracked.
+    assert local_skill_path(target, "gone").read_text(encoding="utf-8") == body
+    assert [e.slug for e in load_sync_state(tmp_config_paths).entries] == ["gone"]
+
+
+@respx.mock
+def test_pull_auto_identity_mismatch_raises_and_is_catchable(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    # The auto path runs the same identity guard. A mismatch raises Conflict
+    # before any work; the caller (the tail) is expected to swallow it.
+    _me_route("intruder@example.com")
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    list_route = respx.get(f"{SERVER}/v1/workflows").mock(return_value=_list_response([]))
+    state = SyncState(identity="owner@example.com")
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client, pytest.raises(Conflict):
+        pull(
+            client,
+            config,
+            state,
+            slugs=[],
+            target_path=None,
+            force=False,
+            yes=False,
+            auto=True,
+            paths=tmp_config_paths,
+        )
+    assert list_route.call_count == 0

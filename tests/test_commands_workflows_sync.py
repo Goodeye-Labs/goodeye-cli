@@ -1523,3 +1523,102 @@ def test_target_add_only_with_preset_appends_to_existing_preset_target(
     selected = items[0]["selected"]
     assert "existing-wf" in selected
     assert "new-wf" in selected
+
+
+# ----- workflows sync auto -----
+
+
+def _load_auto(tmp_config_paths: ConfigPaths):
+    from goodeye_cli import sync
+
+    return sync.load_sync_config(tmp_config_paths).auto
+
+
+def test_auto_on_enables_and_defaults_to_compact_json(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "sync", "auto", "on"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["enabled"] is True
+    assert payload["interval_seconds"] == 3600
+    assert payload["last_auto_pull_at"] is None
+    # The config on disk reflects the change.
+    assert _load_auto(tmp_config_paths).enabled is True
+
+
+def test_auto_on_with_interval_sets_interval(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "sync", "auto", "on", "--interval", "120"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["interval_seconds"] == 120
+    assert _load_auto(tmp_config_paths).interval_seconds == 120
+
+
+def test_auto_on_rejects_non_positive_interval(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "sync", "auto", "on", "--interval", "0"])
+    assert result.exit_code != 0
+    # The setting was not flipped on by a rejected request.
+    assert _load_auto(tmp_config_paths).enabled is False
+
+
+def test_auto_off_disables_but_keeps_interval(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    runner.invoke(app, ["workflows", "sync", "auto", "on", "--interval", "900"])
+    result = runner.invoke(app, ["workflows", "sync", "auto", "off"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["enabled"] is False
+    # The interval is remembered for the next `on`.
+    assert payload["interval_seconds"] == 900
+    assert _load_auto(tmp_config_paths).interval_seconds == 900
+
+
+def test_auto_status_reports_current_setting(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    runner.invoke(app, ["workflows", "sync", "auto", "on", "--interval", "600"])
+    result = runner.invoke(app, ["workflows", "sync", "auto"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload == {
+        "enabled": True,
+        "interval_seconds": 600,
+        "last_auto_pull_at": None,
+    }
+
+
+def test_auto_status_human_mode_on_tty(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    runner.invoke(app, ["workflows", "sync", "auto", "on"])
+    # --table forces the human-readable view regardless of TTY detection.
+    result = runner.invoke(app, ["workflows", "sync", "auto", "--table"])
+    assert result.exit_code == 0, result.output
+    assert "Automatic pull is" in result.output
+    assert "on" in result.output
+    assert "never" in result.output
+
+
+def test_auto_status_reports_last_pull_time(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    from datetime import UTC, datetime
+
+    from goodeye_cli import sync
+
+    _redirect_config(monkeypatch, tmp_config_paths)
+    config = sync.SyncConfig(auto=sync.AutoConfig(enabled=True, interval_seconds=300))
+    sync.save_sync_config(config, tmp_config_paths)
+    state = sync.SyncState(last_auto_pull_at=datetime(2026, 6, 14, 17, 2, 11, tzinfo=UTC))
+    sync.save_sync_state(state, tmp_config_paths)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "sync", "auto"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["last_auto_pull_at"] == "2026-06-14T17:02:11+00:00"

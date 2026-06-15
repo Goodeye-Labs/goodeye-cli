@@ -21,6 +21,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -92,6 +93,20 @@ class SyncTarget(_SyncBase):
     link: bool = False
 
 
+class AutoConfig(_SyncBase):
+    """Opt-in automatic-pull settings for the local mirror.
+
+    ``enabled`` is off by default, so a config written by an older CLI (which
+    has no ``auto`` block at all) loads with automatic pulls disabled and sees
+    no behavior change until the user opts in. ``interval_seconds`` is the
+    minimum gap between automatic pulls: a floor on how often the background
+    tail refreshes the mirror, not a freshness guarantee at any instant.
+    """
+
+    enabled: bool = False
+    interval_seconds: int = 3600
+
+
 class SyncConfig(_SyncBase):
     """The full local sync configuration persisted to ``sync.json``."""
 
@@ -103,6 +118,9 @@ class SyncConfig(_SyncBase):
     # if a config-level binding is added later.
     identity: str | None = None
     targets: list[SyncTarget] = Field(default_factory=list)
+    # Defaulted so a config written before automatic pull existed (no ``auto``
+    # key) loads with the feature off.
+    auto: AutoConfig = Field(default_factory=AutoConfig)
 
 
 def expand_target_path(path: str) -> Path:
@@ -453,6 +471,34 @@ class SyncState(_SyncBase):
     version: int = 1
     identity: str | None = None
     entries: list[SyncEntry] = Field(default_factory=list)
+    # When the last automatic pull claimed its throttle window. ``None`` until
+    # the first automatic pull runs; absent in indexes written by an older CLI,
+    # which load it as ``None``.
+    last_auto_pull_at: datetime | None = None
+
+
+def auto_is_due(state: SyncState, config: SyncConfig, now: datetime) -> bool:
+    """Return whether enough time has elapsed for another automatic pull.
+
+    The interval is a floor between automatic pulls. A never-run mirror
+    (``last_auto_pull_at is None``) is always due. Otherwise the gap since the
+    last claim must reach ``config.auto.interval_seconds``. Naive timestamps are
+    treated as the same wall clock as ``now`` so a comparison never raises on a
+    legacy index that stored a tz-naive value.
+    """
+    last = state.last_auto_pull_at
+    if last is None:
+        return True
+    if last.tzinfo is None and now.tzinfo is not None:
+        last = last.replace(tzinfo=now.tzinfo)
+    elif last.tzinfo is not None and now.tzinfo is None:
+        now = now.replace(tzinfo=last.tzinfo)
+    return (now - last).total_seconds() >= config.auto.interval_seconds
+
+
+def stamp_auto_pull(state: SyncState, now: datetime) -> None:
+    """Record ``now`` as the moment the latest automatic pull claimed its window."""
+    state.last_auto_pull_at = now
 
 
 def load_sync_state(paths: ConfigPaths) -> SyncState:
@@ -900,6 +946,7 @@ def pull(
     force: bool,
     yes: bool,
     paths: ConfigPaths,
+    auto: bool = False,
 ) -> PullResult:
     """Mirror registry workflows onto disk for the configured targets.
 
@@ -918,6 +965,13 @@ def pull(
     sibling fetch interrupted) records no entry, so a re-run reports its
     ``SKILL.md`` as untracked and preserves it (it is never clobbered without
     ``force``); the resume guarantee covers completed workflows only.
+
+    ``auto`` runs the same ``force=False`` pull in a report-only deletion mode:
+    a workflow gone server-side is still classified and reported as
+    ``deleted-on-server`` but its local directory is never removed and no
+    confirmation prompt is ever issued. This is the mode the background
+    automatic pull uses, where prompting is impossible and deletion is reserved
+    for an explicit manual pull.
     """
     result = PullResult()
     # Guard before any work: a mismatched identity aborts here, and a first run
@@ -936,7 +990,9 @@ def pull(
             for summary in selected:
                 result.items.append(_pull_one(client, state, target, summary, force=force))
             result.items.extend(
-                _reconcile_deletions(state, target, live, slug_args=slug_args, force=force, yes=yes)
+                _reconcile_deletions(
+                    state, target, live, slug_args=slug_args, force=force, yes=yes, auto=auto
+                )
             )
     finally:
         # Persist whatever the index accumulated, including on a mid-loop raise.
@@ -957,6 +1013,7 @@ def _reconcile_deletions(
     slug_args: list[str],
     force: bool,
     yes: bool,
+    auto: bool = False,
 ) -> list[PullItem]:
     """Remove local copies of tracked workflows that are gone server-side.
 
@@ -974,6 +1031,13 @@ def _reconcile_deletions(
     guard, ``confirm_destructive`` auto-approves on a non-TTY (the agent path),
     so an agent run would otherwise delete a vanished workflow's directory along
     with edits that were never pushed.
+
+    ``auto`` is the report-only mode used by the background automatic pull: a
+    gone-server-side entry is always reported ``deleted-on-server`` and kept on
+    disk. The destructive branch (``confirm_destructive`` plus
+    ``_remove_skill_dir``) is never reached, so the automatic path can never
+    delete a local directory and never prompts, even on a non-TTY where the
+    confirm would otherwise auto-approve.
     """
     stored_target = normalize_target_path(target.path)
     wanted = set(slug_args)
@@ -999,6 +1063,22 @@ def _reconcile_deletions(
         # at an id absent from the live set is genuinely gone.
         if entry.workflow_id in live_ids:
             surviving.append(entry)
+            continue
+
+        # Report-only automatic path: a workflow gone server-side is surfaced as
+        # `deleted-on-server` and kept on disk. The automatic pull never deletes
+        # and never prompts, so it short-circuits here before the edit guard and
+        # the confirm. Deletion stays an explicit, confirmed manual pull.
+        if auto:
+            surviving.append(entry)
+            items.append(
+                PullItem(
+                    slug=entry.slug,
+                    target_path=stored_target,
+                    action="deleted-on-server",
+                    workflow_id=entry.workflow_id,
+                )
+            )
             continue
 
         # Protect un-pushed local edits. If the on-disk body or any tracked

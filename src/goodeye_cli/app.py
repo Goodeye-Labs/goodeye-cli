@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import atexit
 import os
 import sys
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
 from rich.console import Console
 
-from goodeye_cli import __version__
+from goodeye_cli import __version__, sync
+from goodeye_cli import background as background_sync
 from goodeye_cli import update as update_checks
 from goodeye_cli.commands import auth as auth_cmds
 from goodeye_cli.commands import design as design_cmd
@@ -27,6 +30,7 @@ from goodeye_cli.commands import usage as usage_cmd
 from goodeye_cli.commands import verifiers as verifiers_cmds
 from goodeye_cli.commands import whoami as whoami_cmd
 from goodeye_cli.commands import workflows as workflows_cmds
+from goodeye_cli.config import get_api_key, get_config_paths
 from goodeye_cli.errors import GoodeyeError
 
 app = typer.Typer(
@@ -97,6 +101,33 @@ def _maybe_emit_background_update_notice() -> None:
         return
 
 
+def _maybe_register_auto_pull_tail() -> None:
+    """Register the automatic-pull tail when the cheap synchronous gate passes.
+
+    Reuses the best-effort ethos of the update notice: a broken gate must never
+    break the user's command, so the whole body is wrapped in a swallow. The
+    network work runs only later, in the ``atexit`` tail, so even an eligible
+    invocation pays nothing here beyond a couple of small local JSON reads.
+    """
+    try:
+        args = _get_background_notice_args()
+        paths = get_config_paths()
+        config = sync.load_sync_config(paths)
+        state = sync.load_sync_state(paths)
+        if background_sync.should_run_auto_pull(
+            args,
+            os.environ,
+            config,
+            state,
+            authenticated=get_api_key(paths) is not None,
+            now=datetime.now(UTC),
+        ):
+            atexit.register(background_sync.run_auto_pull_tail)
+    except Exception:
+        # A broken gate must never break the user's command.
+        return
+
+
 @app.callback()
 def _root(
     version: bool = typer.Option(
@@ -110,6 +141,7 @@ def _root(
     """Global options processed before any subcommand."""
     _ = version
     _maybe_emit_background_update_notice()
+    _maybe_register_auto_pull_tail()
 
 
 def main() -> None:

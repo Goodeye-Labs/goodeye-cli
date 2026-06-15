@@ -34,6 +34,7 @@ def test_get_config_paths_uses_xdg(tmp_path: Path) -> None:
     assert paths.update_check_file == tmp_path / "goodeye" / "update-check.json"
     assert paths.sync_file == tmp_path / "goodeye" / "sync.json"
     assert paths.sync_state_file == tmp_path / "goodeye" / "sync-state.json"
+    assert paths.sync_lock_file == tmp_path / "goodeye" / "sync.lock"
 
 
 def test_get_config_paths_defaults_to_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
