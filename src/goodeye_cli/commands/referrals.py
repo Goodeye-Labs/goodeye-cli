@@ -93,9 +93,9 @@ def redeem(
 ) -> None:
     """Redeem a referral code from another Goodeye user.
 
-    Applies the referral to your account. Credits are granted once your account
-    meets the qualification criteria. The referrer also receives credits when
-    you qualify.
+    Applies the referral to your account. Your bonus credits land as soon as you
+    redeem a valid code. The referrer's reward is separate: it is paid later, once
+    your account is activated.
     """
     console = Console()
     with _require_client() as client:
@@ -113,7 +113,8 @@ def redeem(
 
     console.print(f"[green]Referral redeemed[/green] (status: {result.status})")
     console.print(f"Credits granted: ${result.credits_granted_usd}")
-    console.print(f"Referred by: @{result.referrer_handle}")
+    if result.referrer_handle:
+        console.print(f"Referred by: @{result.referrer_handle}")
     console.print(f"Expires at: {result.expires_at.isoformat()}")
 
 

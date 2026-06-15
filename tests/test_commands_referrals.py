@@ -111,6 +111,23 @@ def test_referral_redeem_human(tmp_config_paths: ConfigPaths, monkeypatch) -> No
 
 
 @respx.mock
+def test_referral_redeem_human_blank_referrer_handle(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """When the server returns an empty referrer_handle, do not print a bare `@`."""
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE_key")
+    body = {**_REDEEM_BODY, "referrer_handle": ""}
+    respx.post(f"{SERVER}/v1/referrals/redeem").mock(return_value=httpx.Response(200, json=body))
+    runner = CliRunner()
+    result = runner.invoke(app, ["referral", "redeem", "GOODEYE-ABC123"])
+    assert result.exit_code == 0, result.output
+    assert "redeemed" in result.output.lower()
+    assert "$5.00" in result.output
+    assert "Referred by:" not in result.output
+    assert "@" not in result.output
+
+
+@respx.mock
 def test_referral_redeem_json(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE_key")
     respx.post(f"{SERVER}/v1/referrals/redeem").mock(
