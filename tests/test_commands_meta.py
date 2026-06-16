@@ -224,6 +224,53 @@ def test_login_help_documents_interactive_and_non_interactive_modes() -> None:
     assert "non-interactive" in out
 
 
+def test_register_help_documents_interactive_and_non_interactive_modes() -> None:
+    runner = CliRunner()
+    result = runner.invoke(app, ["register", "--help"])
+
+    assert result.exit_code == 0, result.output
+    out = result.output.lower()
+    assert "interactive" in out
+    assert "non-interactive" in out
+
+
+def test_register_no_args_runs_interactive_device_code(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """Bare `register` (no --email) must drive the interactive device-code flow,
+    not error on a missing option the way the old non-interactive-only command did."""
+    _env(monkeypatch, tmp_config_paths, api_key=None)
+
+    from unittest.mock import patch
+
+    with (
+        respx.mock,
+        patch(
+            "goodeye_cli.commands.login.device_code_login",
+            return_value="good_live_EXAMPLE_reg_int",
+        ) as mock_dcl,
+        patch("goodeye_cli.commands.login.save_client_config"),
+    ):
+        respx.get(f"{SERVER}/.well-known/goodeye-client-config").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "workos_client_id": "client_X",
+                    "workos_device_authorization_uri": DEVICE_URI,
+                    "workos_token_uri": TOKEN_URI,
+                },
+            )
+        )
+        runner = CliRunner()
+        result = runner.invoke(app, ["register"])
+
+    assert result.exit_code == 0, result.output
+    assert mock_dcl.called
+    creds = load_credentials(tmp_config_paths)
+    assert creds is not None
+    assert creds["api_key"] == "good_live_EXAMPLE_reg_int"
+
+
 def test_logout_removes_credentials(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _env(monkeypatch, tmp_config_paths, api_key=None)
     save_credentials({"api_key": "good_live_EXAMPLE", "server": SERVER}, tmp_config_paths)

@@ -6,13 +6,14 @@ import typer
 from rich.console import Console
 
 from goodeye_cli.client import GoodeyeClient
+from goodeye_cli.commands.login import run_interactive_login
 from goodeye_cli.commands.referrals import _maybe_redeem_referral
 from goodeye_cli.config import get_server, save_credentials
 
 
 def register(
-    email: str = typer.Option(
-        ...,
+    email: str | None = typer.Option(
+        None,
         "--email",
         "-e",
         help=(
@@ -20,15 +21,28 @@ def register(
             "Use `goodeye register-verify --email <email> --code <code>` to finish."
         ),
     ),
+    referral_code: str | None = typer.Option(
+        None,
+        "--referral-code",
+        help="Referral code to claim a bonus after registering.",
+    ),
 ) -> None:
-    """Start non-interactive Goodeye account registration.
+    """Create a Goodeye account on this machine.
 
-    This command sends the email-code request and exits without prompting so an
-    AI agent or automation can run the verify command after the user supplies
-    the emailed code.
+    With no options, runs the interactive browser/device-code flow for humans:
+    the hosted sign-in page creates the account for new users (and signs in
+    returning users), so registering and signing in share one path. With
+    ``--email``, starts a non-interactive email-code registration for agents and
+    automation, then exits so the emailed code can be supplied in a separate
+    command.
     """
     console = Console()
     server = get_server()
+
+    if email is None:
+        run_interactive_login(server, console, referral_code)
+        return
+
     with GoodeyeClient(server) as client:
         client.register(email)
     console.print("Check your email for next steps.")
