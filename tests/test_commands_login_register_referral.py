@@ -298,6 +298,77 @@ def test_login_device_code_referral_failure_is_nonfatal(
 
 
 # ---------------------------------------------------------------------------
+# register (no --email) --referral-code  (interactive device-code path)
+# ---------------------------------------------------------------------------
+
+
+def test_register_device_code_with_referral_code_success(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """Bare `register` runs the interactive device-code flow and redeems the referral code."""
+    _env(monkeypatch, tmp_config_paths)
+
+    with (
+        respx.mock,
+        patch(
+            "goodeye_cli.commands.login.device_code_login",
+            return_value="good_live_EXAMPLE_regdc1",
+        ) as mock_dcl,
+        patch("goodeye_cli.commands.login.save_client_config"),
+    ):
+        respx.get(f"{SERVER}/.well-known/goodeye-client-config").mock(
+            return_value=httpx.Response(200, json=_CLIENT_CONFIG_BODY)
+        )
+        respx.post(f"{SERVER}/v1/referrals/redeem").mock(
+            return_value=httpx.Response(200, json=_REDEEM_BODY)
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["register", "--referral-code", "GOODEYE-REGX"])
+
+    assert result.exit_code == 0, result.output
+    assert mock_dcl.called
+    creds = load_credentials(tmp_config_paths)
+    assert creds is not None
+    assert creds["api_key"] == "good_live_EXAMPLE_regdc1"
+    assert "Referral bonus applied" in result.output
+    assert "$5.00" in result.output
+
+
+def test_register_device_code_without_referral_code_does_not_call_redeem(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """Bare `register` without --referral-code runs interactively and skips redeem."""
+    _env(monkeypatch, tmp_config_paths)
+
+    with (
+        respx.mock,
+        patch(
+            "goodeye_cli.commands.login.device_code_login",
+            return_value="good_live_EXAMPLE_regdc2",
+        ) as mock_dcl,
+        patch("goodeye_cli.commands.login.save_client_config"),
+    ):
+        respx.get(f"{SERVER}/.well-known/goodeye-client-config").mock(
+            return_value=httpx.Response(200, json=_CLIENT_CONFIG_BODY)
+        )
+        redeem_route = respx.post(f"{SERVER}/v1/referrals/redeem").mock(
+            return_value=httpx.Response(200, json=_REDEEM_BODY)
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["register"])
+
+    assert result.exit_code == 0, result.output
+    assert mock_dcl.called
+    assert redeem_route.call_count == 0
+    creds = load_credentials(tmp_config_paths)
+    assert creds is not None
+    assert creds["api_key"] == "good_live_EXAMPLE_regdc2"
+    assert "Referral" not in result.output
+
+
+# ---------------------------------------------------------------------------
 # login-verify --referral-code
 # ---------------------------------------------------------------------------
 

@@ -13,6 +13,32 @@ from goodeye_cli.commands.referrals import _maybe_redeem_referral
 from goodeye_cli.config import get_server, save_client_config, save_credentials
 
 
+def run_interactive_login(server: str, console: Console, referral_code: str | None) -> None:
+    """Run the browser/device-code sign-in flow and save local credentials.
+
+    Shared by ``goodeye login`` and ``goodeye register``: the hosted sign-in
+    page creates the account for new users and signs in returning users, so both
+    commands drive the same interactive path. Redeems ``referral_code`` once
+    credentials are saved, if one was supplied.
+    """
+    with GoodeyeClient(server) as client:
+        client_config = client.get_client_config()
+    save_client_config(client_config.model_dump())
+    hostname = platform.node() or "unknown"
+    api_key = device_code_login(
+        server,
+        workos_client_id=client_config.workos_client_id,
+        workos_device_authorization_uri=client_config.workos_device_authorization_uri,
+        workos_token_uri=client_config.workos_token_uri,
+        hostname=hostname,
+        console=console,
+    )
+
+    path = save_credentials({"api_key": api_key, "server": server})
+    console.print(f"[green]Signed in.[/green] Credentials saved to {path}")
+    _maybe_redeem_referral(server, api_key, referral_code, console)
+
+
 def login(
     email: str | None = typer.Option(
         None,
@@ -49,22 +75,7 @@ def login(
         )
         return
 
-    with GoodeyeClient(server) as client:
-        client_config = client.get_client_config()
-    save_client_config(client_config.model_dump())
-    hostname = platform.node() or "unknown"
-    api_key = device_code_login(
-        server,
-        workos_client_id=client_config.workos_client_id,
-        workos_device_authorization_uri=client_config.workos_device_authorization_uri,
-        workos_token_uri=client_config.workos_token_uri,
-        hostname=hostname,
-        console=console,
-    )
-
-    path = save_credentials({"api_key": api_key, "server": server})
-    console.print(f"[green]Signed in.[/green] Credentials saved to {path}")
-    _maybe_redeem_referral(server, api_key, referral_code, console)
+    run_interactive_login(server, console, referral_code)
 
 
 def login_verify(
