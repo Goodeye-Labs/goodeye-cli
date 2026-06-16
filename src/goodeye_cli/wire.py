@@ -38,7 +38,9 @@ class UsageResponse(_WireBase):
     Money-shaped fields are strings to preserve exact decimal values across
     the wire (callers parse them with ``Decimal`` or ``float`` as needed).
     ``available_usd`` is what the caller can spend right now: monthly grant
-    plus any one-off purchased credits, minus carried-over unpaid balance.
+    plus any one-off purchased credits and referral bonus credits, minus
+    carried-over unpaid balance. ``referral_remaining_usd`` defaults to 0.00
+    so responses from servers that predate the field still parse.
     """
 
     tier: str
@@ -47,6 +49,7 @@ class UsageResponse(_WireBase):
     monthly_refill_usd: str
     monthly_refill_at: datetime
     purchased_remaining_usd: str
+    referral_remaining_usd: str = "0.00"
     unpaid_balance_usd: str
 
 
