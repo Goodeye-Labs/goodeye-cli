@@ -24,22 +24,26 @@ def _coerce_usage(body: UsageResponse | dict[str, Any]) -> UsageResponse:
 def format_usage_summary(body: UsageResponse | dict[str, Any]) -> str:
     """Render the usage payload as a human-readable multi-line string.
 
-    The purchased-credits and unpaid-balance lines only render when their
-    values are positive.
+    The purchased-credits, referral-credits, and unpaid-balance lines only
+    render when their values are positive.
     """
     usage = _coerce_usage(body)
     refill_at = usage.monthly_refill_at.strftime("%m/%d/%Y")
     has_purchased = float(usage.purchased_remaining_usd) > 0
+    has_referral = float(usage.referral_remaining_usd) > 0
     lines = [
         f"Tier: {usage.tier}",
         f"Available: ${usage.available_usd}",
     ]
-    if has_purchased:
+    if has_purchased or has_referral:
         lines.append(
             f"  ${usage.monthly_remaining_usd} monthly "
             f"(refills to ${usage.monthly_refill_usd} on {refill_at})"
         )
-        lines.append(f"  ${usage.purchased_remaining_usd} one-off credits")
+        if has_purchased:
+            lines.append(f"  ${usage.purchased_remaining_usd} one-off credits")
+        if has_referral:
+            lines.append(f"  ${usage.referral_remaining_usd} referral credits")
     else:
         lines.append(f"  refills to ${usage.monthly_refill_usd} on {refill_at}")
     if float(usage.unpaid_balance_usd) > 0:
@@ -75,6 +79,7 @@ def usage(
             "monthly_refill_usd": result.monthly_refill_usd,
             "monthly_refill_at": result.monthly_refill_at.isoformat(),
             "purchased_remaining_usd": result.purchased_remaining_usd,
+            "referral_remaining_usd": result.referral_remaining_usd,
             "unpaid_balance_usd": result.unpaid_balance_usd,
         }
         typer.echo(_json.dumps(payload))

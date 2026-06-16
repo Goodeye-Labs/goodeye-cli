@@ -70,6 +70,40 @@ def test_format_usage_summary_with_purchased() -> None:
     assert "$50.00 one-off credits" in out
 
 
+def test_format_usage_summary_with_referral() -> None:
+    out = format_usage_summary(
+        _body(
+            available_usd="9.17",
+            monthly_remaining_usd="4.17",
+            referral_remaining_usd="5.00",
+        )
+    )
+    assert "Available: $9.17" in out
+    assert "$4.17 monthly (refills to $5.00 on 05/14/2026)" in out
+    assert "$5.00 referral credits" in out
+
+
+def test_format_usage_summary_with_purchased_and_referral() -> None:
+    out = format_usage_summary(
+        _body(
+            available_usd="59.17",
+            monthly_remaining_usd="4.17",
+            purchased_remaining_usd="50.00",
+            referral_remaining_usd="5.00",
+        )
+    )
+    assert "Available: $59.17" in out
+    assert "$50.00 one-off credits" in out
+    assert "$5.00 referral credits" in out
+
+
+def test_format_usage_summary_no_referral_line_when_absent() -> None:
+    # Older servers omit the field entirely; the wire default keeps it at 0.00
+    # and the line is suppressed.
+    out = format_usage_summary(_body())
+    assert "referral" not in out
+
+
 def test_format_usage_summary_with_unpaid() -> None:
     out = format_usage_summary(
         _body(
@@ -128,6 +162,7 @@ def test_usage_command_json(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     assert data["tier"] == "pro"
     assert data["available_usd"] == "15.00"
     assert data["monthly_refill_usd"] == "20.00"
+    assert data["referral_remaining_usd"] == "0.00"
 
 
 def test_usage_command_without_credentials_errors(
