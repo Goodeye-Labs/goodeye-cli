@@ -27,12 +27,14 @@ from goodeye_cli.wire import (
     ClientConfig,
     DeviceAuthResponse,
     ExchangeResult,
+    ImageDetail,
     ImageGenerationRunResult,
     ImageGeneratorDeleteResult,
     ImageGeneratorDeployResult,
     ImageGeneratorDetail,
     ImageGeneratorList,
     ImageGeneratorRevokeResult,
+    ImageList,
     InvitationAcceptResult,
     InvitationCancelResult,
     InvitationDeclineResult,
@@ -191,6 +193,34 @@ class GoodeyeClient:
                     del request.headers[header_name]
         try:
             response = self._http.send(request, follow_redirects=follow_redirects)
+        except httpx.RequestError as exc:
+            raise _network_error(self.server, exc) from exc
+        _raise_for_status(response)
+        return response
+
+    def _request_multipart(
+        self,
+        method: str,
+        path: str,
+        *,
+        files: dict[str, Any],
+        data: dict[str, str],
+    ) -> httpx.Response:
+        """Send a multipart/form-data request (used for file uploads)."""
+        headers = dict(self._http.headers)
+        # Let httpx set Content-Type with the boundary.
+        headers.pop("content-type", None)
+        headers.pop("Content-Type", None)
+        headers["accept"] = "application/json"
+        headers.pop("Accept", None)
+        try:
+            response = self._http.request(
+                method,
+                path,
+                files=files,
+                data=data,
+                headers=headers,
+            )
         except httpx.RequestError as exc:
             raise _network_error(self.server, exc) from exc
         _raise_for_status(response)
@@ -1032,6 +1062,72 @@ class GoodeyeClient:
                 message="Unexpected response from /v1/design/workflow-prompt.",
             )
         return data
+
+    # ----- hosted images -----
+
+    def upload_image(
+        self,
+        file_bytes: bytes,
+        filename: str,
+        content_type: str,
+        *,
+        visibility: str = "private",
+        ttl_seconds: int | None = None,
+    ) -> ImageDetail:
+        """POST /v1/images (multipart/form-data) to upload a hosted image."""
+        data: dict[str, str] = {"visibility": visibility}
+        if ttl_seconds is not None:
+            data["ttl_seconds"] = str(ttl_seconds)
+        files = {"file": (filename, file_bytes, content_type)}
+        response = self._request_multipart("POST", "/v1/images", files=files, data=data)
+        return ImageDetail.model_validate(response.json())
+
+    def list_images(
+        self,
+        *,
+        limit: int = 25,
+        cursor: str | None = None,
+        source: str | None = None,
+        visibility: str | None = None,
+    ) -> ImageList:
+        """GET /v1/images with cursor-based pagination."""
+        params: dict[str, Any] = {"limit": limit}
+        if cursor:
+            params["cursor"] = cursor
+        if source:
+            params["source"] = source
+        if visibility:
+            params["visibility"] = visibility
+        response = self._request("GET", "/v1/images", params=params)
+        return ImageList.model_validate(response.json())
+
+    def get_image(self, image_id: str) -> ImageDetail:
+        """GET /v1/images/{id}."""
+        response = self._request("GET", f"/v1/images/{image_id}")
+        return ImageDetail.model_validate(response.json())
+
+    def update_image(
+        self,
+        image_id: str,
+        *,
+        visibility: str | None = None,
+        ttl_seconds: int | None = None,
+        permanent: bool | None = None,
+    ) -> ImageDetail:
+        """PATCH /v1/images/{id}."""
+        body: dict[str, Any] = {}
+        if visibility is not None:
+            body["visibility"] = visibility
+        if ttl_seconds is not None:
+            body["ttl_seconds"] = ttl_seconds
+        if permanent is not None:
+            body["permanent"] = permanent
+        response = self._request("PATCH", f"/v1/images/{image_id}", json_body=body)
+        return ImageDetail.model_validate(response.json())
+
+    def delete_image(self, image_id: str) -> None:
+        """DELETE /v1/images/{id}. Returns 204 with no body."""
+        self._request("DELETE", f"/v1/images/{image_id}")
 
 
 def request_device_authorization(

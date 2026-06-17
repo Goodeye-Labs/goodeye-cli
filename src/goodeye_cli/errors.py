@@ -132,6 +132,11 @@ _SLUG_MAP: dict[str, type[GoodeyeError]] = {
     "self_referral": Conflict,
     "already_referred": Conflict,
     "referral_not_eligible": Conflict,
+    # hosted images
+    "image_not_found": NotFound,
+    "file_too_large": ValidationFailed,
+    "unsupported_image_type": ValidationFailed,
+    "quota_exceeded": ValidationFailed,
 }
 
 
