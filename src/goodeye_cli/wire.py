@@ -802,3 +802,25 @@ class RedeemResponse(_WireBase):
     credits_granted_usd: str
     expires_at: datetime
     referrer_handle: str
+
+
+# ----- hosted images -----
+
+
+class ImageDetail(_WireBase):
+    """One image record returned by GET /v1/images/{id} or POST /v1/images."""
+
+    id: str
+    token: str
+    url: str
+    visibility: str
+    expires_at: datetime | None = None
+    size_bytes: int | None = None
+    content_type: str | None = None
+    source: str | None = None
+    created_at: str | None = None
+
+
+class ImageList(_WireBase):
+    items: list[ImageDetail]
+    next_cursor: str | None = None

@@ -18,6 +18,7 @@ from goodeye_cli import update as update_checks
 from goodeye_cli.commands import auth as auth_cmds
 from goodeye_cli.commands import design as design_cmd
 from goodeye_cli.commands import image_generators as image_generators_cmds
+from goodeye_cli.commands import images as images_cmds
 from goodeye_cli.commands import invitations as invitations_cmds
 from goodeye_cli.commands import login as login_cmd
 from goodeye_cli.commands import logout as logout_cmd
@@ -65,6 +66,7 @@ app.add_typer(
     name="image-generators",
     help="Deploy and run image generators.",
 )
+app.add_typer(images_cmds.app, name="images", help="Upload and manage hosted images.")
 app.add_typer(invitations_cmds.app, name="invitations", help="Manage invitations.")
 app.add_typer(referrals_cmds.app, name="referrals", help="View and redeem referral codes.")
 
