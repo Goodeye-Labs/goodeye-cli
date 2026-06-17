@@ -146,6 +146,52 @@ def test_images_upload_requires_auth(
     assert result.exit_code != 0
 
 
+@respx.mock
+def test_images_upload_file_too_large_surfaces_message(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """A 413 file_too_large from the server is surfaced cleanly with a non-zero exit."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    img_file = tmp_path / "photo.png"
+    img_file.write_bytes(b"\x89PNG")
+    respx.post(f"{SERVER}/v1/images").mock(
+        return_value=httpx.Response(
+            413,
+            json={
+                "error": "file_too_large",
+                "message": "image file exceeds the maximum allowed size",
+            },
+        )
+    )
+    result = runner.invoke(app, ["images", "upload", str(img_file)])
+    assert result.exit_code != 0
+    assert result.exception is not None
+    assert "exceeds the maximum allowed size" in str(result.exception)
+
+
+@respx.mock
+def test_images_upload_unsupported_type_surfaces_message(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """A 415 unsupported_image_type from the server is surfaced cleanly with a non-zero exit."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    img_file = tmp_path / "doc.svg"
+    img_file.write_bytes(b"<svg></svg>")
+    respx.post(f"{SERVER}/v1/images").mock(
+        return_value=httpx.Response(
+            415,
+            json={
+                "error": "unsupported_image_type",
+                "message": "image must be a PNG, JPEG, WebP, or GIF",
+            },
+        )
+    )
+    result = runner.invoke(app, ["images", "upload", str(img_file)])
+    assert result.exit_code != 0
+    assert result.exception is not None
+    assert "PNG, JPEG, WebP, or GIF" in str(result.exception)
+
+
 # ---------------------------------------------------------------------------
 # list
 # ---------------------------------------------------------------------------
