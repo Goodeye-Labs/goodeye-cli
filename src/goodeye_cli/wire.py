@@ -818,7 +818,7 @@ class ImageDetail(_WireBase):
     size_bytes: int | None = None
     content_type: str | None = None
     source: str | None = None
-    created_at: str | None = None
+    created_at: datetime | None = None
 
 
 class ImageList(_WireBase):
