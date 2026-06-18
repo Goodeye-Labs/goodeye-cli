@@ -7,6 +7,7 @@ import os
 import stat
 import tomllib
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -54,6 +55,31 @@ def test_save_credentials_writes_0600(tmp_config_paths: ConfigPaths) -> None:
     with path.open() as fh:
         data = json.load(fh)
     assert data == {"api_key": "good_live_EXAMPLE", "server": "https://x"}
+
+
+def test_write_json_temp_file_is_0600_during_write(
+    tmp_config_paths: ConfigPaths, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observed: dict[str, int] = {}
+    real_dump = json.dump
+
+    def spying_dump(obj: object, fp: Any, **kwargs: Any) -> None:
+        # Stat the open temp fd mid-write: this is the window during which the
+        # secret must already be at 0600, not the umask default that a later
+        # chmod would only tighten after the bytes are on disk.
+        observed["mode"] = stat.S_IMODE(os.fstat(fp.fileno()).st_mode)
+        real_dump(obj, fp, **kwargs)
+
+    monkeypatch.setattr(json, "dump", spying_dump)
+    previous = os.umask(0o022)
+    try:
+        save_credentials({"api_key": "good_live_EXAMPLE"}, tmp_config_paths)
+    finally:
+        os.umask(previous)
+
+    assert observed["mode"] == 0o600
+    # No stray temp file is left behind after a successful write.
+    assert list(tmp_config_paths.config_dir.glob("*.tmp")) == []
 
 
 def test_load_credentials_missing_returns_none(tmp_config_paths: ConfigPaths) -> None:

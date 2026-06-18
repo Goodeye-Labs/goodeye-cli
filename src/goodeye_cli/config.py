@@ -21,9 +21,11 @@ Source order for request timeout seconds (highest wins):
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -94,15 +96,39 @@ def _load_json(path: Path) -> dict[str, Any] | None:
 
 
 def _write_json_0600(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with tmp.open("w", encoding="utf-8") as fh:
-        json.dump(payload, fh, indent=2, sort_keys=True)
-        fh.write("\n")
-    os.chmod(tmp, 0o600)
-    os.replace(tmp, path)
-    # Replace preserves the tmp file's mode on POSIX; re-chmod defensively.
-    os.chmod(path, 0o600)
+    """Atomically write ``payload`` as JSON to ``path`` with mode 0600.
+
+    The canonical writer for every file under the config dir, not only the
+    credentials file: update-check cache, sync config, and sync state route
+    through it too. Those payloads are not secret, but 0600 is a harmless floor
+    for them and the load-bearing guarantee for the ones that are (credentials,
+    cached client config), so a single atomic-write path keeps the behavior
+    uniform. Comments below reason about "the secret" because that is the
+    strictest call site; they describe the mechanism, not a claim that every
+    payload is sensitive.
+    """
+    # Create the config dir at 0700 for new installs, and best-effort tighten an
+    # existing dir an older CLI created at the umask default. The 0600 file below
+    # is the load-bearing guarantee; the 0700 dir is defense in depth, so a chmod
+    # failure (e.g. a dir owned by another user) must not break the invocation.
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with contextlib.suppress(OSError):
+        os.chmod(path.parent, 0o700)
+    # mkstemp creates the file atomically with mode 0600 and a unique name,
+    # closing the window a post-hoc chmod leaves open (the secret is never on
+    # disk at a broader mode) and avoiding a fixed temp path that concurrent
+    # writers would collide on. os.replace then atomically renames it into place,
+    # preserving the 0600 mode, so no chmod is needed afterward.
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2, sort_keys=True)
+            fh.write("\n")
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def _migrate_legacy_server_pin(creds: dict[str, Any], credentials_file: Path) -> dict[str, Any]:
