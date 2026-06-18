@@ -672,8 +672,10 @@ def _push_hints(items: list[sync.PushItem]) -> list[str]:
     A conflict points the caller at the existing ``pull`` and ``status``
     commands. A diverged workflow points at ``--target`` to pick the copy to
     keep. An untracked local directory points at ``workflows publish``, the only
-    path that creates a new registry workflow. Every command named here exists
-    today. A ``converged`` sibling needs no hint: it is already reconciled.
+    path that creates a new registry workflow. A ``pull-required`` copy was
+    deferred because the push changed sibling files it does not have, so it points
+    at ``pull`` to refresh. Every command named here exists today. A ``converged``
+    sibling needs no hint: it is already reconciled.
     """
     hints: list[str] = []
     conflicts = sum(1 for i in items if i.action == "conflict")
@@ -681,6 +683,7 @@ def _push_hints(items: list[sync.PushItem]) -> list[str]:
     # distinct workflows so the hint reads as one decision per workflow.
     diverged = len({i.workflow_id for i in items if i.action == "diverged"})
     untracked = sum(1 for i in items if i.action == "untracked")
+    pull_required = sum(1 for i in items if i.action == "pull-required")
     if conflicts:
         hints.append(
             f"{conflicts} workflow(s) conflict; run `goodeye workflows sync pull` "
@@ -695,6 +698,11 @@ def _push_hints(items: list[sync.PushItem]) -> list[str]:
         hints.append(
             f"{untracked} local workflow(s) are not in the registry; create them "
             "with `goodeye workflows publish`"
+        )
+    if pull_required:
+        hints.append(
+            f"{pull_required} other copy(ies) of a pushed workflow changed sibling files; "
+            "run `goodeye workflows sync pull` to refresh them"
         )
     return hints
 

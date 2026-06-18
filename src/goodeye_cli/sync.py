@@ -1614,9 +1614,12 @@ _IDENTITY_KEYS = ("name", "slug")
 # metadata was rejected locally before any upload; ``untracked`` flags a local
 # directory the registry does not track, which push never creates; ``converged``
 # means a sibling copy of a just-pushed workflow in another target was rewritten
-# to match (no second upload); ``diverged`` means the same workflow was edited
-# differently in two or more targets and every copy was refused pending the
-# caller picking a source with ``--target`` or reconciling the copies.
+# to match (no second upload); ``pull-required`` means a sibling copy was left at
+# its behind-server state because the push changed sibling files it does not
+# have, so the next ordinary pull must refresh it (its token is deliberately not
+# advanced); ``diverged`` means the same workflow was edited differently in two or
+# more targets and every copy was refused pending the caller picking a source
+# with ``--target`` or reconciling the copies.
 PushAction = Literal[
     "pushed",
     "conflict",
@@ -1624,6 +1627,7 @@ PushAction = Literal[
     "skipped-invalid",
     "untracked",
     "converged",
+    "pull-required",
     "diverged",
 ]
 
@@ -1747,7 +1751,10 @@ def push(
     converge the siblings; differing edits are refused as ``diverged`` unless
     the caller picks the source with ``--target``. After a successful upload the
     other target copies of that workflow are rewritten to match (no second
-    upload) and reported as ``converged``.
+    upload) and reported as ``converged``. A copy whose recorded siblings differ
+    from the just-pushed ones is instead left at its behind-server state and
+    reported ``pull-required``, so the next ordinary pull refreshes its sibling
+    tree rather than convergence leaving stale files behind a current token.
 
     The index is persisted once in a ``finally`` so a mid-loop failure still
     records every entry already pushed, and a re-run resumes cleanly.
@@ -1938,11 +1945,20 @@ def _converge_siblings(
     - Modified locally and the local body differs from the pushed body: left
       untouched and reported ``diverged``. The sibling holds a distinct local
       edit that this push did not include; overwriting it would lose work.
-    - Modified locally but the local body already equals the pushed body: no
-      rewrite is needed; its index entry is advanced to clean and it reports
-      ``converged``.
-    - Clean (local body present and matching the recorded hash): rewritten to
-      the pushed body, its index entry advanced, and reported ``converged``.
+    - The push changed sibling files this copy does not have (its recorded
+      manifest differs from the just-pushed manifest): left entirely untouched
+      and reported ``pull-required``. Convergence rewrites only the body, not the
+      sibling tree, so advancing this copy's token would mask stale siblings as
+      current and defeat the next pull's "server moved" re-fetch. Leaving the copy
+      at its behind-server state lets the next ordinary pull bring its siblings,
+      manifest, and body current through the existing pull path (which also
+      preserves any un-pushed sibling edit this copy holds).
+    - Modified locally but the local body already equals the pushed body, and the
+      siblings already match: no rewrite is needed; its index entry is advanced to
+      clean and it reports ``converged``.
+    - Clean (local body present and matching the recorded hash) with matching
+      siblings: rewritten to the pushed body, its index entry advanced, and
+      reported ``converged``.
 
     Siblings are found from the full config so a ``--target`` run still
     converges (or flags) targets outside the processed set. This per-sibling
@@ -1977,16 +1993,29 @@ def _converge_siblings(
             items.append(_diverged_sibling_item(entry, stored_target))
             continue
 
+        if not _sibling_manifests_match(source.entry.files, entry.files):
+            # The push changed sibling content this copy does not have.
+            # Convergence rewrites only the body, so advancing this copy's token
+            # would leave its siblings stale on disk while reporting it current and
+            # would suppress the next pull's re-fetch. Leave the copy entirely at
+            # its behind-server state; the next ordinary pull refreshes it.
+            items.append(_pull_required_item(entry, stored_target, source_target))
+            continue
+
         if not modified:
-            # Clean sibling: rewrite its file to the pushed body.
+            # Clean sibling whose tree already matches the pushed siblings:
+            # rewrite its file to the pushed body.
             _write_skill_file(local_skill_path(target, entry.slug), source.body)
         # Either rewritten from clean, or already equal to the pushed body on
         # disk; either way the recorded state advances to the pushed version so
-        # the sibling reads clean afterward with no second upload.
+        # the sibling reads clean afterward with no second upload. The sibling
+        # tree already matches, so copying the manifest forward only aligns
+        # per-file metadata (e.g. the purpose label) with the pushed copy.
         entry.synced_version = source.entry.synced_version
         entry.version_token = source.entry.version_token
         entry.body_sha256 = source.entry.body_sha256
         entry.verifier_bindings = [b.model_copy() for b in source.entry.verifier_bindings]
+        entry.files = [f.model_copy() for f in source.entry.files]
         items.append(
             PushItem(
                 slug=entry.slug,
@@ -1997,6 +2026,37 @@ def _converge_siblings(
             )
         )
     return items
+
+
+def _sibling_manifests_match(a: list[FileState], b: list[FileState]) -> bool:
+    """Whether two file manifests describe the same on-disk sibling tree.
+
+    Compares the content-identifying fields (path, sha256, executable) as sets so
+    order does not matter. ``purpose`` is a server-side label, not on-disk
+    content, so it is excluded: a label-only difference must not force a pull.
+    """
+    return {(f.path, f.sha256, f.executable) for f in a} == {
+        (f.path, f.sha256, f.executable) for f in b
+    }
+
+
+def _pull_required_item(entry: SyncEntry, stored_target: str, source_target: str) -> PushItem:
+    """Build the ``pull-required`` item for a copy deferred to the next pull.
+
+    The push changed sibling files this copy does not have. Its index entry was
+    left untouched (token not advanced) so the next ordinary pull re-fetches the
+    siblings and rebuilds the manifest through the existing pull path.
+    """
+    return PushItem(
+        slug=entry.slug,
+        workflow_id=entry.workflow_id,
+        target_path=stored_target,
+        action="pull-required",
+        detail=(
+            f"The copy pushed from {source_target} changed sibling files. Run "
+            "`goodeye workflows sync pull` to bring this copy up to date."
+        ),
+    )
 
 
 def _diverged_sibling_item(entry: SyncEntry, stored_target: str) -> PushItem:
