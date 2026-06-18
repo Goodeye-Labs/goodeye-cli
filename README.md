@@ -573,7 +573,7 @@ goodeye teams members <team> [--json|--table]
 - `GOODEYE_API_KEY` env var (highest precedence).
 - `~/.config/goodeye/credentials.json` (or `$XDG_CONFIG_HOME/goodeye/`).
 
-Credential files are created with mode `0600`.
+Credential files are created atomically with mode `0600` (never briefly readable by other local users), and the config directory is created with mode `0700`.
 
 ### Server
 
