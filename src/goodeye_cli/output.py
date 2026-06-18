@@ -72,14 +72,24 @@ def fetch_pages(
     all_pages: bool,
 ) -> tuple[list[Any], str | None]:
     """Fetch one page by default, or follow cursors when requested."""
+    from goodeye_cli.errors import ServerError
+
     items: list[Any] = []
     next_cursor = cursor
+    seen_cursors: set[str] = set()
     while True:
         page = fetch_page(next_cursor)
         items.extend(page.items)
         next_cursor = page.next_cursor
         if not all_pages or next_cursor is None:
             return items, next_cursor
+        if next_cursor in seen_cursors:
+            raise ServerError(
+                slug="internal_error",
+                message=f"Server returned a repeated pagination cursor: {next_cursor!r}",
+                hint="This is a server bug. Try the request again or contact support.",
+            )
+        seen_cursors.add(next_cursor)
 
 
 def next_page_hint(
