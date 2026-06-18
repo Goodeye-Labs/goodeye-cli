@@ -648,6 +648,10 @@ def check_safety(
     re-check. Returns ``status=clean`` when both verifiers pass,
     ``flagged`` when only the advisory fails, ``blocked`` when the block
     verifier fails, and ``error`` when the block verifier errors.
+
+    A field longer than the safety check's input limit is truncated for this
+    scan and reported via ``truncated`` / ``truncated_fields``; the
+    authoritative verdict remains the status recorded at publish time.
     """
     console = Console()
     parsed_id, parsed_version = _split_version_suffix(template_id)

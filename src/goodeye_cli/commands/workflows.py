@@ -906,6 +906,13 @@ def _render_safety_check(result: SafetyCheckResult, console: Console) -> None:
         f"[bold {color}]{result.status.upper()}[/bold {color}] "
         f"{result.resource_type} {result.resource_id} v{result.resource_version}"
     )
+    if result.truncated:
+        fields = ", ".join(result.truncated_fields) or "some fields"
+        console.print(
+            f"  [yellow]note[/yellow] {fields} exceeded the safety check input "
+            "limit and were truncated for this scan; the authoritative verdict is "
+            "the status recorded when the template was published."
+        )
     for label, run in (("block", result.block), ("advisory", result.advisory)):
         verdict_color = {
             "pass": "green",

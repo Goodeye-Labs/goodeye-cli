@@ -455,6 +455,11 @@ class SafetyCheckResult(_WireBase):
     status: str
     block: SafetyCheckVerifierRun
     advisory: SafetyCheckVerifierRun
+    # True when one or more fields were too long for the safety check's input
+    # limit and were truncated for this scan; truncated_fields names them.
+    # Default keeps responses from older servers parsing.
+    truncated: bool = False
+    truncated_fields: list[str] = Field(default_factory=list)
 
 
 class TemplateUnpublishResult(_WireBase):
