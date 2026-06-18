@@ -1967,9 +1967,16 @@ def _converge_siblings(
     manifest still matching the source's) is not detected here, and the copy is
     advanced and reported ``converged`` while that on-disk sibling edit diverges
     from the recorded hash. That edit is not lost (the file is never rewritten),
-    but it stops surfacing until the server moves the workflow again. A future
-    change that wants the stronger guarantee would compare on-disk sibling state
-    here (e.g. via ``tree_modified_locally``) and defer such a copy to a pull.
+    and it does not go silent: because the matched manifests carry identical
+    per-file hashes, copying ``source.entry.files`` forward leaves this copy's
+    recorded sibling hash unchanged, so the on-disk edit still differs from the
+    recorded hash and ``tree_modified_locally`` keeps flagging the copy as a push
+    candidate on the next run. The only gap is that this convergence pass neither
+    reconciles nor defers that copy (it reports ``converged`` rather than
+    ``diverged`` or ``pull-required`` for the sibling-file case). A future change
+    that wants this pass to surface it directly would compare on-disk sibling
+    state here (e.g. via ``tree_modified_locally``) and defer such a copy to a
+    pull.
 
     Siblings are found from the full config so a ``--target`` run still
     converges (or flags) targets outside the processed set. This per-sibling
