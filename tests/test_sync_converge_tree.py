@@ -4,8 +4,9 @@ When a workflow is mirrored into more than one local target and a push from one
 copy changes a sibling file, the other copies must end up with the correct
 sibling tree, either immediately (when the push left siblings unchanged) or after
 the next ordinary pull (when the push changed siblings). A copy whose siblings
-are stale must never be reported up to date, and a copy's own un-pushed sibling
-edit must never be clobbered.
+are stale must never be reported up to date, and when the push changed siblings a
+copy's own un-pushed sibling edit must never be clobbered (it is deferred to the
+next pull, which refuses the unforced overwrite).
 
 These cover the gap the body-only convergence tests in ``test_sync.py`` leave:
 they assert only on the SKILL.md body and the version token, never on siblings.
@@ -233,9 +234,7 @@ def test_push_sibling_change_defers_other_copy_then_pull_heals(
     }
     b_entry = persisted[normalize_target_path(str(second))]
     assert b_entry.version_token == "tok-1"
-    assert [(f.path, f.sha256) for f in b_entry.files] == [
-        ("helper.sh", _sha256_text(sib_v1))
-    ]
+    assert [(f.path, f.sha256) for f in b_entry.files] == [("helper.sh", _sha256_text(sib_v1))]
 
     # The next ordinary (non-forced) pull heals B through the existing pull path.
     respx.get(f"{SERVER}/v1/workflows").mock(
@@ -282,9 +281,7 @@ def test_push_sibling_change_defers_other_copy_then_pull_heals(
     }
     b_healed = healed[normalize_target_path(str(second))]
     assert b_healed.version_token == "tok-2"
-    assert [(f.path, f.sha256) for f in b_healed.files] == [
-        ("helper.sh", _sha256_text(sib_v2))
-    ]
+    assert [(f.path, f.sha256) for f in b_healed.files] == [("helper.sh", _sha256_text(sib_v2))]
 
 
 # ---- anti-clobber: B's own un-pushed sibling edit is preserved -------------

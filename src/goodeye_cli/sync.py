@@ -1937,8 +1937,8 @@ def _converge_siblings(
     """Bring every other target copy of a just-pushed workflow into line with it.
 
     For each sibling index entry (same workflow id, different target) the action
-    depends on the sibling's own on-disk state, so an un-pushed local edit in a
-    sibling is never silently destroyed:
+    depends on the sibling's recorded state, so an un-pushed body edit or a
+    recorded-manifest difference is never silently overwritten:
 
     - Local file missing: skipped silently. A directory the user deleted is not
       resurrected.
@@ -1959,6 +1959,17 @@ def _converge_siblings(
     - Clean (local body present and matching the recorded hash) with matching
       siblings: rewritten to the pushed body, its index entry advanced, and
       reported ``converged``.
+
+    Scope of the manifest check: ``_sibling_manifests_match`` compares the two
+    copies' recorded manifests, not this copy's on-disk sibling files. So when
+    the push left siblings unchanged and this copy shares the same body edit, an
+    un-pushed on-disk edit to one of this copy's own sibling files (its recorded
+    manifest still matching the source's) is not detected here, and the copy is
+    advanced and reported ``converged`` while that on-disk sibling edit diverges
+    from the recorded hash. That edit is not lost (the file is never rewritten),
+    but it stops surfacing until the server moves the workflow again. A future
+    change that wants the stronger guarantee would compare on-disk sibling state
+    here (e.g. via ``tree_modified_locally``) and defer such a copy to a pull.
 
     Siblings are found from the full config so a ``--target`` run still
     converges (or flags) targets outside the processed set. This per-sibling
