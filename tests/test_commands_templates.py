@@ -1061,6 +1061,26 @@ def test_templates_check_safety_authenticated_sends_authorization(
 
 
 @respx.mock
+def test_templates_check_safety_renders_truncation_note(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """A truncated re-check surfaces the affected fields in human-readable output."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    template_uuid = "11111111-1111-1111-1111-111111111111"
+    payload = _safety_check_payload(status="clean", advisory_verdict="pass")
+    payload["truncated"] = True
+    payload["truncated_fields"] = ["body"]
+    respx.post(f"{SERVER}/v1/templates/{template_uuid}/safety-check").mock(
+        return_value=httpx.Response(200, json=payload),
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "check-safety", template_uuid])
+    assert result.exit_code == 0, result.output
+    assert "body" in result.output
+    assert "truncated" in result.output.lower()
+
+
+@respx.mock
 def test_templates_check_safety_anonymous_omits_authorization(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
