@@ -43,7 +43,11 @@ def parse_front_matter(source: str) -> tuple[dict[str, Any], str]:
                 mark = getattr(exc, "problem_mark", None)
                 problem = getattr(exc, "problem", None)
                 if mark is not None and problem:
-                    detail = f" (line {mark.line + 1}, column {mark.column + 1}): {problem}"
+                    # ``mark.line`` is 0-indexed within the YAML block, which
+                    # itself starts on the source line after the opening ``---``
+                    # fence. Add 2 so the reported line matches the line the
+                    # author sees in their file (1-indexed, fence included).
+                    detail = f" (line {mark.line + 2}, column {mark.column + 1}): {problem}"
                 else:
                     detail = "."
                 raise ValidationFailed(

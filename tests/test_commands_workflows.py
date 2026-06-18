@@ -1739,6 +1739,16 @@ def test_parse_front_matter_malformed_yaml_raises_validation() -> None:
     assert "line" in str(excinfo.value)
 
 
+def test_parse_front_matter_malformed_yaml_reports_file_line() -> None:
+    # The bad indentation sits on file line 3 (the opening ``---`` is line 1).
+    # The reported line must match the file the author sees, not the line index
+    # within the stripped YAML block.
+    source = "---\nname: ok\n  bad: indent\n---\nBody\n"
+    with pytest.raises(ValidationFailed, match="not valid YAML") as excinfo:
+        _parse_front_matter(source)
+    assert "line 3" in str(excinfo.value)
+
+
 def test_parse_workflow_verifier_flags_rejects_route_unsafe_names() -> None:
     with pytest.raises(ValidationFailed, match="name"):
         _parse_workflow_verifier_flags(["tone/check=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"])
