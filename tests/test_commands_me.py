@@ -8,6 +8,12 @@ from typer.testing import CliRunner
 
 from goodeye_cli.app import app
 from goodeye_cli.config import ConfigPaths
+from goodeye_cli.errors import (
+    Conflict,
+    RateLimited,
+    ValidationFailed,
+    error_from_body,
+)
 
 SERVER = "https://example.test"
 
@@ -125,3 +131,66 @@ def test_rename_handle_without_credentials_errors(
     runner = CliRunner()
     result = runner.invoke(app, ["me", "rename-handle", "alice"])
     assert result.exit_code != 0
+
+
+# ----- handle error slug mapping -----
+
+
+def test_error_slug_handle_invalid() -> None:
+    err = error_from_body(
+        400,
+        {"error": "handle_invalid", "message": "handle does not satisfy the allowed format"},
+    )
+    assert isinstance(err, ValidationFailed)
+    assert err.slug == "handle_invalid"
+
+
+def test_error_slug_handle_reserved() -> None:
+    err = error_from_body(
+        409,
+        {"error": "handle_reserved", "message": "handle is reserved and cannot be claimed"},
+    )
+    assert isinstance(err, Conflict)
+    assert err.slug == "handle_reserved"
+
+
+def test_error_slug_handle_taken() -> None:
+    err = error_from_body(
+        409,
+        {"error": "handle_taken", "message": "handle is already taken"},
+    )
+    assert isinstance(err, Conflict)
+    assert err.slug == "handle_taken"
+
+
+def test_error_slug_handle_not_claimed() -> None:
+    err = error_from_body(
+        409,
+        {"error": "handle_not_claimed", "message": "claim a handle before performing this action"},
+    )
+    assert isinstance(err, Conflict)
+    assert err.slug == "handle_not_claimed"
+
+
+def test_error_slug_handle_rename_too_soon() -> None:
+    err = error_from_body(
+        429,
+        {
+            "error": "handle_rename_too_soon",
+            "message": "handles can be renamed at most once every 90 days",
+        },
+    )
+    assert isinstance(err, RateLimited)
+    assert err.slug == "handle_rename_too_soon"
+
+
+def test_error_slug_handle_rename_limit_exceeded() -> None:
+    err = error_from_body(
+        429,
+        {
+            "error": "handle_rename_limit_exceeded",
+            "message": "handle rename limit reached for the current calendar year (max 3)",
+        },
+    )
+    assert isinstance(err, RateLimited)
+    assert err.slug == "handle_rename_limit_exceeded"
