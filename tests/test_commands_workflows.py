@@ -99,6 +99,31 @@ def test_workflows_list_defaults_to_one_compact_json_page(
 
 
 @respx.mock
+def test_workflows_list_default_filter_is_all(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    # With no --filter, the CLI must match the server default ("all" = owned +
+    # shared) so workflows shared via grants are not hidden by default.
+    _setup_creds(monkeypatch, tmp_config_paths)
+    route = respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    {"id": "skl_01", "name": "a", "visibility": "public", "current_version": 1}
+                ],
+                "next_cursor": None,
+            },
+        )
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "list"])
+    assert result.exit_code == 0, result.output
+    assert route.call_count == 1
+    params = dict(route.calls.last.request.url.params)
+    assert params["filter"] == "all"
+
+
+@respx.mock
 def test_workflows_list_all_follows_cursor(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
     responses = [
