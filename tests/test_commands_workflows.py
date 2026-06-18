@@ -923,6 +923,23 @@ def test_publish_missing_outcome_errors(
     assert "outcome" in str(result.exception).lower()
 
 
+def test_publish_malformed_front_matter_errors_cleanly(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    workflow_file = tmp_path / "broken.md"
+    workflow_file.write_text("---\nname: broken\ntags: [a, b\n---\nBody\n")
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["workflows", "publish", str(workflow_file)])
+
+    # Malformed front-matter must surface as a clean validation error rather
+    # than a raw YAMLError escaping to the unexpected-error backstop.
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ValidationFailed)
+    assert "not valid YAML" in str(result.exception)
+
+
 def test_publish_unreadable_file_errors(
     tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
@@ -1710,6 +1727,26 @@ def test_parse_front_matter_without_front_matter_returns_source() -> None:
     fm, body = _parse_front_matter("just body\n")
     assert fm == {}
     assert body == "just body\n"
+
+
+def test_parse_front_matter_malformed_yaml_raises_validation() -> None:
+    # An unterminated flow sequence is invalid YAML; the parser reports a mark,
+    # so the message should name the parse failure with a line/column rather
+    # than letting a raw YAMLError escape to the top-level backstop.
+    source = "---\nname: ok\ntags: [a, b\n---\nBody\n"
+    with pytest.raises(ValidationFailed, match="not valid YAML") as excinfo:
+        _parse_front_matter(source)
+    assert "line" in str(excinfo.value)
+
+
+def test_parse_front_matter_malformed_yaml_reports_file_line() -> None:
+    # The bad indentation sits on file line 3 (the opening ``---`` is line 1).
+    # The reported line must match the file the author sees, not the line index
+    # within the stripped YAML block.
+    source = "---\nname: ok\n  bad: indent\n---\nBody\n"
+    with pytest.raises(ValidationFailed, match="not valid YAML") as excinfo:
+        _parse_front_matter(source)
+    assert "line 3" in str(excinfo.value)
 
 
 def test_parse_workflow_verifier_flags_rejects_route_unsafe_names() -> None:
