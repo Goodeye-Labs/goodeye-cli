@@ -37,7 +37,19 @@ def parse_front_matter(source: str) -> tuple[dict[str, Any], str]:
             body = "".join(lines[idx + 1 :])
             if body.startswith("\n"):
                 body = body[1:]
-            parsed = yaml.safe_load(yaml_text) or {}
+            try:
+                parsed = yaml.safe_load(yaml_text) or {}
+            except yaml.YAMLError as exc:
+                mark = getattr(exc, "problem_mark", None)
+                problem = getattr(exc, "problem", None)
+                if mark is not None and problem:
+                    detail = f" (line {mark.line + 1}, column {mark.column + 1}): {problem}"
+                else:
+                    detail = "."
+                raise ValidationFailed(
+                    slug="validation_error",
+                    message=f"Workflow front-matter is not valid YAML{detail}",
+                ) from exc
             if not isinstance(parsed, dict):
                 raise ValidationFailed(
                     slug="validation_error",
