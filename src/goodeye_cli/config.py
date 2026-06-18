@@ -96,6 +96,17 @@ def _load_json(path: Path) -> dict[str, Any] | None:
 
 
 def _write_json_0600(path: Path, payload: dict[str, Any]) -> None:
+    """Atomically write ``payload`` as JSON to ``path`` with mode 0600.
+
+    The canonical writer for every file under the config dir, not only the
+    credentials file: update-check cache, sync config, and sync state route
+    through it too. Those payloads are not secret, but 0600 is a harmless floor
+    for them and the load-bearing guarantee for the ones that are (credentials,
+    cached client config), so a single atomic-write path keeps the behavior
+    uniform. Comments below reason about "the secret" because that is the
+    strictest call site; they describe the mechanism, not a claim that every
+    payload is sensitive.
+    """
     # Create the config dir at 0700 for new installs, and best-effort tighten an
     # existing dir an older CLI created at the umask default. The 0600 file below
     # is the load-bearing guarantee; the 0700 dir is defense in depth, so a chmod
