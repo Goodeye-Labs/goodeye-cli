@@ -192,6 +192,54 @@ def test_images_upload_unsupported_type_surfaces_message(
     assert "PNG, JPEG, WebP, or GIF" in str(result.exception)
 
 
+@respx.mock
+def test_images_upload_public_content_rejected_surfaces_message(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """A 422 image_content_rejected on a public upload is surfaced with a non-zero exit."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    img_file = tmp_path / "photo.png"
+    img_file.write_bytes(b"\x89PNG")
+    respx.post(f"{SERVER}/v1/images").mock(
+        return_value=httpx.Response(
+            422,
+            json={
+                "error": "image_content_rejected",
+                "message": "the image was rejected because it contains disallowed content",
+            },
+        )
+    )
+    result = runner.invoke(app, ["images", "upload", str(img_file), "--visibility", "public"])
+    assert result.exit_code != 0
+    assert result.exception is not None
+    assert "disallowed content" in str(result.exception)
+
+
+@respx.mock
+def test_images_upload_public_screening_unavailable_surfaces_message(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """A 503 image_screening_unavailable on a public upload is surfaced with a non-zero exit."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    img_file = tmp_path / "photo.png"
+    img_file.write_bytes(b"\x89PNG")
+    respx.post(f"{SERVER}/v1/images").mock(
+        return_value=httpx.Response(
+            503,
+            json={
+                "error": "image_screening_unavailable",
+                "message": (
+                    "the image could not be screened for disallowed content; try again shortly"
+                ),
+            },
+        )
+    )
+    result = runner.invoke(app, ["images", "upload", str(img_file), "--visibility", "public"])
+    assert result.exit_code != 0
+    assert result.exception is not None
+    assert "try again shortly" in str(result.exception)
+
+
 # ---------------------------------------------------------------------------
 # list
 # ---------------------------------------------------------------------------
@@ -366,6 +414,27 @@ def test_images_update_permanent(tmp_config_paths: ConfigPaths, monkeypatch) -> 
     respx.patch(f"{SERVER}/v1/images/{IMAGE_ID}").mock(side_effect=check)
     result = runner.invoke(app, ["images", "update", IMAGE_ID, "--permanent"])
     assert result.exit_code == 0, result.output
+
+
+@respx.mock
+def test_images_update_public_content_rejected_surfaces_message(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """A 422 image_content_rejected on a private-to-public flip is surfaced with a non-zero exit."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.patch(f"{SERVER}/v1/images/{IMAGE_ID}").mock(
+        return_value=httpx.Response(
+            422,
+            json={
+                "error": "image_content_rejected",
+                "message": "the image was rejected because it contains disallowed content",
+            },
+        )
+    )
+    result = runner.invoke(app, ["images", "update", IMAGE_ID, "--visibility", "public"])
+    assert result.exit_code != 0
+    assert result.exception is not None
+    assert "disallowed content" in str(result.exception)
 
 
 def test_images_update_ttl_and_permanent_rejected(

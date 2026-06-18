@@ -144,6 +144,8 @@ _SLUG_MAP: dict[str, type[GoodeyeError]] = {
     "file_too_large": ValidationFailed,
     "unsupported_image_type": ValidationFailed,
     "quota_exceeded": ValidationFailed,
+    "image_content_rejected": ValidationFailed,
+    "image_screening_unavailable": ServerError,
 }
 
 
