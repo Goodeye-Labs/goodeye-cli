@@ -59,12 +59,13 @@ def _client(*, require_auth: bool) -> GoodeyeClient:
 @app.command("list")
 def list_cmd(
     filter_: str = typer.Option(
-        "mine",
+        "all",
         "--filter",
         "-f",
         help=(
-            "Scope filter: mine (workflows you own), shared-with-me "
-            "(workflows shared with you via grants), or all (mine + shared)."
+            "Scope filter: all (mine + shared, the default), mine "
+            "(workflows you own), or shared-with-me (workflows shared "
+            "with you via grants)."
         ),
         case_sensitive=False,
     ),
@@ -81,7 +82,7 @@ def list_cmd(
         help="Also list your own archived workflows (restore with `workflows unarchive`).",
     ),
 ) -> None:
-    """List workflows you own."""
+    """List workflows you own plus those shared with you."""
     console = Console()
     mode = resolve_output_mode(json_output=json_output, table_output=table_output)
     with _client(require_auth=True) as client:
