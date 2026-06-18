@@ -1123,6 +1123,29 @@ def test_push_diverged_hint(tmp_config_paths: ConfigPaths, monkeypatch, tmp_path
     assert "goodeye workflows sync push --target" in result.output
 
 
+def test_push_pull_required_hint_points_at_pull() -> None:
+    """A ``pull-required`` copy yields a hint pointing at the pull command.
+
+    The copy was deferred because the push changed sibling files it does not
+    have; the only way to refresh it is an ordinary pull.
+    """
+    from goodeye_cli.commands.workflows_sync import _push_hints
+    from goodeye_cli.sync import PushItem
+
+    items = [
+        PushItem(slug="alpha", workflow_id="skl_a", target_path="/a", action="pushed"),
+        PushItem(
+            slug="alpha",
+            workflow_id="skl_a",
+            target_path="/b",
+            action="pull-required",
+            detail="changed sibling files",
+        ),
+    ]
+    hints = _push_hints(items)
+    assert any("goodeye workflows sync pull" in h and "sibling" in h for h in hints)
+
+
 # ----- target add --only: allowlist append -----
 
 
