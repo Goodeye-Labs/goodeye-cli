@@ -121,6 +121,11 @@ _SLUG_MAP: dict[str, type[GoodeyeError]] = {
     "validation_error": ValidationFailed,
     "rate_limited": RateLimited,
     "conflict": Conflict,
+    # workflow namespace resolution: a name-only save that collides with a
+    # workflow shared at edit access. Treated as a rejected request so a sync
+    # push reports it as one skipped item (with the server's message) and the
+    # rest of the pass still runs, instead of aborting on an unmapped error.
+    "ambiguous_workflow_reference": ValidationFailed,
     # handle slugs
     "handle_invalid": ValidationFailed,
     "handle_reserved": Conflict,
@@ -142,6 +147,7 @@ _SLUG_MAP: dict[str, type[GoodeyeError]] = {
     # hosted images
     "image_not_found": NotFound,
     "file_too_large": ValidationFailed,
+    "image_dimensions_exceeded": ValidationFailed,
     "unsupported_image_type": ValidationFailed,
     "quota_exceeded": ValidationFailed,
     "image_content_rejected": ValidationFailed,

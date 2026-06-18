@@ -907,7 +907,7 @@ def _render_safety_check(result: SafetyCheckResult, console: Console) -> None:
         f"{result.resource_type} {result.resource_id} v{result.resource_version}"
     )
     if result.truncated:
-        fields = ", ".join(result.truncated_fields) or "some fields"
+        fields = rich_escape(", ".join(result.truncated_fields)) or "some fields"
         console.print(
             f"  [yellow]note[/yellow] {fields} exceeded the safety check input "
             "limit and were truncated for this scan; the authoritative verdict is "

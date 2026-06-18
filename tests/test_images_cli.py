@@ -170,6 +170,29 @@ def test_images_upload_file_too_large_surfaces_message(
 
 
 @respx.mock
+def test_images_upload_dimensions_exceeded_surfaces_message(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """A 413 image_dimensions_exceeded from the server is surfaced cleanly with a non-zero exit."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    img_file = tmp_path / "huge.png"
+    img_file.write_bytes(b"\x89PNG")
+    respx.post(f"{SERVER}/v1/images").mock(
+        return_value=httpx.Response(
+            413,
+            json={
+                "error": "image_dimensions_exceeded",
+                "message": "image resolution exceeds the maximum allowed pixels",
+            },
+        )
+    )
+    result = runner.invoke(app, ["images", "upload", str(img_file)])
+    assert result.exit_code != 0
+    assert result.exception is not None
+    assert "exceeds the maximum allowed pixels" in str(result.exception)
+
+
+@respx.mock
 def test_images_upload_unsupported_type_surfaces_message(
     tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:

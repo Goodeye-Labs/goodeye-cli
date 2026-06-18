@@ -775,6 +775,41 @@ def test_push_table_conflict_hint(
 
 
 @respx.mock
+def test_push_ambiguous_reference_skips_item_and_continues(
+    tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
+) -> None:
+    """A 409 ambiguous_workflow_reference during push is reported as one skipped
+    item with a zero exit, not an unmapped ServerError that aborts the whole pass."""
+    _setup_auth(monkeypatch, tmp_config_paths)
+    _me_route()
+    target_dir = tmp_path / "skills"
+    _seed_target(monkeypatch, tmp_config_paths, str(target_dir))
+    _seed_modified_entry(
+        tmp_config_paths,
+        target_dir=target_dir,
+        workflow_id="skl_01",
+        slug="alpha",
+        body=_push_body(slug="alpha"),
+    )
+    respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            409,
+            json={
+                "error": "ambiguous_workflow_reference",
+                "message": "workflow name 'alpha' is ambiguous",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "sync", "push"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    item = payload["items"][0]
+    assert item["slug"] == "alpha"
+    assert item["action"] == "skipped-invalid"
+
+
+@respx.mock
 def test_push_target_option_scopes_to_one(
     tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
 ) -> None:
