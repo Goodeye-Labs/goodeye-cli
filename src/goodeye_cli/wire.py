@@ -362,13 +362,23 @@ class TemplateSearchResponse(_WireBase):
 
 
 class TemplateVerifierSnapshotWire(_WireBase):
-    """Public metadata for a verifier attached to a template version."""
+    """Full definition of a verifier attached to a template version.
+
+    A verifier embedded in a published template is fully readable by everyone,
+    including anonymous readers: the criterion and calibration examples are
+    public, so they are surfaced here (previously the server redacted them).
+    """
 
     name: str
     input_contract: str
     input_fields: list[str] = Field(default_factory=list)
     verifier_version: int | None = None
     config_hash: str | None = None
+    verifier_id: str | None = None
+    criterion: str | None = None
+    few_shot_examples: list[dict[str, Any]] = Field(default_factory=list)
+    judge_model_config: dict[str, Any] = Field(default_factory=dict)
+    reasoning_field_description: str | None = None
 
 
 class TemplateImageGeneratorSnapshotWire(_WireBase):
@@ -434,6 +444,9 @@ class TemplatePublishResult(_WireBase):
     # was referenced but not attached, or a video host that will not embed).
     # Defaults to empty so responses from older servers still parse.
     authoring_notes: list[str] = Field(default_factory=list)
+    # Disclosure that publishing made the template's verifier definitions public.
+    # Present only when the template references verifiers; None on older servers.
+    verifier_exposure_notice: str | None = None
 
 
 class SafetyCheckVerifierRun(_WireBase):

@@ -178,6 +178,21 @@ def test_template_publish_result_defaults_authoring_notes_empty() -> None:
         }
     )
     assert result.authoring_notes == []
+    # Absent on older servers / templates with no verifiers.
+    assert result.verifier_exposure_notice is None
+
+
+def test_template_publish_result_parses_verifier_exposure_notice() -> None:
+    notice = "Publishing makes this template's verifier definitions public."
+    result = TemplatePublishResult.model_validate(
+        {
+            "template_id": "tpl_1",
+            "version": 2,
+            "publishing_handle": "h",
+            "verifier_exposure_notice": notice,
+        }
+    )
+    assert result.verifier_exposure_notice == notice
 
 
 def test_workflow_detail_parses_image_generators_and_archived_at() -> None:

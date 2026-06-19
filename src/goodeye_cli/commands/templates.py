@@ -322,6 +322,8 @@ def publish(
             console.print("[dim]Safety:[/dim] [yellow]advisory concerns flagged[/yellow]")
             if sv.advisory_reasoning:
                 console.print(f"[dim]{sv.advisory_reasoning}[/dim]")
+    if result.verifier_exposure_notice:
+        console.print(f"[yellow]Note:[/yellow] {result.verifier_exposure_notice}")
     _print_authoring_notes(result.authoring_notes)
 
 
