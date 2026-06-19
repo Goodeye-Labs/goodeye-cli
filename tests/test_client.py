@@ -92,6 +92,11 @@ def test_get_template_json_preserves_verifier_snapshots() -> None:
                         "input_fields": ["output"],
                         "verifier_version": 2,
                         "config_hash": "abc123",
+                        "verifier_id": "ver_1",
+                        "criterion": "Pass if the tone is professional. Fail otherwise.",
+                        "few_shot_examples": [{"input": {"output": "hi"}, "passed": True}],
+                        "judge_model_config": {"model": "openai/gpt-5.4-mini"},
+                        "reasoning_field_description": "why",
                     }
                 ],
             },
@@ -100,8 +105,14 @@ def test_get_template_json_preserves_verifier_snapshots() -> None:
     with GoodeyeClient(SERVER) as client:
         result = client.get_template("sample")
     assert not isinstance(result, str)
-    assert result.verifier_snapshots[0].name == "tone"
-    assert result.verifier_snapshots[0].input_fields == ["output"]
+    snap = result.verifier_snapshots[0]
+    assert snap.name == "tone"
+    assert snap.input_fields == ["output"]
+    # Full verifier definition is now public and must survive deserialization.
+    assert snap.verifier_id == "ver_1"
+    assert snap.criterion == "Pass if the tone is professional. Fail otherwise."
+    assert snap.few_shot_examples == [{"input": {"output": "hi"}, "passed": True}]
+    assert snap.judge_model_config == {"model": "openai/gpt-5.4-mini"}
 
 
 @respx.mock

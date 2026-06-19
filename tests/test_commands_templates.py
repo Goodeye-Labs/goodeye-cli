@@ -828,6 +828,30 @@ def test_templates_publish_clean_shows_verified(tmp_config_paths: ConfigPaths, m
 
 
 @respx.mock
+def test_templates_publish_shows_verifier_exposure_notice(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    notice = "Publishing makes this template's verifier definitions public."
+    respx.post(f"{SERVER}/v1/templates").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "template_id": "tpl_notice",
+                "version": 1,
+                "publishing_handle": "h",
+                "safety_verification": {"status": "clean"},
+                "verifier_exposure_notice": notice,
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "publish", "my-workflow"])
+    assert result.exit_code == 0, result.output
+    assert notice in result.output
+
+
+@respx.mock
 def test_templates_publish_flagged_shows_warning_and_reasoning(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
