@@ -579,6 +579,31 @@ class GoodeyeClient:
         )
         return response.json()
 
+    def get_workflow_file_raw(
+        self, workflow_id: str, path: str, *, sha256: str | None = None
+    ) -> bytes:
+        """GET /v1/workflows/{workflow_id}/files?path=<path>&format=raw.
+
+        Returns the file's raw bytes (the response body). Unlike the JSON
+        ``get_workflow_file`` route, raw serving applies no inline binary
+        ceiling, so this is the only way to retrieve a binary larger than the
+        server's inline limit (the ``binary_too_large_for_inline`` case) -- the
+        sync pull uses it to mirror over-ceiling demo assets to disk.
+
+        Pass ``sha256`` to content-address the fetch: the file is resolved by
+        path and then confirmed to match the address, so a republished or
+        removed file no longer resolves at a stale address (returns not found).
+        """
+        params: dict[str, str] = {"path": path, "format": "raw"}
+        if sha256 is not None:
+            params["sha256"] = sha256
+        response = self._request(
+            "GET",
+            f"/v1/workflows/{workflow_id}/files",
+            params=params,
+        )
+        return response.content
+
     # ----- templates -----
     def list_templates(
         self,

@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from goodeye_cli.config import ConfigPaths, _load_json, _write_json_0600
-from goodeye_cli.errors import Conflict, Forbidden, NotFound, ValidationFailed
+from goodeye_cli.errors import Conflict, Forbidden, GoodeyeError, NotFound, ValidationFailed
 from goodeye_cli.frontmatter import (
     coerce_outcome,
     coerce_required_text,
@@ -1172,11 +1172,66 @@ def _write_one_envelope(slug_dir: Path, workflow_id: str, envelope: dict[str, An
     return env_path
 
 
+def _write_raw_sibling_file(path: Path, raw: bytes, *, executable: bool) -> None:
+    """Write raw bytes fetched from the ``format=raw`` route, applying the exec bit.
+
+    Companion to ``_write_sibling_file`` (which writes from a JSON file envelope)
+    for the binary-too-large path, where the bytes arrive as the raw response
+    body rather than base64 inside an envelope. The executable flag comes from
+    the manifest row, mirroring ``_write_sibling_file``'s handling so a
+    force-overwrite onto an existing inode cannot keep a stale ``+x``.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(raw)
+    current_mode = os.stat(path).st_mode
+    if executable:
+        os.chmod(path, current_mode | 0o111)
+    else:
+        os.chmod(path, current_mode & ~0o111)
+
+
+def _fetch_raw_sibling(
+    client: GoodeyeClient,
+    workflow_id: str,
+    slug_dir: Path,
+    row: Any,
+) -> str | None:
+    """Fetch a binary too large to inline via the raw byte route and write it.
+
+    The inline file API caps binaries at the server's inline ceiling and returns
+    ``binary_too_large_for_inline`` for anything larger, so neither the batch nor
+    the single-file JSON route can deliver those bytes. The ``format=raw`` route
+    streams them whole with no ceiling, which is how a large demo image or asset
+    lands on disk. The fetch is content-addressed by the manifest sha so a
+    republished file at the same path cannot resolve to stale bytes, and the
+    bytes are re-hashed locally and rejected on mismatch.
+
+    Returns the written path, or ``None`` (with a warning) when the path is
+    unsafe, the raw fetch fails, or the bytes do not match the expected sha.
+    """
+    env_path = row.path
+    if not _is_safe_sibling_path(slug_dir, env_path):
+        _log.warning("skipping unsafe path %r in file envelope for %s", env_path, workflow_id)
+        return None
+    expected_sha = row.sha256
+    try:
+        raw = client.get_workflow_file_raw(workflow_id, env_path, sha256=expected_sha)
+    except GoodeyeError as exc:
+        _log.warning("skipping sibling %s: raw fetch failed: %s", env_path, exc)
+        return None
+    if expected_sha is not None and hashlib.sha256(raw).hexdigest() != expected_sha:
+        _log.warning("skipping sibling %s: raw bytes did not match expected sha256", env_path)
+        return None
+    _write_raw_sibling_file(slug_dir / env_path, raw, executable=bool(row.executable))
+    return env_path
+
+
 def _fetch_and_write_siblings(
     client: GoodeyeClient,
     workflow_id: str,
     slug_dir: Path,
     to_fetch: list[str],
+    meta_by_path: dict[str, Any],
 ) -> set[str]:
     """Batch-fetch ``to_fetch`` paths and write each file to disk.
 
@@ -1184,21 +1239,25 @@ def _fetch_and_write_siblings(
     recovers any path the server returns as ``batch_response_cap_exceeded`` (its
     content would have pushed the batch past the aggregate inline budget) by
     re-fetching it alone through the single-file route, which has no aggregate
-    cap. Unsafe envelope paths and remaining error envelopes are skipped with a
-    warning. Returns the set of paths actually written to disk so the caller can
-    avoid recording a skipped file as synced.
+    cap. A path the server returns as ``binary_too_large_for_inline`` (a binary
+    over the per-file inline ceiling, which no JSON route can deliver) is fetched
+    through the ``format=raw`` byte route instead, content-addressed by its
+    ``meta_by_path`` manifest row. Unsafe envelope paths and remaining error
+    envelopes are skipped with a warning. Returns the set of paths actually
+    written to disk so the caller can avoid recording a skipped file as synced.
     """
     written: set[str] = set()
     for start in range(0, len(to_fetch), _FETCH_BATCH_PATHS):
         chunk = to_fetch[start : start + _FETCH_BATCH_PATHS]
         batch_result = client.get_workflow_files(workflow_id, chunk)
         for envelope in batch_result.get("files", []):
-            if envelope.get("error") == "batch_response_cap_exceeded":
+            env_path = envelope.get("path", "")
+            error = envelope.get("error")
+            if error == "batch_response_cap_exceeded":
                 # The file was dropped from the batch to honor the aggregate
                 # inline budget. Re-fetch it on its own, where no aggregate cap
                 # applies, so a large-but-individually-fetchable sibling still
                 # lands on disk instead of being silently skipped.
-                env_path = envelope.get("path", "")
                 if not _is_safe_sibling_path(slug_dir, env_path):
                     _log.warning(
                         "skipping unsafe path %r in file envelope for %s", env_path, workflow_id
@@ -1206,6 +1265,24 @@ def _fetch_and_write_siblings(
                     continue
                 single = client.get_workflow_file(workflow_id, env_path)
                 landed = _write_one_envelope(slug_dir, workflow_id, single)
+                # A re-fetch can still report the file is over the per-file inline
+                # ceiling; fall through to the raw byte route in that case.
+                if landed is None and single.get("error") == "binary_too_large_for_inline":
+                    row = meta_by_path.get(env_path)
+                    landed = (
+                        _fetch_raw_sibling(client, workflow_id, slug_dir, row)
+                        if row is not None
+                        else None
+                    )
+            elif error == "binary_too_large_for_inline":
+                # Over the per-file inline ceiling: the only way to get the bytes
+                # is the raw route, which streams them whole with no ceiling.
+                row = meta_by_path.get(env_path)
+                landed = (
+                    _fetch_raw_sibling(client, workflow_id, slug_dir, row)
+                    if row is not None
+                    else None
+                )
             else:
                 landed = _write_one_envelope(slug_dir, workflow_id, envelope)
             if landed is not None:
@@ -1294,9 +1371,14 @@ def _sync_sibling_files(
         if _is_safe_sibling_path(slug_dir, row.path)
         and _sibling_needs_fetch(row, slug_dir, old_files)
     ]
+    # Manifest row by path, so the fetch can content-address a raw byte fetch
+    # (the binary-too-large fallback) by the row's sha and preserve its exec bit.
+    meta_by_path = {row.path: row for row in new_manifest}
     landed_paths: set[str] = set()
     if to_fetch:
-        landed_paths = _fetch_and_write_siblings(client, detail.id, slug_dir, to_fetch)
+        landed_paths = _fetch_and_write_siblings(
+            client, detail.id, slug_dir, to_fetch, meta_by_path
+        )
 
     _remove_dropped_siblings(slug_dir, old_files, new_manifest_paths)
     return _build_file_states(slug_dir, new_manifest, landed_paths)
