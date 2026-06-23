@@ -2,10 +2,11 @@
 
 Command-line client for Goodeye - manage AI workflows from the terminal.
 
-Goodeye is an outcome-aligned AI workflow registry: you author workflows as
-markdown runbooks tagged with the business outcome they serve, and verifiers
-that score an AI agent against a measurable business result. This CLI is wired
-to the public `/v1/` REST API.
+Goodeye turns the business outcomes you care about into verified AI workflows
+that agents run reliably: you author workflows as markdown runbooks tagged with
+the business outcome they serve, paired with verifiers that score an AI agent
+against a measurable business result. This CLI is wired to the public `/v1/`
+REST API.
 
 ## Primary caller is your AI agent
 
