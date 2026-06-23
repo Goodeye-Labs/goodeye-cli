@@ -944,12 +944,14 @@ def test_unpushed_sibling_edit_blocks_unforced_overwrite(
 def test_pull_skips_undeliverable_sibling_and_reports_incomplete(
     tmp_path: Path, tmp_config_paths: ConfigPaths
 ) -> None:
-    """A sibling the server cannot inline is left off disk, not recorded, and flagged.
+    """A sibling no route can deliver is left off disk, not recorded, and flagged.
 
-    The server returns an error envelope (e.g. a binary over the inline ceiling)
-    for one sibling and content for the other. The undeliverable sibling must not
-    be written, must not be recorded in the index as synced (so the next pull
-    retries it), and the pull must report ``pulled-incomplete``.
+    A binary over the inline ceiling returns ``binary_too_large_for_inline`` from
+    the JSON route; the pull then falls back to the ``format=raw`` byte route. If
+    even that cannot deliver the bytes (here it 404s, standing in for a GC'd or
+    otherwise missing blob), the sibling must not be written, must not be recorded
+    in the index as synced (so the next pull retries it), and the pull must report
+    ``pulled-incomplete``.
     """
     _me_route()
     target_dir = tmp_path / "skills"
@@ -986,8 +988,12 @@ def test_pull_skips_undeliverable_sibling_and_reports_incomplete(
             ],
         )
     )
-    respx.get(f"{SERVER}/v1/workflows/wf_big/files").mock(
-        return_value=httpx.Response(
+
+    def _files_side_effect(request: httpx.Request) -> httpx.Response:
+        if request.url.params.get("format") == "raw":
+            # Raw fallback cannot deliver either: the blob is genuinely gone.
+            return httpx.Response(404, json={"error": "not_found", "message": "blob missing"})
+        return httpx.Response(
             200,
             json={
                 "files": [
@@ -996,7 +1002,8 @@ def test_pull_skips_undeliverable_sibling_and_reports_incomplete(
                 ]
             },
         )
-    )
+
+    respx.get(f"{SERVER}/v1/workflows/wf_big/files").mock(side_effect=_files_side_effect)
 
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
         result = pull(
@@ -1023,6 +1030,106 @@ def test_pull_skips_undeliverable_sibling_and_reports_incomplete(
     tracked_paths = {f.path for f in entry.files}
     assert "small.txt" in tracked_paths
     assert "big.bin" not in tracked_paths
+
+
+@respx.mock
+def test_pull_recovers_over_ceiling_binary_via_raw(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    """A binary over the inline ceiling is recovered through the format=raw route.
+
+    The JSON batch route reports ``binary_too_large_for_inline`` for the large
+    sibling; the pull falls back to the raw byte route (content-addressed by the
+    manifest sha), which streams the bytes whole. The file must land on disk
+    intact, be recorded as synced, and the pull must report ``pulled`` (complete).
+    """
+    _me_route()
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+
+    skill_body = "---\nname: img-wf\n---\nbody"
+    small_text = "small helper"
+    # A 1500-byte binary that "exceeds the inline ceiling"; raw delivers it whole.
+    big_bin = bytes(range(256)) * 6  # 1536 bytes, non-text
+    big_sha = _sha256(big_bin)
+
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response([_summary_dict(id_="wf_img", name="img-wf", token="t1")])
+    )
+    respx.get(f"{SERVER}/v1/workflows/wf_img").mock(
+        return_value=_detail_response(
+            id_="wf_img",
+            name="img-wf",
+            body=skill_body,
+            token="t1",
+            files=[
+                {
+                    "path": "small.txt",
+                    "sha256": _sha256_text(small_text),
+                    "size_bytes": len(small_text),
+                    "executable": False,
+                    "content_kind": "text",
+                },
+                {
+                    "path": "demo/big.png",
+                    "sha256": big_sha,
+                    "size_bytes": len(big_bin),
+                    "executable": False,
+                    "content_kind": "binary",
+                },
+            ],
+        )
+    )
+
+    seen_raw: dict[str, str] = {}
+
+    def _files_side_effect(request: httpx.Request) -> httpx.Response:
+        params = request.url.params
+        if params.get("format") == "raw":
+            # Raw byte route: record what was asked for, then stream the bytes.
+            seen_raw["path"] = params.get("path", "")
+            seen_raw["sha256"] = params.get("sha256", "")
+            return httpx.Response(200, content=big_bin)
+        # Batch route: small inlined, big reported over the per-file ceiling.
+        return httpx.Response(
+            200,
+            json={
+                "files": [
+                    _file_envelope("small.txt", content=small_text),
+                    _file_envelope("demo/big.png", error="binary_too_large_for_inline"),
+                ]
+            },
+        )
+
+    respx.get(f"{SERVER}/v1/workflows/wf_img/files").mock(side_effect=_files_side_effect)
+
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = pull(
+            client,
+            config,
+            SyncState(),
+            slugs=[],
+            target_path=None,
+            force=False,
+            yes=False,
+            paths=tmp_config_paths,
+        )
+
+    # The raw fallback recovered the over-ceiling binary, so the pull is complete.
+    assert [(i.slug, i.action) for i in result.items] == [("img-wf", "pulled")]
+
+    slug_dir = target_dir / "img-wf"
+    assert (slug_dir / "small.txt").read_text(encoding="utf-8") == small_text
+    assert (slug_dir / "demo" / "big.png").read_bytes() == big_bin
+
+    # The raw fetch was content-addressed by the manifest sha for the right path.
+    assert seen_raw == {"path": "demo/big.png", "sha256": big_sha}
+
+    # Both siblings are now recorded as synced, so a later pull treats the
+    # directory as complete instead of re-fetching.
+    entry = load_sync_state(tmp_config_paths).entries[0]
+    tracked_paths = {f.path for f in entry.files}
+    assert tracked_paths == {"small.txt", "demo/big.png"}
 
 
 @respx.mock
