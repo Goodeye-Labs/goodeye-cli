@@ -376,7 +376,7 @@ def unpublish(
     ),
     version: int = typer.Argument(..., help="Version to unpublish."),
 ) -> None:
-    """Hide one published version from the public catalog (reversible).
+    """Hide one published version from the public catalog (distinct from deprecate and delete).
 
     Existing forks pinned to this version continue to work. The catalog
     hides the template if no live version remains.
