@@ -993,6 +993,7 @@ class GoodeyeClient:
         workflow_version: int | None = None,
         workflow_ref: str | None = None,
         run_id: str | None = None,
+        visibility: str = "public",
         anonymous: bool = False,
     ) -> ImageGenerationRunResult:
         """POST /v1/image-generators/{generator_path_id}/runs.
@@ -1027,6 +1028,7 @@ class GoodeyeClient:
             body["workflow_ref"] = workflow_ref
         if run_id is not None:
             body["run_id"] = run_id
+        body["visibility"] = visibility
         response = self._request(
             "POST",
             f"/v1/image-generators/{generator_path_id}/runs",
@@ -1138,6 +1140,7 @@ class GoodeyeClient:
         visibility: str | None = None,
         ttl_seconds: int | None = None,
         permanent: bool | None = None,
+        rotate_view_secret: bool | None = None,
     ) -> ImageDetail:
         """PATCH /v1/images/{id}."""
         body: dict[str, Any] = {}
@@ -1147,6 +1150,8 @@ class GoodeyeClient:
             body["ttl_seconds"] = ttl_seconds
         if permanent is not None:
             body["permanent"] = permanent
+        if rotate_view_secret is not None:
+            body["rotate_view_secret"] = rotate_view_secret
         response = self._request("PATCH", f"/v1/images/{image_id}", json_body=body)
         return ImageDetail.model_validate(response.json())
 

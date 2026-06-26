@@ -1,7 +1,7 @@
 """Typer commands for ``goodeye images``.
 
-Covers upload, list, get, update, delete, share, unshare, and set-ttl.
-Consumes the hosted-image REST endpoints under /v1/images.
+Covers upload, list, get, update, delete, share, unshare, set-ttl, and
+reset-link. Consumes the hosted-image REST endpoints under /v1/images.
 """
 
 from __future__ import annotations
@@ -213,6 +213,11 @@ def get(
         console.print(f"type:       {result.content_type}")
     if result.source:
         console.print(f"source:     {result.source}")
+    if result.visibility == "private":
+        console.print(
+            "[dim]This url is your private view link: open it or forward it to view the image. "
+            "The plain url without the token stays locked.[/dim]"
+        )
 
 
 @app.command("update")
@@ -236,12 +241,23 @@ def update(
         "--permanent",
         help="Clear the expiry and keep the image indefinitely. Mutually exclusive with --ttl.",
     ),
+    rotate_view_secret: bool = typer.Option(
+        False,
+        "--rotate-view-secret",
+        help=(
+            "Issue a fresh private view link and revoke every link shared earlier "
+            "for this image. Use to un-share a private image."
+        ),
+    ),
     json_output: bool = typer.Option(False, "--json", help="Print JSON."),
 ) -> None:
-    """Update the visibility or expiry of an image you own.
+    """Update the visibility, expiry, or private view link of an image you own.
 
     Pass --ttl <seconds> to extend or shorten the lifetime, or --permanent to
     remove the expiry entirely. --ttl and --permanent are mutually exclusive.
+    Pass --rotate-view-secret to issue a fresh private view link and revoke the
+    links you shared earlier. For a private image, the printed url is the current
+    view link.
     """
     if ttl is not None and permanent:
         raise ValidationFailed(
@@ -256,6 +272,7 @@ def update(
             visibility=visibility,
             ttl_seconds=ttl,
             permanent=permanent if permanent else None,
+            rotate_view_secret=rotate_view_secret if rotate_view_secret else None,
         )
 
     if json_output:
@@ -268,6 +285,8 @@ def update(
         console.print(f"expires_at: {result.expires_at.isoformat()}")
     else:
         console.print("expires_at: never")
+    if result.visibility == "private" and result.url:
+        console.print(f"view link:  {result.url}")
 
 
 @app.command("delete")
@@ -311,7 +330,11 @@ def unshare(
     image_id: str = typer.Argument(..., help="Image ID to make private."),
     json_output: bool = typer.Option(False, "--json", help="Print JSON."),
 ) -> None:
-    """Restrict an image to private access (owner only)."""
+    """Restrict an image to private access (owner only).
+
+    A private image still has a view link you can open or forward to people you
+    choose; the printed url is that link, while the plain url stays locked.
+    """
     console = Console()
     with _client() as client:
         result = client.update_image(image_id, visibility="private")
@@ -321,6 +344,8 @@ def unshare(
         return
 
     console.print(f"[green]Unshared[/green] {result.id}  visibility=private")
+    if result.url:
+        console.print(f"view link: {result.url}")
 
 
 @app.command("set-ttl")
@@ -382,3 +407,26 @@ def set_ttl(
             f"[green]Updated[/green] {result.id}  "
             f"expires_at={result.expires_at.isoformat() if result.expires_at else 'unknown'}"
         )
+
+
+@app.command("reset-link")
+def reset_link(
+    image_id: str = typer.Argument(..., help="Image ID."),
+    json_output: bool = typer.Option(False, "--json", help="Print JSON."),
+) -> None:
+    """Issue a fresh private view link and revoke the links you shared earlier.
+
+    Rotates the image's view secret: every link you handed out before stops
+    working, and the printed url is the new view link to open or share.
+    """
+    console = Console()
+    with _client() as client:
+        result = client.update_image(image_id, rotate_view_secret=True)
+
+    if json_output:
+        typer.echo(result.model_dump_json(indent=2))
+        return
+
+    console.print(f"[green]Reset view link[/green] {result.id}")
+    if result.url:
+        console.print(f"view link: {result.url}")

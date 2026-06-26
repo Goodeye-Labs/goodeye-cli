@@ -394,6 +394,43 @@ def test_image_generators_generate_prints_url_to_stdout(
 
 
 @respx.mock
+def test_image_generators_generate_defaults_visibility_public(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """generate sends visibility=public by default in the run body."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+
+    def check(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode())
+        assert body.get("visibility") == "public"
+        return httpx.Response(201, json=_run_response())
+
+    respx.post(f"{SERVER}/v1/image-generators/system:image-standard/runs").mock(side_effect=check)
+    result = runner.invoke(app, ["image-generators", "generate", "--prompt", "a red cat"])
+    assert result.exit_code == 0, result.output
+
+
+@respx.mock
+def test_image_generators_generate_visibility_private(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """--visibility private is carried in the run body."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+
+    def check(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode())
+        assert body.get("visibility") == "private"
+        return httpx.Response(201, json=_run_response())
+
+    respx.post(f"{SERVER}/v1/image-generators/system:image-standard/runs").mock(side_effect=check)
+    result = runner.invoke(
+        app,
+        ["image-generators", "generate", "--prompt", "a red cat", "--visibility", "private"],
+    )
+    assert result.exit_code == 0, result.output
+
+
+@respx.mock
 def test_image_generators_generate_with_generator_flag(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
