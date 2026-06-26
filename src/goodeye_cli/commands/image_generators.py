@@ -149,7 +149,7 @@ def deploy(
         ),
     ),
 ) -> None:
-    """Publish a reusable image generator your workflows can call (new or new version).
+    """Deploy a reusable image generator your workflows can call (new or new version).
 
     On success prints the ``generator_id``, ``version``, and the new
     ``version_token``. Persist the token: it's required for the next re-deploy.
