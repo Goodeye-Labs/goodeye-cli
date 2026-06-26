@@ -844,7 +844,7 @@ def leave(
     workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
-    """Stop accessing a workflow someone shared with you."""
+    """Remove your personal access to a workflow someone shared with you (team access stays)."""
     console = Console()
     if not confirm_destructive(f"Leave shared workflow {workflow_id}?", yes=yes):
         console.print("Cancelled.")
