@@ -52,6 +52,7 @@ from goodeye_cli.sync import (
     slug_in_target_scope,
     stamp_auto_pull,
     status,
+    tree_push_drifted,
     untracked_local_slugs,
     upsert_entry,
 )
@@ -3634,6 +3635,43 @@ def test_status_deleted_sibling_reports_modified_local(
     item = result.items[0]
     assert item.state == "modified-local"
     assert item.next_action == "push"
+
+
+def test_tree_push_drifted_sibling_deleted_mid_walk_is_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A tracked sibling that is hashed after the walk but deleted in between
+    reports drift instead of raising FileNotFoundError.
+
+    ``_collect_non_ignored_files`` materializes the file set first, then
+    ``tree_push_drifted`` hashes each recorded sibling. A concurrent removal in
+    that window must surface as drift (the file is gone), not crash the read-only
+    status/push drift check with an unhandled error.
+    """
+    target_dir = tmp_path / "skills"
+    target = SyncTarget(path=str(target_dir), scope="owned")
+    body = "server body"
+    slug_dir = target_dir / "alpha"
+    slug_dir.mkdir(parents=True)
+    (slug_dir / "SKILL.md").write_text(body, encoding="utf-8")
+    helper_content = "helper original"
+    (slug_dir / "helper.sh").write_text(helper_content, encoding="utf-8")
+    entry = SyncEntry(
+        workflow_id="skl_a",
+        slug="alpha",
+        target_path=normalize_target_path(str(target_dir)),
+        synced_version=1,
+        version_token="t1",
+        body_sha256=body_sha256(body),
+        files=[FileState(path="helper.sh", sha256=body_sha256(helper_content), executable=False)],
+    )
+
+    def _vanished(_path: Path) -> str:
+        # Simulate the sibling being removed between the walk and the hash.
+        raise FileNotFoundError
+
+    monkeypatch.setattr("goodeye_cli.sync._sibling_sha256", _vanished)
+    assert tree_push_drifted(entry, target, None) is True
 
 
 @respx.mock

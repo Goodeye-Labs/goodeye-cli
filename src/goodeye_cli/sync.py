@@ -792,8 +792,19 @@ def tree_push_drifted(
         # but gone from disk (a deletion, or a file newly hidden by an ignore-spec
         # change) is drift.
         return True
-    # A tracked sibling whose on-disk bytes changed is drift.
-    return any(_sibling_sha256(on_disk[rel]) != fs.sha256 for rel, fs in recorded.items())
+
+    # A tracked sibling whose on-disk bytes changed is drift. If the walk saw a
+    # sibling but it was deleted before we could hash it (a concurrent removal in
+    # the walk-to-hash window), treat the vanished file as drift rather than
+    # letting a FileNotFoundError escape: a removed tracked file is exactly the
+    # deletion this predicate exists to report.
+    def _sibling_changed(rel: str, fs: FileState) -> bool:
+        try:
+            return _sibling_sha256(on_disk[rel]) != fs.sha256
+        except FileNotFoundError:
+            return True
+
+    return any(_sibling_changed(rel, fs) for rel, fs in recorded.items())
 
 
 def server_moved(entry: SyncEntry, summary: WorkflowSummary) -> bool:
