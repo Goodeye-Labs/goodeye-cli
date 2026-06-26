@@ -72,7 +72,8 @@ def register_verify(
         help="Referral code to claim a bonus after registering.",
     ),
 ) -> None:
-    """Complete non-interactive registration and save local credentials."""
+    """Finish a non-interactive sign-up by submitting the emailed code (for AI agents
+    and automation, no browser)."""
     console = Console()
     server = get_server()
     with GoodeyeClient(server) as client:

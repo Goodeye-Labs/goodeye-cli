@@ -60,7 +60,7 @@ def create_key(
     name: str = typer.Option(..., "--name", "-n", help="Human-readable name for the key."),
     copy: bool = typer.Option(False, "--copy", help="Copy the key to the clipboard."),
 ) -> None:
-    """Create a new API key. The secret is shown once - save it somewhere safe."""
+    """Create a new API key. The secret is shown once; save it somewhere safe."""
     console = Console()
     with _require_client() as client:
         created = client.create_api_key(name)

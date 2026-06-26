@@ -195,7 +195,7 @@ def search_cmd(
     json_output: bool = typer.Option(False, "--json", help="Print JSON."),
     table_output: bool = typer.Option(False, "--table", help="Print results as a table."),
 ) -> None:
-    """LLM-ranked search over templates (not lexical list filtering)."""
+    """Find a public template by describing what you need, not just its name."""
     console = Console()
     mode = resolve_output_mode(json_output=json_output, table_output=table_output)
     # Anonymous reads, like `templates list` and `get`: the server route is
@@ -302,7 +302,7 @@ def get_file_cmd(
         ),
     ),
 ) -> None:
-    """Download one template file as raw bytes and write it to a local path.
+    """Save one file from a template to your local disk.
 
     Use this to pull a template's demo asset (or any attached file) verbatim,
     for example a demo preview image. The bytes are written to the path given
@@ -376,7 +376,7 @@ def unpublish(
     ),
     version: int = typer.Argument(..., help="Version to unpublish."),
 ) -> None:
-    """Soft-unpublish a single template version.
+    """Hide one published version from the public catalog (reversible).
 
     Existing forks pinned to this version continue to work. The catalog
     hides the template if no live version remains.
@@ -397,7 +397,7 @@ def fork(
         None, "--name", help="Override the fork's slug (default is the template slug)."
     ),
 ) -> None:
-    """Fork a public template into a private workflow owned by the caller.
+    """Copy a public template into your own private workflow to customize it.
 
     Authentication is required. Returns the new workflow's id and lineage
     metadata; fetching the body and acting on it (if at all) is a
@@ -582,7 +582,7 @@ def deprecate_version_cmd(
         help="Required deprecation message shown to users who fork this version.",
     ),
 ) -> None:
-    """Flag a single template version as deprecated.
+    """Warn users a version is outdated while keeping it published.
 
     The message is shown to anyone who forks this version. The version
     stays reachable so existing pins continue to work.

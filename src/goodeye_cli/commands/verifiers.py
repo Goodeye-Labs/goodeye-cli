@@ -147,7 +147,7 @@ def deploy(
         ),
     ),
 ) -> None:
-    """Deploy a verifier or append a new version from a JSON file or stdin.
+    """Publish a check that workflows call to grade agent output (new verifier or version).
 
     The config file is a single JSON object with these fields:
 
