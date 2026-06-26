@@ -3634,3 +3634,55 @@ def test_status_deleted_sibling_reports_modified_local(
     item = result.items[0]
     assert item.state == "modified-local"
     assert item.next_action == "push"
+
+
+@respx.mock
+def test_status_honors_server_ignore_default(tmp_path: Path, tmp_config_paths: ConfigPaths) -> None:
+    """Status threads the server-provided ignore defaults, not just the offline
+    fallback. A brand-new file matching a pattern that exists ONLY in the server
+    config (absent from the baked-in defaults) stays clean, because status fetched
+    and applied the same ignore spec push uploads with. If the server defaults were
+    not threaded through, the file would drift to modified-local under the fallback.
+    """
+    _me_route()
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    body = "server body"
+    slug_dir = target_dir / "alpha"
+    slug_dir.mkdir(parents=True)
+    (slug_dir / "SKILL.md").write_text(body, encoding="utf-8")
+    # `*.tmp` is not in the baked-in DEFAULT_IGNORE_PATTERNS, so only the
+    # server-supplied default can hide this new file.
+    (slug_dir / "scratch.tmp").write_text("scratch", encoding="utf-8")
+    state = SyncState(
+        entries=[
+            SyncEntry(
+                workflow_id="skl_a",
+                slug="alpha",
+                target_path=normalize_target_path(str(target_dir)),
+                synced_version=1,
+                version_token="t1",
+                body_sha256=body_sha256(body),
+                files=[],
+            )
+        ]
+    )
+    respx.get(f"{SERVER}/.well-known/goodeye-client-config").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "workos_client_id": "client_abc",
+                "workos_device_authorization_uri": "https://auth.example.com/device",
+                "workos_token_uri": "https://auth.example.com/token",
+                "ignore_defaults": ["*.tmp"],
+            },
+        )
+    )
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response([_summary_dict(id_="skl_a", name="alpha", token="t1")])
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = status(client, config, state, target_path=None)
+    item = result.items[0]
+    assert item.state == "clean"
+    assert item.next_action == "none"
