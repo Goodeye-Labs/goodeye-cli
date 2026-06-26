@@ -52,6 +52,7 @@ from goodeye_cli.sync import (
     slug_in_target_scope,
     stamp_auto_pull,
     status,
+    tree_push_drifted,
     untracked_local_slugs,
     upsert_entry,
 )
@@ -3539,3 +3540,187 @@ def test_pull_auto_identity_mismatch_raises_and_is_catchable(
             paths=tmp_config_paths,
         )
     assert list_route.call_count == 0
+
+
+@respx.mock
+def test_status_new_sibling_file_reports_modified_local(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    """A brand-new non-ignored file in a tracked directory, with the body and
+    every tracked sibling unchanged, makes status report modified-local, not
+    clean.
+
+    Status shares its drift predicate with push, so the same blind spot that hid
+    a new file from push hid it from status. The server token matches the entry
+    so only the new file can move the classification off clean.
+    """
+    _me_route()
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    body = "server body"
+    slug_dir = target_dir / "alpha"
+    slug_dir.mkdir(parents=True)
+    (slug_dir / "SKILL.md").write_text(body, encoding="utf-8")
+    helper_content = "helper original"
+    (slug_dir / "helper.sh").write_text(helper_content, encoding="utf-8")
+    # Brand-new file, nothing else touched.
+    (slug_dir / "data.csv").write_text("id,value\n1,42\n", encoding="utf-8")
+    state = SyncState(
+        entries=[
+            SyncEntry(
+                workflow_id="skl_a",
+                slug="alpha",
+                target_path=normalize_target_path(str(target_dir)),
+                synced_version=1,
+                version_token="t1",
+                body_sha256=body_sha256(body),
+                files=[
+                    FileState(
+                        path="helper.sh", sha256=body_sha256(helper_content), executable=False
+                    )
+                ],
+            )
+        ]
+    )
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response([_summary_dict(id_="skl_a", name="alpha", token="t1")])
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = status(client, config, state, target_path=None)
+    item = result.items[0]
+    assert item.state == "modified-local"
+    assert item.next_action == "push"
+
+
+@respx.mock
+def test_status_deleted_sibling_reports_modified_local(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    """Deleting a tracked sibling (body and other siblings unchanged) makes status
+    report modified-local, so the pending deletion is visible before a push.
+    """
+    _me_route()
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    body = "server body"
+    slug_dir = target_dir / "alpha"
+    slug_dir.mkdir(parents=True)
+    (slug_dir / "SKILL.md").write_text(body, encoding="utf-8")
+    helper_content = "helper original"
+    (slug_dir / "helper.sh").write_text(helper_content, encoding="utf-8")
+    # data.json is recorded but absent on disk: deleted locally.
+    state = SyncState(
+        entries=[
+            SyncEntry(
+                workflow_id="skl_a",
+                slug="alpha",
+                target_path=normalize_target_path(str(target_dir)),
+                synced_version=1,
+                version_token="t1",
+                body_sha256=body_sha256(body),
+                files=[
+                    FileState(
+                        path="helper.sh", sha256=body_sha256(helper_content), executable=False
+                    ),
+                    FileState(path="data.json", sha256=body_sha256('{"k": 1}'), executable=False),
+                ],
+            )
+        ]
+    )
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response([_summary_dict(id_="skl_a", name="alpha", token="t1")])
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = status(client, config, state, target_path=None)
+    item = result.items[0]
+    assert item.state == "modified-local"
+    assert item.next_action == "push"
+
+
+def test_tree_push_drifted_sibling_deleted_mid_walk_is_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A tracked sibling that is hashed after the walk but deleted in between
+    reports drift instead of raising FileNotFoundError.
+
+    ``_collect_non_ignored_files`` materializes the file set first, then
+    ``tree_push_drifted`` hashes each recorded sibling. A concurrent removal in
+    that window must surface as drift (the file is gone), not crash the read-only
+    status/push drift check with an unhandled error.
+    """
+    target_dir = tmp_path / "skills"
+    target = SyncTarget(path=str(target_dir), scope="owned")
+    body = "server body"
+    slug_dir = target_dir / "alpha"
+    slug_dir.mkdir(parents=True)
+    (slug_dir / "SKILL.md").write_text(body, encoding="utf-8")
+    helper_content = "helper original"
+    (slug_dir / "helper.sh").write_text(helper_content, encoding="utf-8")
+    entry = SyncEntry(
+        workflow_id="skl_a",
+        slug="alpha",
+        target_path=normalize_target_path(str(target_dir)),
+        synced_version=1,
+        version_token="t1",
+        body_sha256=body_sha256(body),
+        files=[FileState(path="helper.sh", sha256=body_sha256(helper_content), executable=False)],
+    )
+
+    def _vanished(_path: Path) -> str:
+        # Simulate the sibling being removed between the walk and the hash.
+        raise FileNotFoundError
+
+    monkeypatch.setattr("goodeye_cli.sync._sibling_sha256", _vanished)
+    assert tree_push_drifted(entry, target, None) is True
+
+
+@respx.mock
+def test_status_honors_server_ignore_default(tmp_path: Path, tmp_config_paths: ConfigPaths) -> None:
+    """Status threads the server-provided ignore defaults, not just the offline
+    fallback. A brand-new file matching a pattern that exists ONLY in the server
+    config (absent from the baked-in defaults) stays clean, because status fetched
+    and applied the same ignore spec push uploads with. If the server defaults were
+    not threaded through, the file would drift to modified-local under the fallback.
+    """
+    _me_route()
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+    body = "server body"
+    slug_dir = target_dir / "alpha"
+    slug_dir.mkdir(parents=True)
+    (slug_dir / "SKILL.md").write_text(body, encoding="utf-8")
+    # `*.tmp` is not in the baked-in DEFAULT_IGNORE_PATTERNS, so only the
+    # server-supplied default can hide this new file.
+    (slug_dir / "scratch.tmp").write_text("scratch", encoding="utf-8")
+    state = SyncState(
+        entries=[
+            SyncEntry(
+                workflow_id="skl_a",
+                slug="alpha",
+                target_path=normalize_target_path(str(target_dir)),
+                synced_version=1,
+                version_token="t1",
+                body_sha256=body_sha256(body),
+                files=[],
+            )
+        ]
+    )
+    respx.get(f"{SERVER}/.well-known/goodeye-client-config").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "workos_client_id": "client_abc",
+                "workos_device_authorization_uri": "https://auth.example.com/device",
+                "workos_token_uri": "https://auth.example.com/token",
+                "ignore_defaults": ["*.tmp"],
+            },
+        )
+    )
+    respx.get(f"{SERVER}/v1/workflows").mock(
+        return_value=_list_response([_summary_dict(id_="skl_a", name="alpha", token="t1")])
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = status(client, config, state, target_path=None)
+    item = result.items[0]
+    assert item.state == "clean"
+    assert item.next_action == "none"

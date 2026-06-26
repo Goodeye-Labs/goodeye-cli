@@ -434,3 +434,240 @@ def test_purpose_none_omits_key_on_reference_and_inline(tmp_path: Path) -> None:
     state_by_path = {s.path: s for s in states}
     assert state_by_path["helper.sh"].purpose is None
     assert state_by_path["brand_new.txt"].purpose is None
+
+
+def _clean_entry(
+    target_dir: Path,
+    *,
+    id_: str,
+    slug: str,
+    body: str,
+    token: str = "tok-1",
+    files: list[FileState] | None = None,
+) -> SyncEntry:
+    """Entry whose recorded body hash matches ``body`` on disk.
+
+    Use when the body is intentionally clean so that only a sibling-tree change
+    (a brand-new file, a deletion, an ignore-spec shift) can make it a push
+    candidate. This is what isolates whole-tree drift detection from body drift.
+    """
+    return SyncEntry(
+        workflow_id=id_,
+        slug=slug,
+        target_path=normalize_target_path(str(target_dir)),
+        synced_version=1,
+        version_token=token,
+        body_sha256=body_sha256(body),
+        files=files or [],
+    )
+
+
+@respx.mock
+def test_push_uploads_brand_new_file_with_no_other_change(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    """A brand-new non-ignored file, with the body and every tracked sibling
+    unchanged, is detected as drift and uploaded.
+
+    This is the reported gap: detection used to look only at tracked siblings,
+    so a new file added to an otherwise-clean directory was never seen and push
+    selected no candidate. The assertion runs through ``push`` end to end, not
+    ``build_files_payload`` in isolation, so it exercises the detection path.
+    """
+    _me_route()
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+
+    slug = "my-workflow"
+    body = _push_body(slug)
+    _write_skill(target_dir, slug, body)
+
+    # An already-tracked sibling, unchanged on disk.
+    helper_content = "#!/bin/bash\necho hello\n"
+    helper_sha = _sha256_text(helper_content)
+    _write_sibling(target_dir, slug, "helper.sh", helper_content)
+
+    # A brand-new, non-ignored file with no recorded row and nothing else changed.
+    new_content = "id,value\n1,42\n"
+    _write_sibling(target_dir, slug, "data.csv", new_content)
+
+    state = SyncState(
+        entries=[
+            _clean_entry(
+                target_dir,
+                id_="skl_new",
+                slug=slug,
+                body=body,
+                files=[FileState(path="helper.sh", sha256=helper_sha, executable=False)],
+            )
+        ]
+    )
+    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=_save_response(workflow_id="skl_new", name=slug)
+    )
+
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
+
+    assert [(i.slug, i.action) for i in result.items] == [(slug, "pushed")]
+    assert save_route.call_count == 1
+    sent = json.loads(save_route.calls[0].request.content)
+    files_by_path = {f["path"]: f for f in sent["files"]}
+    # The brand-new file is uploaded inline.
+    assert "data.csv" in files_by_path
+    assert files_by_path["data.csv"].get("content") == new_content
+    # The unchanged tracked sibling rides along as a reference.
+    assert files_by_path["helper.sh"]["sha256"] == helper_sha
+
+
+@respx.mock
+def test_push_propagates_deleted_sibling(tmp_path: Path, tmp_config_paths: ConfigPaths) -> None:
+    """Deleting a tracked sibling (body and other siblings unchanged) is detected
+    as drift, and the uploaded full snapshot omits the deleted file.
+
+    Push sends a full snapshot, so a file absent from the payload is dropped on
+    the server. Detection has to notice the deletion for that snapshot to be sent
+    at all.
+    """
+    _me_route()
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+
+    slug = "my-workflow"
+    body = _push_body(slug)
+    _write_skill(target_dir, slug, body)
+
+    helper_content = "#!/bin/bash\necho hello\n"
+    helper_sha = _sha256_text(helper_content)
+    _write_sibling(target_dir, slug, "helper.sh", helper_content)
+
+    data_content = '{"key": "value"}'
+    data_sha = _sha256_text(data_content)
+    # data.json is recorded but NOT written to disk: it was deleted locally.
+
+    state = SyncState(
+        entries=[
+            _clean_entry(
+                target_dir,
+                id_="skl_del",
+                slug=slug,
+                body=body,
+                files=[
+                    FileState(path="helper.sh", sha256=helper_sha, executable=False),
+                    FileState(path="data.json", sha256=data_sha, executable=False),
+                ],
+            )
+        ]
+    )
+    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=_save_response(workflow_id="skl_del", name=slug)
+    )
+
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
+
+    assert [(i.slug, i.action) for i in result.items] == [(slug, "pushed")]
+    sent = json.loads(save_route.calls[0].request.content)
+    paths_sent = {f["path"] for f in sent["files"]}
+    assert "helper.sh" in paths_sent
+    assert "data.json" not in paths_sent
+
+
+@respx.mock
+def test_push_ignored_new_file_is_not_drift(tmp_path: Path, tmp_config_paths: ConfigPaths) -> None:
+    """A new file matched by the effective ignore spec does not trigger drift.
+
+    The ``.goodeyeignore`` itself is recorded and unchanged, so the only on-disk
+    change is an ignored file. Detection honors the live ignore spec, so the
+    workflow stays clean and push selects no candidate.
+    """
+    _me_route()
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+
+    slug = "my-workflow"
+    body = _push_body(slug)
+    _write_skill(target_dir, slug, body)
+
+    ignore_content = "*.log\n"
+    ignore_sha = _sha256_text(ignore_content)
+    _write_sibling(target_dir, slug, ".goodeyeignore", ignore_content)
+
+    helper_content = "#!/bin/bash\necho hello\n"
+    helper_sha = _sha256_text(helper_content)
+    _write_sibling(target_dir, slug, "helper.sh", helper_content)
+
+    # The only new on-disk file is ignored by the recorded .goodeyeignore.
+    _write_sibling(target_dir, slug, "debug.log", "noise\n")
+
+    state = SyncState(
+        entries=[
+            _clean_entry(
+                target_dir,
+                id_="skl_ign",
+                slug=slug,
+                body=body,
+                files=[
+                    FileState(path=".goodeyeignore", sha256=ignore_sha, executable=False),
+                    FileState(path="helper.sh", sha256=helper_sha, executable=False),
+                ],
+            )
+        ]
+    )
+
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
+
+    # No candidate, nothing uploaded: the ignored file is not spurious drift.
+    assert result.items == []
+
+
+@respx.mock
+def test_push_uploads_visible_new_file_skips_ignored_new_file(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    """A new visible file triggers drift and uploads; a co-present new ignored
+    file is excluded from the payload.
+
+    Proves detection and upload share the same live ignore spec: the visible
+    file is both seen and sent, the ignored file is neither.
+    """
+    _me_route()
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
+
+    slug = "my-workflow"
+    body = _push_body(slug)
+    _write_skill(target_dir, slug, body)
+
+    ignore_content = "*.log\n"
+    ignore_sha = _sha256_text(ignore_content)
+    _write_sibling(target_dir, slug, ".goodeyeignore", ignore_content)
+
+    # Two new files: one visible, one ignored by the live .goodeyeignore.
+    _write_sibling(target_dir, slug, "notes.md", "# notes\n")
+    _write_sibling(target_dir, slug, "debug.log", "noise\n")
+
+    state = SyncState(
+        entries=[
+            _clean_entry(
+                target_dir,
+                id_="skl_mix",
+                slug=slug,
+                body=body,
+                files=[FileState(path=".goodeyeignore", sha256=ignore_sha, executable=False)],
+            )
+        ]
+    )
+    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=_save_response(workflow_id="skl_mix", name=slug)
+    )
+
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
+
+    assert [(i.slug, i.action) for i in result.items] == [(slug, "pushed")]
+    sent = json.loads(save_route.calls[0].request.content)
+    paths_sent = {f["path"] for f in sent["files"]}
+    assert "notes.md" in paths_sent
+    assert "debug.log" not in paths_sent

@@ -717,6 +717,96 @@ def tracked_sibling_missing(entry: SyncEntry, target: SyncTarget) -> bool:
     return False
 
 
+def _collect_non_ignored_files(
+    skill_dir: Path, ignore_defaults: list[str] | None
+) -> list[tuple[str, Path]]:
+    """Return ``(posix_rel_path, abs_path)`` for every non-ignored sibling file,
+    sorted lexicographically by path.
+
+    Shared by ``build_files_payload`` (which files to upload) and
+    ``tree_push_drifted`` (which files to compare against the recorded manifest)
+    so detection and upload can never disagree on which files count. Mirrors the
+    upload walk exactly: skips symlinks, non-files, ``SKILL.md`` (the body, not a
+    sibling), and any path the effective ignore spec excludes. ``build_ignore_spec``
+    reads ``.goodeyeignore`` fresh from disk, so editing the ignore file shifts the
+    set returned here too.
+    """
+    from goodeye_cli.ignore import build_ignore_spec
+
+    if not skill_dir.is_dir():
+        return []
+    matcher = build_ignore_spec(skill_dir, ignore_defaults)
+    collected: list[tuple[str, Path]] = []
+    for abs_path in sorted(skill_dir.rglob("*")):
+        # Skip symlinks (``is_file``/``read_bytes`` follow links) and non-files,
+        # mirroring the containment defense the upload walk applies.
+        if abs_path.is_symlink() or not abs_path.is_file():
+            continue
+        try:
+            rel = abs_path.relative_to(skill_dir).as_posix()
+        except ValueError:
+            continue
+        if rel == "SKILL.md" or matcher.is_ignored(rel):
+            continue
+        collected.append((rel, abs_path))
+    return collected
+
+
+def tree_push_drifted(
+    entry: SyncEntry, target: SyncTarget, ignore_defaults: list[str] | None
+) -> bool:
+    """Return True if the workflow diverges from its recorded snapshot such that a
+    push is warranted: the body changed, a non-ignored sibling was added or
+    removed, or a tracked sibling's content changed.
+
+    This is the push/status drift predicate, distinct from ``tree_modified_locally``
+    (the conservative pull-side data-loss guard, which treats a missing sibling as
+    "nothing to lose" so it never blocks a deletion). Detection here compares the
+    effective on-disk non-ignored file set against the recorded manifest using the
+    same walk and ignore spec ``build_files_payload`` uploads with, so the two
+    always agree and an edited ``.goodeyeignore`` shifts both together. A push
+    therefore propagates a local sibling deletion to the server's full snapshot,
+    while a plain pull still restores a deleted sibling: the two surfaces are
+    directional by design (push makes the server match local intent, pull makes
+    local match the server).
+
+    Returns False when ``SKILL.md`` is absent: a workflow with no body is not a
+    push candidate (mirrors push skipping a ``None`` body), so a half-deleted or
+    fully-removed directory is handled by the deletion/untracked paths rather than
+    being reported as pushable drift.
+    """
+    body = read_local_body(target, entry.slug)
+    if body is None:
+        return False
+    if body_sha256(body) != entry.body_sha256:
+        return True
+    slug_dir = local_skill_dir(target, entry.slug)
+    on_disk = dict(_collect_non_ignored_files(slug_dir, ignore_defaults))
+    # Filter recorded paths to safe (contained) ones, mirroring
+    # ``tree_modified_locally`` so a pathological escaping manifest path does not
+    # manufacture permanent drift.
+    recorded = {fs.path: fs for fs in entry.files if _is_safe_sibling_path(slug_dir, fs.path)}
+    if set(on_disk) != set(recorded):
+        # A non-ignored path present on disk but absent from the manifest (an
+        # addition, or a file newly exposed by an ignore-spec change) or recorded
+        # but gone from disk (a deletion, or a file newly hidden by an ignore-spec
+        # change) is drift.
+        return True
+
+    # A tracked sibling whose on-disk bytes changed is drift. If the walk saw a
+    # sibling but it was deleted before we could hash it (a concurrent removal in
+    # the walk-to-hash window), treat the vanished file as drift rather than
+    # letting a FileNotFoundError escape: a removed tracked file is exactly the
+    # deletion this predicate exists to report.
+    def _sibling_changed(rel: str, fs: FileState) -> bool:
+        try:
+            return _sibling_sha256(on_disk[rel]) != fs.sha256
+        except FileNotFoundError:
+            return True
+
+    return any(_sibling_changed(rel, fs) for rel, fs in recorded.items())
+
+
 def server_moved(entry: SyncEntry, summary: WorkflowSummary) -> bool:
     """Return whether the registry advanced past the recorded version.
 
@@ -1557,12 +1647,13 @@ def _classify_tracked(
     summary: WorkflowSummary | None,
     *,
     target: SyncTarget,
+    ignore_defaults: list[str] | None,
 ) -> StatusItem:
     """Classify one tracked index entry against its live summary (if any).
 
-    Reads only the local body hash and the summary's ``version_token``: no body
-    is fetched. A summary that is absent or carries an ``archived_at`` means the
-    workflow is gone server-side.
+    Reads only the local body hash, the recorded sibling manifest, and the
+    summary's ``version_token``: no body is fetched. A summary that is absent or
+    carries an ``archived_at`` means the workflow is gone server-side.
     """
     stored_target = normalize_target_path(target.path)
     read_only = entry.effective_role == "view"
@@ -1581,10 +1672,11 @@ def _classify_tracked(
         return base.model_copy(update={"state": "deleted-on-server", "next_action": "resolve"})
 
     base = base.model_copy(update={"server_version": summary.current_version})
-    # Whole-tree drift: a sibling-file edit counts as modified just like a body
-    # edit, so status does not report a directory with un-pushed sibling work as
-    # clean.
-    modified = tree_modified_locally(entry, target)
+    # Whole-tree drift: a sibling-file edit, an added or removed non-ignored file,
+    # or an ignore-spec shift counts as modified just like a body edit, so status
+    # never reports a directory with un-pushed sibling work as clean. This shares
+    # ``tree_push_drifted`` with push so status and push agree on what is dirty.
+    modified = tree_push_drifted(entry, target, ignore_defaults)
     moved = server_moved(entry, summary)
 
     if modified and moved:
@@ -1621,6 +1713,15 @@ def status(
     # but an unstamped index is left untouched (no stamp on a read).
     ensure_identity(client, state, allow_stamp=False)
     targets = _targets_to_process(config, target_path)
+    # Fetch the ignore defaults once so drift detection honors the same effective
+    # ignore spec push uploads with; a failure falls back to local-only patterns
+    # rather than blocking a read-only status pass.
+    ignore_defaults: list[str] | None = None
+    try:
+        cfg = client.get_client_config()
+        ignore_defaults = cfg.ignore_defaults if cfg.ignore_defaults else None
+    except Exception:
+        pass
     # Cache the listing per server-filter string so targets sharing a scope do
     # not each re-list. The filter already encodes the scope (owned vs all).
     listings: dict[str, list[WorkflowSummary]] = {}
@@ -1631,7 +1732,9 @@ def status(
         if summaries is None:
             summaries = _list_all_for_target(client, target, include_archived=True)
             listings[filter_] = summaries
-        result.items.extend(_status_for_target(target, summaries, state))
+        result.items.extend(
+            _status_for_target(target, summaries, state, ignore_defaults=ignore_defaults)
+        )
     return result
 
 
@@ -1639,6 +1742,8 @@ def _status_for_target(
     target: SyncTarget,
     summaries: list[WorkflowSummary],
     state: SyncState,
+    *,
+    ignore_defaults: list[str] | None,
 ) -> list[StatusItem]:
     """Classify every tracked entry and untracked local dir for one target."""
     # Narrow a `selected` target to its globs; owned/all already match the
@@ -1660,7 +1765,9 @@ def _status_for_target(
             continue
         tracked_slugs.add(entry.slug)
         summary = by_id.get(entry.workflow_id)
-        items.append(_classify_tracked(entry, summary, target=target))
+        items.append(
+            _classify_tracked(entry, summary, target=target, ignore_defaults=ignore_defaults)
+        )
 
     for slug in untracked_local_slugs(target):
         if slug in tracked_slugs:
@@ -1857,7 +1964,9 @@ def push(
         pass
 
     try:
-        candidates = _collect_push_candidates(state, targets, slug_args=slug_args)
+        candidates = _collect_push_candidates(
+            state, targets, slug_args=slug_args, ignore_defaults=ignore_defaults
+        )
         # Group the modified-local copies by workflow identity so a workflow
         # mirrored into several targets is pushed once and its siblings kept
         # coherent rather than racing each other to the registry.
@@ -1889,6 +1998,7 @@ def _collect_push_candidates(
     targets: list[SyncTarget],
     *,
     slug_args: set[str],
+    ignore_defaults: list[str] | None,
 ) -> list[_PushCandidate]:
     """Gather every modified-local tracked entry across the processed targets.
 
@@ -1912,10 +2022,11 @@ def _collect_push_candidates(
         local_body = read_local_body(target, entry.slug)
         if local_body is None:
             continue
-        # A candidate when the body or any tracked sibling drifted.
-        body_drifted = is_modified_locally(entry, local_body)
-        tree_drifted = tree_modified_locally(entry, target)
-        if not body_drifted and not tree_drifted:
+        # A candidate when the body or the sibling tree drifted: an added or
+        # removed non-ignored file, a modified tracked sibling, or a file shifted
+        # in or out of scope by an ignore-spec change. ``tree_push_drifted`` honors
+        # the same ignore spec the upload uses, so detection and upload agree.
+        if not tree_push_drifted(entry, target, ignore_defaults):
             continue
         candidates.append(_PushCandidate(entry=entry, target=target, body=local_body))
     return candidates
@@ -2250,31 +2361,13 @@ def build_files_payload(
     base64) is recorded under its true byte sha256 and converges to a reference
     next push.
     """
-    from goodeye_cli.ignore import build_ignore_spec
-
-    matcher = build_ignore_spec(skill_dir, ignore_defaults)
     recorded_map: dict[str, FileState] = {f.path: f for f in (recorded_files or [])}
 
     entries: list[dict[str, Any]] = []
     states: list[FileState] = []
-    for abs_path in sorted(skill_dir.rglob("*")):
-        # Skip symlinks. ``is_file()`` and ``read_bytes()`` both follow links, so
-        # an in-tree symlink pointing outside the skill directory would otherwise
-        # upload the target's bytes. This mirrors the containment defense the pull
-        # side applies when writing siblings back to disk.
-        if abs_path.is_symlink():
-            continue
-        if not abs_path.is_file():
-            continue
-        try:
-            rel = abs_path.relative_to(skill_dir).as_posix()
-        except ValueError:
-            continue
-        if rel == "SKILL.md":
-            continue
-        if matcher.is_ignored(rel):
-            continue
-
+    # The same walk drift detection uses, so the set of files uploaded here is
+    # exactly the set ``tree_push_drifted`` compares against the manifest.
+    for rel, abs_path in _collect_non_ignored_files(skill_dir, ignore_defaults):
         raw = abs_path.read_bytes()
         sha = hashlib.sha256(raw).hexdigest()
         local_executable = bool(os.stat(abs_path).st_mode & 0o100)
