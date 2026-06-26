@@ -38,7 +38,8 @@ def _render_prompt_pack(payload: dict[str, Any]) -> str | None:
 def design(
     json_output: bool = typer.Option(False, "--json", help="Print the full response as JSON."),
 ) -> None:
-    """Print the workflow-designer prompt to stdout.
+    """Create a new workflow from scratch: a guided session that designs the workflow
+    and its verifiers.
 
     Pipe it into your AI assistant to start designing a workflow + verifier:
 

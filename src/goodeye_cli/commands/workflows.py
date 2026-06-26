@@ -159,7 +159,7 @@ def search_cmd(
     json_output: bool = typer.Option(False, "--json", help="Print JSON."),
     table_output: bool = typer.Option(False, "--table", help="Print results as a table."),
 ) -> None:
-    """LLM-ranked search over your workflows (not lexical list filtering)."""
+    """Find a workflow by describing what it does, even if you don't know its name."""
     console = Console()
     mode = resolve_output_mode(json_output=json_output, table_output=table_output)
     with _client(require_auth=True) as client:
@@ -432,7 +432,7 @@ def publish(
         help="Send an empty file tree, removing all sibling files from the workflow.",
     ),
 ) -> None:
-    """Upload a workflow from a markdown file, directory, or stdin when FILE is `-`.
+    """Save a new workflow (or a new version) to your private registry.
 
     When FILE is a directory containing SKILL.md, the full directory tree is
     uploaded: SKILL.md becomes the workflow body and all other non-ignored files
@@ -647,7 +647,7 @@ def archive(
     workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
-    """Archive a workflow you own.
+    """Hide a workflow from your list without deleting it (reversible).
 
     Archiving hides the workflow from list results and grants but keeps all
     versions and content intact. Use `workflows unarchive` to restore.
@@ -844,7 +844,7 @@ def leave(
     workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
-    """Remove your direct grant on a shared workflow."""
+    """Remove your personal access to a workflow someone shared with you (team access stays)."""
     console = Console()
     if not confirm_destructive(f"Leave shared workflow {workflow_id}?", yes=yes):
         console.print("Cancelled.")
@@ -995,7 +995,7 @@ def transfer_ownership(
 def teach(
     workflow_id: str = typer.Argument(..., help="Workflow UUID or name to teach"),
 ) -> None:
-    """Fetch the teach SKILL pack for an existing workflow.
+    """Improve an existing workflow by hand: teach it from examples and corrections you provide.
 
     The command returns the pack content; the agent (or you, working from
     a script) follows the pack to run the teach session and persist the
@@ -1030,7 +1030,8 @@ def optimize(
         max=1000,
     ),
 ) -> None:
-    """Fetch the optimize SKILL pack for an existing workflow.
+    """Automatically improve an existing workflow: runs an optimization loop to lift it
+    against its outcome.
 
     The command returns the pack content; the agent (or you, working from
     a script) follows the pack to run the optimization loop, then persists
@@ -1077,7 +1078,7 @@ def optimize_description(
         max=1000,
     ),
 ) -> None:
-    """Fetch the description-optimize SKILL pack for an existing workflow.
+    """Tune an existing workflow's trigger: sharpen its description so it fires at the right times.
 
     The pack guides an agent (or you, working from a script) through tuning
     the workflow's description, the text that decides when the workflow
@@ -1119,7 +1120,8 @@ def audit(
         ),
     ),
 ) -> None:
-    """Fetch the audit SKILL pack for a workflow or a local skill.
+    """Review an existing workflow against best practices (or a local skill not yet on
+    Goodeye) and fix what it flags.
 
     The command returns the pack content; the agent (or you, working from a
     script) follows the pack to run the audit, then applies the fixes you

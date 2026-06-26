@@ -97,7 +97,8 @@ def login_verify(
         help="Referral code to claim a bonus after signing in.",
     ),
 ) -> None:
-    """Complete non-interactive email-code login and save local credentials."""
+    """Finish a non-interactive sign-in by submitting the emailed code (for AI agents
+    and automation, no browser)."""
     console = Console()
     server = get_server()
     with GoodeyeClient(server) as client:

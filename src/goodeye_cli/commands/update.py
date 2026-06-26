@@ -21,7 +21,7 @@ def update(
         help="Check PyPI for a newer version without installing.",
     ),
 ) -> None:
-    """Update the Goodeye CLI to the latest PyPI release when possible."""
+    """Upgrade the CLI to the latest release."""
     try:
         result = check_for_update(current_version=__version__, timeout=5.0)
     except GoodeyeError as exc:
