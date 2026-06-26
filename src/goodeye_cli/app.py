@@ -60,7 +60,7 @@ app.add_typer(me_cmds.app, name="me", help="View and update your profile.")
 app.add_typer(
     workflows_cmds.app,
     name="workflows",
-    help="Find, run, publish, and share your private workflows.",
+    help="Find, run, save, and share your private workflows.",
 )
 app.add_typer(templates_cmds.app, name="templates", help="Browse, publish, and fork templates.")
 app.add_typer(teams_cmds.app, name="teams", help="Manage teams.")
