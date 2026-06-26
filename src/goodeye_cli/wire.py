@@ -320,6 +320,30 @@ class WorkflowAuditResult(_WireBase):
     workflow_id: str | None = None
 
 
+class DesignCheckCriterion(_WireBase):
+    """One per-criterion authoring result (publish response only)."""
+
+    criterion: str
+    passed: bool
+    reason: str = ""
+
+
+class DesignChecks(_WireBase):
+    """The three viewer-legible authoring check states for a template version.
+
+    Each state is ``met`` / ``not_met`` / ``not_checked``; an older server that
+    omits the field leaves all three at ``not_checked``. The publish response also
+    carries the author-facing per-criterion ``criteria`` breakdown and an audit
+    ``guidance`` pointer; the read endpoints leave those empty.
+    """
+
+    outcome: str = "not_checked"
+    runnable: str = "not_checked"
+    well_formed: str = "not_checked"
+    criteria: list[DesignCheckCriterion] = Field(default_factory=list)
+    guidance: str | None = None
+
+
 class TemplateSummary(_WireBase):
     id: str
     slug: str
@@ -332,6 +356,7 @@ class TemplateSummary(_WireBase):
     tags: list[str] = Field(default_factory=list)
     publishing_handle: str
     safety_verification_status: str = "unverified"
+    design_checks: DesignChecks = Field(default_factory=DesignChecks)
     published_at: datetime | None = None
 
 
@@ -424,6 +449,7 @@ class TemplateDetail(_WireBase):
     publishing_handle: str
     safety_verification_status: str = "unverified"
     safety_verification: TemplateSafetyVerification | None = None
+    design_checks: DesignChecks = Field(default_factory=DesignChecks)
     published_at: datetime | None = None
     unpublished_at: datetime | None = None
     # ISO-8601 timestamp for an archived template, null for a live one.
@@ -440,6 +466,10 @@ class TemplatePublishResult(_WireBase):
     version: int
     publishing_handle: str
     safety_verification: TemplateSafetyVerification | None = None
+    # The authoring checks computed at publish: the three states plus the
+    # author-facing per-criterion breakdown. Defaults to all not_checked on an
+    # older server that does not return the field.
+    design_checks: DesignChecks = Field(default_factory=DesignChecks)
     # Advisory notes about the published template's demo (e.g. a demo image that
     # was referenced but not attached, or a video host that will not embed).
     # Defaults to empty so responses from older servers still parse.
