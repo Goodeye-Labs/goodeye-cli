@@ -63,7 +63,10 @@ def test_templates_list_defaults_to_compact_json_envelope(
         '{"items":[{"id":"tpl_01","slug":"demo","name":"demo","handle":"h",'
         '"owner_user_id":"user_1","latest_version":2,"description":"",'
         '"outcome":"demo outcome","tags":[],"publishing_handle":"h",'
-        '"safety_verification_status":"unverified","published_at":null}],"next_cursor":"next"}\n'
+        '"safety_verification_status":"unverified",'
+        '"design_checks":{"outcome":"not_checked","runnable":"not_checked",'
+        '"well_formed":"not_checked","criteria":[],"guidance":null},'
+        '"published_at":null}],"next_cursor":"next"}\n'
     )
     params = dict(route.calls.last.request.url.params)
     assert params["filter"] == "all"
@@ -825,6 +828,42 @@ def test_templates_publish_clean_shows_verified(tmp_config_paths: ConfigPaths, m
     assert result.exit_code == 0, result.output
     assert "Published" in result.output
     assert "verified" in result.output
+
+
+@respx.mock
+def test_templates_publish_renders_authoring_checks(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.post(f"{SERVER}/v1/templates").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "template_id": "tpl_01",
+                "version": 1,
+                "publishing_handle": "h",
+                "safety_verification": {"status": "clean"},
+                "design_checks": {
+                    "outcome": "met",
+                    "runnable": "not_met",
+                    "well_formed": "not_checked",
+                    "criteria": [
+                        {"criterion": "workflow-io-contract", "passed": False, "reason": "no io"}
+                    ],
+                    "guidance": "Run `goodeye workflows audit` to improve the authoring checks.",
+                },
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "publish", "my-workflow"])
+    assert result.exit_code == 0, result.output
+    assert "Checks:" in result.output
+    assert "Outcome" in result.output
+    assert "not met" in result.output
+    assert "not checked" in result.output
+    # A failed criterion surfaces the audit guidance.
+    assert "audit" in result.output
 
 
 @respx.mock

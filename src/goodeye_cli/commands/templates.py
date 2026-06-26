@@ -31,12 +31,46 @@ from goodeye_cli.output import (
     next_page_hint,
     resolve_output_mode,
 )
-from goodeye_cli.wire import TemplateDetail
+from goodeye_cli.wire import DesignChecks, TemplateDetail
 
 app = typer.Typer(
     help="Browse the public template catalog; publish or fork templates.",
     no_args_is_help=True,
 )
+
+# The three authoring checks, in display order, mapped to their field name.
+_AUTHORING_CHECKS: tuple[tuple[str, str], ...] = (
+    ("outcome", "Outcome"),
+    ("runnable", "Runnable"),
+    ("well_formed", "Well-formed"),
+)
+
+
+def _check_state_markup(state: str) -> str:
+    """Rich markup for one authoring check state, distinct per state."""
+    if state == "met":
+        return "[green]met[/green]"
+    if state == "not_met":
+        return "[yellow]not met[/yellow]"
+    return "[dim]not checked[/dim]"
+
+
+def _render_design_checks(console: Console, checks: DesignChecks) -> None:
+    """Print the three authoring check states on one line."""
+    parts = [
+        f"{label} {_check_state_markup(getattr(checks, key))}" for key, label in _AUTHORING_CHECKS
+    ]
+    console.print("[dim]Checks:[/dim] " + "  ".join(parts))
+
+
+def _design_checks_cell(checks: DesignChecks) -> str:
+    """Compact triplet for the list table: a colored O/R/W per check state."""
+    color = {"met": "green", "not_met": "yellow", "not_checked": "dim"}
+    cells = [
+        f"[{color.get(getattr(checks, key), 'dim')}]{label[0]}[/]"
+        for key, label in _AUTHORING_CHECKS
+    ]
+    return " ".join(cells)
 
 
 def _client(*, require_auth: bool) -> GoodeyeClient:
@@ -111,6 +145,7 @@ def list_cmd(
     table.add_column("Latest", justify="right")
     table.add_column("Outcome")
     table.add_column("Safety")
+    table.add_column("Checks (ORW)", no_wrap=True)
     table.add_column("Published by")
     for item in items:
         status = item.safety_verification_status
@@ -126,6 +161,7 @@ def list_cmd(
             f"v{item.latest_version}",
             item.outcome,
             safety_cell,
+            _design_checks_cell(item.design_checks),
             item.publishing_handle,
         )
     if not items:
@@ -322,6 +358,11 @@ def publish(
             console.print("[dim]Safety:[/dim] [yellow]advisory concerns flagged[/yellow]")
             if sv.advisory_reasoning:
                 console.print(f"[dim]{sv.advisory_reasoning}[/dim]")
+    _render_design_checks(console, result.design_checks)
+    failed = [c for c in result.design_checks.criteria if not c.passed]
+    if failed:
+        guidance = result.design_checks.guidance or "Run `goodeye workflows audit` to improve."
+        console.print(f"[dim]{guidance}[/dim]")
     if result.verifier_exposure_notice:
         console.print(f"[yellow]Note:[/yellow] {result.verifier_exposure_notice}")
     _print_authoring_notes(result.authoring_notes)
