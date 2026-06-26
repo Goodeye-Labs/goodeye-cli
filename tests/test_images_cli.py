@@ -440,6 +440,41 @@ def test_images_update_permanent(tmp_config_paths: ConfigPaths, monkeypatch) -> 
 
 
 @respx.mock
+def test_images_update_rotate_view_secret(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+
+    def check(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode())
+        assert body.get("rotate_view_secret") is True
+        view = dict(_image_dict(visibility="private"))
+        view["url"] = f"{SERVER}/v1/i/tok.png?k=newsecret"
+        return httpx.Response(200, json=view)
+
+    respx.patch(f"{SERVER}/v1/images/{IMAGE_ID}").mock(side_effect=check)
+    result = runner.invoke(app, ["images", "update", IMAGE_ID, "--rotate-view-secret"])
+    assert result.exit_code == 0, result.output
+    assert "view link" in result.output
+
+
+@respx.mock
+def test_images_reset_link(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+
+    def check(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode())
+        assert body.get("rotate_view_secret") is True
+        view = dict(_image_dict(visibility="private"))
+        view["url"] = f"{SERVER}/v1/i/tok.png?k=newsecret"
+        return httpx.Response(200, json=view)
+
+    respx.patch(f"{SERVER}/v1/images/{IMAGE_ID}").mock(side_effect=check)
+    result = runner.invoke(app, ["images", "reset-link", IMAGE_ID])
+    assert result.exit_code == 0, result.output
+    assert "Reset view link" in result.output
+    assert "view link" in result.output
+
+
+@respx.mock
 def test_images_update_public_content_rejected_surfaces_message(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:

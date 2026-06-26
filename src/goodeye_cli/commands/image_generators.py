@@ -308,6 +308,16 @@ def generate(
             "produce consistent results across runs."
         ),
     ),
+    visibility: str = typer.Option(
+        "public",
+        "--visibility",
+        help=(
+            "Access level for the hosted copy of each image: 'public' (default) "
+            "gives a link that opens in any browser; 'private' gives a link only "
+            "you can open and forward, while the plain URL stays locked. Applies "
+            "to authenticated generations; anonymous generations are always public."
+        ),
+    ),
     params_json: str | None = typer.Option(
         None,
         "--params-json",
@@ -412,6 +422,7 @@ def generate(
             workflow_version=workflow_version,
             workflow_ref=workflow_ref,
             run_id=run_id,
+            visibility=visibility,
             anonymous=anonymous,
         )
 
