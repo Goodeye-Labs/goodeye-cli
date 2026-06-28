@@ -292,16 +292,36 @@ def test_workflows_search_table_flag_renders_table(
 def test_workflows_get_markdown_default(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
     respx.get(f"{SERVER}/v1/workflows/example").mock(
-        return_value=httpx.Response(200, text="# hi\nbody")
+        return_value=httpx.Response(200, text="This is your Goodeye workflow\n\n# hi\nbody")
     )
     runner = CliRunner()
     result = runner.invoke(app, ["workflows", "get", "example"])
     assert result.exit_code == 0, result.output
     assert "# hi" in result.output
-    # Wrap with agent-execution markers so the calling agent knows to run it.
-    assert "# Goodeye workflow" in result.output
-    assert "execute the instructions below" in result.output
-    assert "# End of Goodeye workflow." in result.output
+    # The server markdown payload already carries the run guidance directive;
+    # the CLI prints it as-is with no added framing.
+    assert "# Goodeye workflow - execute the instructions below" not in result.stdout
+    assert "# End of Goodeye workflow." not in result.stdout
+    assert result.stdout.lstrip().startswith("This is your Goodeye workflow")
+
+
+@respx.mock
+def test_workflows_get_stdout_has_no_execute_markers(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """CLI prints the server markdown body without adding hardcoded framing markers."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.get(f"{SERVER}/v1/workflows/some-slug").mock(
+        return_value=httpx.Response(
+            200, text="This is your Goodeye workflow\n\n# Body\nDo the thing."
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "get", "some-slug"])
+    assert result.exit_code == 0, result.output
+    assert "# Goodeye workflow - execute the instructions below" not in result.stdout
+    assert "# End of Goodeye workflow." not in result.stdout
+    assert result.stdout.lstrip().startswith("This is your Goodeye workflow")
 
 
 @respx.mock
@@ -330,6 +350,50 @@ def test_workflows_get_json_flag(tmp_config_paths: ConfigPaths, monkeypatch) -> 
     # JSON output skips the agent-execution wrappers so consumers can parse cleanly.
     assert "# Goodeye workflow" not in result.output
     assert "# End of Goodeye workflow." not in result.output
+
+
+@respx.mock
+def test_workflows_get_output_writes_canonical_body(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """`--output` writes the canonical body (front-matter first), not the runbook.
+
+    Stdout streams the server markdown verbatim (run-guidance directive
+    in-band), but the file written by --output must stay editable and
+    re-publishable, so it carries the directive-free body fetched as the
+    structured record.
+    """
+    _setup_creds(monkeypatch, tmp_config_paths)
+    body = (
+        "---\nname: example\ndescription: Do the thing.\noutcome: Ship it.\n---\n"
+        "# Example\n\nDo the thing.\n"
+    )
+    route = respx.get(f"{SERVER}/v1/workflows/example").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "skl_01",
+                "name": "example",
+                "visibility": "public",
+                "version": 1,
+                "body": body,
+                "description": "Do the thing.",
+                "outcome": "Ship it.",
+                "tags": [],
+            },
+        )
+    )
+    out_path = tmp_path / "example.md"
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "get", "example", "-o", str(out_path)])
+    assert result.exit_code == 0, result.output
+    # --output fetches the structured record (JSON), not the runbook markdown.
+    assert route.calls.last.request.headers["accept"] == "application/json"
+    written = out_path.read_text(encoding="utf-8")
+    assert written == body
+    assert written.startswith("---")
+    # The run-guidance directive (added on the markdown route) must not leak in.
+    assert "run it on the user's behalf" not in written
 
 
 @respx.mock

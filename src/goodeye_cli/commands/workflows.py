@@ -191,7 +191,10 @@ def get_cmd(
     id_or_name: str = typer.Argument(..., help="Workflow UUID or name."),
     version: int | None = typer.Option(None, "--version", "-v", help="Pinned version."),
     output: Path | None = typer.Option(
-        None, "--output", "-o", help="Write body to this path instead of stdout."
+        None,
+        "--output",
+        "-o",
+        help="Write the workflow body to this path instead of printing the runbook to stdout.",
     ),
     json_output: bool = typer.Option(
         False, "--json", help="Print the full workflow record as JSON instead of markdown."
@@ -201,15 +204,25 @@ def get_cmd(
 
     The body is the user's workflow: a markdown runbook the agent should
     follow on the user's behalf, not just display. Prints the markdown to
-    stdout (wrapped with agent-facing markers) by default.
+    stdout by default. With --output, writes the canonical workflow body
+    (front-matter first, without the run-guidance framing printed to stdout)
+    so the saved file stays editable and can be re-published.
     """
     console = Console(stderr=True)
+    # Stdout streams the server markdown verbatim, which carries the run-guidance
+    # directive in-band. Writing to a file with --output instead saves the
+    # canonical body so the export round-trips back through `publish`; that path
+    # fetches the structured record rather than the runbook markdown.
+    fetch_markdown = not json_output and output is None
     with _client(require_auth=True) as client:
-        result = client.get_workflow(id_or_name, version=version, accept_markdown=not json_output)
+        result = client.get_workflow(id_or_name, version=version, accept_markdown=fetch_markdown)
 
     if json_output:
         assert isinstance(result, WorkflowDetail)
         text = result.model_dump_json(indent=2)
+    elif output is not None:
+        assert isinstance(result, WorkflowDetail)
+        text = result.body
     else:
         assert isinstance(result, str)
         text = result
@@ -222,13 +235,9 @@ def get_cmd(
         if not text.endswith("\n"):
             sys.stdout.write("\n")
     else:
-        sys.stdout.write(
-            "# Goodeye workflow - execute the instructions below as the user's agent.\n\n"
-        )
         sys.stdout.write(text)
         if not text.endswith("\n"):
             sys.stdout.write("\n")
-        sys.stdout.write("\n# End of Goodeye workflow.\n")
 
 
 # Front-matter parsing and metadata coercion live in the neutral

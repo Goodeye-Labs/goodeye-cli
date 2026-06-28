@@ -214,21 +214,42 @@ def test_templates_search_rejects_json_and_table(
 
 
 @respx.mock
-def test_templates_get_wraps_body_with_agent_markers(
+def test_templates_get_stdout_renders_server_body(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
-    """Stdout is wrapped so the calling agent knows to execute the body."""
+    """CLI outputs the server body verbatim to stdout without adding framing markers."""
     _setup_no_creds(monkeypatch, tmp_config_paths)
     respx.get(f"{SERVER}/v1/templates/@h/example").mock(
-        return_value=httpx.Response(200, text="# template body")
+        return_value=httpx.Response(
+            200, text="This is a Goodeye workflow you are about to run\n\n# template body"
+        )
     )
     runner = CliRunner()
     result = runner.invoke(app, ["templates", "get", "@h/example"])
     assert result.exit_code == 0, result.output
     assert "# template body" in result.output
-    assert "# Goodeye workflow" in result.output
-    assert "execute the instructions below" in result.output
-    assert "# End of Goodeye workflow." in result.output
+    assert "# Goodeye workflow - execute the instructions below" not in result.stdout
+    assert "# End of Goodeye workflow." not in result.stdout
+    assert result.stdout.startswith("This is a Goodeye workflow you are about to run")
+
+
+@respx.mock
+def test_templates_get_stdout_has_no_execute_markers(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """CLI prints the server markdown body without adding hardcoded framing markers."""
+    _setup_no_creds(monkeypatch, tmp_config_paths)
+    respx.get(f"{SERVER}/v1/templates/@h/example").mock(
+        return_value=httpx.Response(
+            200, text="This is a Goodeye workflow you are about to run\n\n# Body\nDo the thing."
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "get", "@h/example"])
+    assert result.exit_code == 0, result.output
+    assert "# Goodeye workflow - execute the instructions below" not in result.stdout
+    assert "# End of Goodeye workflow." not in result.stdout
+    assert result.stdout.startswith("This is a Goodeye workflow you are about to run")
 
 
 @respx.mock
@@ -260,6 +281,51 @@ def test_templates_get_json_skips_wrappers(tmp_config_paths: ConfigPaths, monkey
     assert '"slug": "example"' in result.output
     assert "# Goodeye workflow" not in result.output
     assert "# End of Goodeye workflow." not in result.output
+
+
+@respx.mock
+def test_templates_get_output_writes_body_without_runbook_framing(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """`--output` writes the template body, not the runbook with run-guidance framing.
+
+    Stdout streams the server markdown verbatim (run-guidance directive
+    in-band), but the file written by --output carries just the body, fetched
+    as the structured record so the runbook framing is omitted.
+    """
+    _setup_no_creds(monkeypatch, tmp_config_paths)
+    body = "# Example template\n\nDo the thing.\n"
+    route = respx.get(f"{SERVER}/v1/templates/@h/example").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "tpl_01",
+                "slug": "example",
+                "name": "example",
+                "handle": "h",
+                "owner_user_id": "usr_01",
+                "version": 1,
+                "body": body,
+                "description": "an example",
+                "outcome": "outcome",
+                "tags": [],
+                "publishing_handle": "h",
+                "safety_verification_status": "unverified",
+                "published_at": "2026-01-01T00:00:00+00:00",
+            },
+        )
+    )
+    out_path = tmp_path / "example.md"
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "get", "@h/example", "-o", str(out_path)])
+    assert result.exit_code == 0, result.output
+    # --output fetches the structured record (JSON), not the runbook markdown.
+    assert route.calls.last.request.headers["accept"] == "application/json"
+    written = out_path.read_text(encoding="utf-8")
+    assert written == body
+    # The run-guidance directive (added on the markdown route) must not leak in.
+    assert "run it on the user's behalf" not in written
+    assert "you are about to run on the user's behalf" not in written
 
 
 @respx.mock
