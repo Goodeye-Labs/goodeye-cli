@@ -214,10 +214,10 @@ def test_templates_search_rejects_json_and_table(
 
 
 @respx.mock
-def test_templates_get_wraps_body_with_agent_markers(
+def test_templates_get_stdout_renders_server_body(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
-    """CLI prints the server markdown body without adding hardcoded framing markers."""
+    """CLI outputs the server body verbatim to stdout without adding framing markers."""
     _setup_no_creds(monkeypatch, tmp_config_paths)
     respx.get(f"{SERVER}/v1/templates/@h/example").mock(
         return_value=httpx.Response(
