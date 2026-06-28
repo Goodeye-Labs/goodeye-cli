@@ -284,6 +284,51 @@ def test_templates_get_json_skips_wrappers(tmp_config_paths: ConfigPaths, monkey
 
 
 @respx.mock
+def test_templates_get_output_writes_body_without_runbook_framing(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """`--output` writes the template body, not the runbook with run-guidance framing.
+
+    Stdout streams the server markdown verbatim (run-guidance directive
+    in-band), but the file written by --output carries just the body, fetched
+    as the structured record so the runbook framing is omitted.
+    """
+    _setup_no_creds(monkeypatch, tmp_config_paths)
+    body = "# Example template\n\nDo the thing.\n"
+    route = respx.get(f"{SERVER}/v1/templates/@h/example").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "tpl_01",
+                "slug": "example",
+                "name": "example",
+                "handle": "h",
+                "owner_user_id": "usr_01",
+                "version": 1,
+                "body": body,
+                "description": "an example",
+                "outcome": "outcome",
+                "tags": [],
+                "publishing_handle": "h",
+                "safety_verification_status": "unverified",
+                "published_at": "2026-01-01T00:00:00+00:00",
+            },
+        )
+    )
+    out_path = tmp_path / "example.md"
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "get", "@h/example", "-o", str(out_path)])
+    assert result.exit_code == 0, result.output
+    # --output fetches the structured record (JSON), not the runbook markdown.
+    assert route.calls.last.request.headers["accept"] == "application/json"
+    written = out_path.read_text(encoding="utf-8")
+    assert written == body
+    # The run-guidance directive (added on the markdown route) must not leak in.
+    assert "run it on the user's behalf" not in written
+    assert "you are about to run on the user's behalf" not in written
+
+
+@respx.mock
 def test_templates_get_file_writes_raw_bytes_to_output(
     tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: Path
 ) -> None:

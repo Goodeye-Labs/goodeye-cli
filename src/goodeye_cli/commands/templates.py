@@ -232,7 +232,10 @@ def get_cmd(
     identifier: str = typer.Argument(..., help="Template UUID, @handle/slug, or @handle/slug@vN."),
     version: int | None = typer.Option(None, "--version", "-v", help="Pinned version."),
     output: Path | None = typer.Option(
-        None, "--output", "-o", help="Write body to this path instead of stdout."
+        None,
+        "--output",
+        "-o",
+        help="Write the template body to this path instead of printing the runbook to stdout.",
     ),
     json_output: bool = typer.Option(
         False, "--json", help="Print the full template record as JSON instead of markdown."
@@ -243,12 +246,19 @@ def get_cmd(
     The body is a workflow: a markdown runbook the agent should follow on
     the user's behalf, not just display. Non-owner reads include an
     unverified-template safety banner. Prints the markdown to stdout
-    by default.
+    by default. With --output, writes the template body (safety banner
+    included for non-owner reads, without the run-guidance framing printed
+    to stdout) to the file.
     """
     console = Console(stderr=True)
+    # Stdout streams the server markdown verbatim, which carries the run-guidance
+    # directive in-band. Writing to a file with --output instead saves the
+    # template body; that path fetches the structured record so the saved file
+    # omits the runbook framing.
+    fetch_markdown = not json_output and output is None
     with _client(require_auth=False) as client:
         result, final_identifier = client.get_template_with_redirect(
-            identifier, version=version, accept_markdown=not json_output
+            identifier, version=version, accept_markdown=fetch_markdown
         )
 
     if final_identifier is not None and final_identifier != identifier:
@@ -259,6 +269,9 @@ def get_cmd(
     if json_output:
         assert isinstance(result, TemplateDetail)
         text = result.model_dump_json(indent=2)
+    elif output is not None:
+        assert isinstance(result, TemplateDetail)
+        text = result.body
     else:
         assert isinstance(result, str)
         text = result
