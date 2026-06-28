@@ -201,7 +201,7 @@ def get_cmd(
 
     The body is the user's workflow: a markdown runbook the agent should
     follow on the user's behalf, not just display. Prints the markdown to
-    stdout (wrapped with agent-facing markers) by default.
+    stdout by default.
     """
     console = Console(stderr=True)
     with _client(require_auth=True) as client:

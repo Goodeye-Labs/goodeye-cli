@@ -243,7 +243,7 @@ def get_cmd(
     The body is a workflow: a markdown runbook the agent should follow on
     the user's behalf, not just display. Non-owner reads include an
     unverified-template safety banner. Prints the markdown to stdout
-    (wrapped with agent-facing markers) by default.
+    by default.
     """
     console = Console(stderr=True)
     with _client(require_auth=False) as client:
