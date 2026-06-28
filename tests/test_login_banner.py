@@ -51,9 +51,7 @@ def _env(monkeypatch, tmp_config_paths: ConfigPaths) -> None:
     monkeypatch.delenv("GOODEYE_API_KEY", raising=False)
 
 
-def test_login_banner_interactive_shows_counts(
-    tmp_config_paths: ConfigPaths, monkeypatch
-) -> None:
+def test_login_banner_interactive_shows_counts(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     """Interactive login prints shared-workflow and invitation counts when both are nonzero."""
     _env(monkeypatch, tmp_config_paths)
 
@@ -70,14 +68,10 @@ def test_login_banner_interactive_shows_counts(
             return_value=httpx.Response(200, json=_CLIENT_CONFIG_BODY)
         )
         respx.get(f"{SERVER}/v1/workflows").mock(
-            return_value=httpx.Response(
-                200, json={"items": _WORKFLOW_ITEMS, "next_cursor": None}
-            )
+            return_value=httpx.Response(200, json={"items": _WORKFLOW_ITEMS, "next_cursor": None})
         )
         respx.get(f"{SERVER}/v1/invitations").mock(
-            return_value=httpx.Response(
-                200, json={"items": _INVITATION_ITEMS, "next_cursor": None}
-            )
+            return_value=httpx.Response(200, json={"items": _INVITATION_ITEMS, "next_cursor": None})
         )
 
         runner = CliRunner()
@@ -95,9 +89,7 @@ def test_login_banner_interactive_shows_counts(
     assert "1" in flat  # 1 invitation
 
 
-def test_login_banner_no_tty_prints_nothing(
-    tmp_config_paths: ConfigPaths, monkeypatch
-) -> None:
+def test_login_banner_no_tty_prints_nothing(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     """Non-TTY session produces no banner and does not call the list endpoints."""
     _env(monkeypatch, tmp_config_paths)
 
@@ -114,14 +106,10 @@ def test_login_banner_no_tty_prints_nothing(
             return_value=httpx.Response(200, json=_CLIENT_CONFIG_BODY)
         )
         wf_route = respx.get(f"{SERVER}/v1/workflows").mock(
-            return_value=httpx.Response(
-                200, json={"items": _WORKFLOW_ITEMS, "next_cursor": None}
-            )
+            return_value=httpx.Response(200, json={"items": _WORKFLOW_ITEMS, "next_cursor": None})
         )
         inv_route = respx.get(f"{SERVER}/v1/invitations").mock(
-            return_value=httpx.Response(
-                200, json={"items": _INVITATION_ITEMS, "next_cursor": None}
-            )
+            return_value=httpx.Response(200, json={"items": _INVITATION_ITEMS, "next_cursor": None})
         )
 
         runner = CliRunner()

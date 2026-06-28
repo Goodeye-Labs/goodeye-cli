@@ -33,14 +33,20 @@ def _print_post_login_banner(server: str, api_key: str, console: Console) -> Non
             invitations = client.list_invitations(filter_="received", state="pending")
         n = len(workflows.items)
         m = len(invitations.items)
+        # A present next_cursor means the first page did not exhaust the
+        # results, so the counts are lower bounds; render them as "N+".
+        wf_more = workflows.next_cursor is not None
+        inv_more = invitations.next_cursor is not None
     except Exception:
         return
     if n == 0 and m == 0:
         return
-    wf_noun = "workflow" if n == 1 else "workflows"
-    inv_noun = "invitation" if m == 1 else "invitations"
+    wf_count = f"{n}+" if wf_more else str(n)
+    inv_count = f"{m}+" if inv_more else str(m)
+    wf_noun = "workflow" if n == 1 and not wf_more else "workflows"
+    inv_noun = "invitation" if m == 1 and not inv_more else "invitations"
     console.print(
-        f"You have {n} {wf_noun} shared with you and {m} pending {inv_noun}. "
+        f"You have {wf_count} {wf_noun} shared with you and {inv_count} pending {inv_noun}. "
         "Run 'goodeye workflows list --filter shared-with-me' or "
         "'goodeye invitations list' to see them."
     )
