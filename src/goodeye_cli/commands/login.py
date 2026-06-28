@@ -45,11 +45,17 @@ def _print_post_login_banner(server: str, api_key: str, console: Console) -> Non
     inv_count = f"{m}+" if inv_more else str(m)
     wf_noun = "workflow" if n == 1 and not wf_more else "workflows"
     inv_noun = "invitation" if m == 1 and not inv_more else "invitations"
-    console.print(
-        f"You have {wf_count} {wf_noun} shared with you and {inv_count} pending {inv_noun}. "
-        "Run 'goodeye workflows list --filter shared-with-me' or "
-        "'goodeye invitations list' to see them."
-    )
+    # Name only the nonzero categories so a user with shared workflows but no
+    # invitations (or vice versa) never sees an awkward "0 ..." count.
+    clauses: list[str] = []
+    commands: list[str] = []
+    if n > 0:
+        clauses.append(f"{wf_count} {wf_noun} shared with you")
+        commands.append("'goodeye workflows list --filter shared-with-me'")
+    if m > 0:
+        clauses.append(f"{inv_count} pending {inv_noun}")
+        commands.append("'goodeye invitations list'")
+    console.print(f"You have {' and '.join(clauses)}. Run {' or '.join(commands)} to see them.")
 
 
 def run_interactive_login(server: str, console: Console, referral_code: str | None) -> None:

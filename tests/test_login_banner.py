@@ -89,6 +89,80 @@ def test_login_banner_interactive_shows_counts(tmp_config_paths: ConfigPaths, mo
     assert "1" in flat  # 1 invitation
 
 
+def test_login_banner_only_workflows_omits_zero_invitations(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """With shared workflows but no pending invitations, the banner names only workflows."""
+    _env(monkeypatch, tmp_config_paths)
+
+    with (
+        respx.mock,
+        patch(
+            "goodeye_cli.commands.login.device_code_login",
+            return_value="good_live_EXAMPLE_banner4",
+        ),
+        patch("goodeye_cli.commands.login.save_client_config"),
+        patch("goodeye_cli.commands.login._is_tty", return_value=True),
+    ):
+        respx.get(f"{SERVER}/.well-known/goodeye-client-config").mock(
+            return_value=httpx.Response(200, json=_CLIENT_CONFIG_BODY)
+        )
+        respx.get(f"{SERVER}/v1/workflows").mock(
+            return_value=httpx.Response(200, json={"items": _WORKFLOW_ITEMS, "next_cursor": None})
+        )
+        respx.get(f"{SERVER}/v1/invitations").mock(
+            return_value=httpx.Response(200, json={"items": [], "next_cursor": None})
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["login"])
+
+    assert result.exit_code == 0, result.output
+    flat = " ".join(result.output.split())
+    assert "shared with you" in flat
+    assert "goodeye workflows list --filter shared-with-me" in flat
+    # The zero category is omitted entirely: no "0 ..." count, no invitation copy.
+    assert "pending invitation" not in flat
+    assert "goodeye invitations list" not in flat
+
+
+def test_login_banner_only_invitations_omits_zero_workflows(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """With pending invitations but no shared workflows, the banner names only invitations."""
+    _env(monkeypatch, tmp_config_paths)
+
+    with (
+        respx.mock,
+        patch(
+            "goodeye_cli.commands.login.device_code_login",
+            return_value="good_live_EXAMPLE_banner5",
+        ),
+        patch("goodeye_cli.commands.login.save_client_config"),
+        patch("goodeye_cli.commands.login._is_tty", return_value=True),
+    ):
+        respx.get(f"{SERVER}/.well-known/goodeye-client-config").mock(
+            return_value=httpx.Response(200, json=_CLIENT_CONFIG_BODY)
+        )
+        respx.get(f"{SERVER}/v1/workflows").mock(
+            return_value=httpx.Response(200, json={"items": [], "next_cursor": None})
+        )
+        respx.get(f"{SERVER}/v1/invitations").mock(
+            return_value=httpx.Response(200, json={"items": _INVITATION_ITEMS, "next_cursor": None})
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["login"])
+
+    assert result.exit_code == 0, result.output
+    flat = " ".join(result.output.split())
+    assert "pending invitation" in flat
+    assert "goodeye invitations list" in flat
+    # The zero category is omitted entirely: no "0 ..." count, no workflow copy.
+    assert "shared with you" not in flat
+    assert "goodeye workflows list --filter shared-with-me" not in flat
+
+
 def test_login_banner_no_tty_prints_nothing(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     """Non-TTY session produces no banner and does not call the list endpoints."""
     _env(monkeypatch, tmp_config_paths)
