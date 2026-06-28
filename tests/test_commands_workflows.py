@@ -292,16 +292,36 @@ def test_workflows_search_table_flag_renders_table(
 def test_workflows_get_markdown_default(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
     respx.get(f"{SERVER}/v1/workflows/example").mock(
-        return_value=httpx.Response(200, text="# hi\nbody")
+        return_value=httpx.Response(200, text="This is your Goodeye workflow\n\n# hi\nbody")
     )
     runner = CliRunner()
     result = runner.invoke(app, ["workflows", "get", "example"])
     assert result.exit_code == 0, result.output
     assert "# hi" in result.output
-    # Wrap with agent-execution markers so the calling agent knows to run it.
-    assert "# Goodeye workflow" in result.output
-    assert "execute the instructions below" in result.output
-    assert "# End of Goodeye workflow." in result.output
+    # The server markdown payload already carries the run guidance directive;
+    # the CLI prints it as-is with no added framing.
+    assert "# Goodeye workflow - execute the instructions below" not in result.stdout
+    assert "# End of Goodeye workflow." not in result.stdout
+    assert result.stdout.lstrip().startswith("This is your Goodeye workflow")
+
+
+@respx.mock
+def test_workflows_get_stdout_has_no_execute_markers(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """CLI prints the server markdown body without adding hardcoded framing markers."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.get(f"{SERVER}/v1/workflows/some-slug").mock(
+        return_value=httpx.Response(
+            200, text="This is your Goodeye workflow\n\n# Body\nDo the thing."
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "get", "some-slug"])
+    assert result.exit_code == 0, result.output
+    assert "# Goodeye workflow - execute the instructions below" not in result.stdout
+    assert "# End of Goodeye workflow." not in result.stdout
+    assert result.stdout.lstrip().startswith("This is your Goodeye workflow")
 
 
 @respx.mock

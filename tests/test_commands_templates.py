@@ -217,18 +217,39 @@ def test_templates_search_rejects_json_and_table(
 def test_templates_get_wraps_body_with_agent_markers(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
-    """Stdout is wrapped so the calling agent knows to execute the body."""
+    """CLI prints the server markdown body without adding hardcoded framing markers."""
     _setup_no_creds(monkeypatch, tmp_config_paths)
     respx.get(f"{SERVER}/v1/templates/@h/example").mock(
-        return_value=httpx.Response(200, text="# template body")
+        return_value=httpx.Response(
+            200, text="This is a Goodeye workflow you are about to run\n\n# template body"
+        )
     )
     runner = CliRunner()
     result = runner.invoke(app, ["templates", "get", "@h/example"])
     assert result.exit_code == 0, result.output
     assert "# template body" in result.output
-    assert "# Goodeye workflow" in result.output
-    assert "execute the instructions below" in result.output
-    assert "# End of Goodeye workflow." in result.output
+    assert "# Goodeye workflow - execute the instructions below" not in result.stdout
+    assert "# End of Goodeye workflow." not in result.stdout
+    assert result.stdout.startswith("This is a Goodeye workflow you are about to run")
+
+
+@respx.mock
+def test_templates_get_stdout_has_no_execute_markers(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """CLI prints the server markdown body without adding hardcoded framing markers."""
+    _setup_no_creds(monkeypatch, tmp_config_paths)
+    respx.get(f"{SERVER}/v1/templates/@h/example").mock(
+        return_value=httpx.Response(
+            200, text="This is a Goodeye workflow you are about to run\n\n# Body\nDo the thing."
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "get", "@h/example"])
+    assert result.exit_code == 0, result.output
+    assert "# Goodeye workflow - execute the instructions below" not in result.stdout
+    assert "# End of Goodeye workflow." not in result.stdout
+    assert result.stdout.startswith("This is a Goodeye workflow you are about to run")
 
 
 @respx.mock

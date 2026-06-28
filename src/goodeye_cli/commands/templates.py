@@ -271,13 +271,9 @@ def get_cmd(
         if not text.endswith("\n"):
             sys.stdout.write("\n")
     else:
-        sys.stdout.write(
-            "# Goodeye workflow - execute the instructions below as the user's agent.\n\n"
-        )
         sys.stdout.write(text)
         if not text.endswith("\n"):
             sys.stdout.write("\n")
-        sys.stdout.write("\n# End of Goodeye workflow.\n")
 
 
 @app.command("get-file")
