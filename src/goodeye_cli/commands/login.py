@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import platform
+import sys
 
 import typer
 from rich.console import Console
@@ -11,6 +12,50 @@ from goodeye_cli.auth_flows import device_code_login
 from goodeye_cli.client import GoodeyeClient
 from goodeye_cli.commands.referrals import _maybe_redeem_referral
 from goodeye_cli.config import get_server, save_client_config, save_credentials
+
+
+def _is_tty() -> bool:
+    """Return True when stdout is an interactive terminal."""
+    return sys.stdout.isatty()
+
+
+def _print_post_login_banner(server: str, api_key: str, console: Console) -> None:
+    """Print a one-line nudge about shared workflows and pending invitations.
+
+    Silent and non-blocking: any error, non-TTY session, or offline state
+    results in nothing printed. Login always succeeds regardless.
+    """
+    if not _is_tty():
+        return
+    try:
+        with GoodeyeClient(server, api_key=api_key, timeout=0.9) as client:
+            workflows = client.list_workflows(filter_="shared-with-me")
+            invitations = client.list_invitations(filter_="received", state="pending")
+        n = len(workflows.items)
+        m = len(invitations.items)
+        # A present next_cursor means the first page did not exhaust the
+        # results, so the counts are lower bounds; render them as "N+".
+        wf_more = workflows.next_cursor is not None
+        inv_more = invitations.next_cursor is not None
+    except Exception:
+        return
+    if n == 0 and m == 0:
+        return
+    wf_count = f"{n}+" if wf_more else str(n)
+    inv_count = f"{m}+" if inv_more else str(m)
+    wf_noun = "workflow" if n == 1 and not wf_more else "workflows"
+    inv_noun = "invitation" if m == 1 and not inv_more else "invitations"
+    # Name only the nonzero categories so a user with shared workflows but no
+    # invitations (or vice versa) never sees an awkward "0 ..." count.
+    clauses: list[str] = []
+    commands: list[str] = []
+    if n > 0:
+        clauses.append(f"{wf_count} {wf_noun} shared with you")
+        commands.append("'goodeye workflows list --filter shared-with-me'")
+    if m > 0:
+        clauses.append(f"{inv_count} pending {inv_noun}")
+        commands.append("'goodeye invitations list'")
+    console.print(f"You have {' and '.join(clauses)}. Run {' or '.join(commands)} to see them.")
 
 
 def run_interactive_login(server: str, console: Console, referral_code: str | None) -> None:
@@ -37,6 +82,7 @@ def run_interactive_login(server: str, console: Console, referral_code: str | No
     path = save_credentials({"api_key": api_key, "server": server})
     console.print(f"[green]Signed in.[/green] Credentials saved to {path}")
     _maybe_redeem_referral(server, api_key, referral_code, console)
+    _print_post_login_banner(server, api_key, console)
 
 
 def login(
