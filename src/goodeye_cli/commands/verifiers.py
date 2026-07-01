@@ -165,12 +165,17 @@ def deploy(
       model_settings          Optional {"model": ..., "reasoning_effort": ...}.
                               reasoning_effort: low | medium | high | xhigh.
                               Only these two fields are honored. Supported
-                              model values: openai/gpt-5.4-mini, openai/gpt-5.4,
-                              openai/gpt-5.5, openai/gpt-5.2-pro,
+                              model values: openai/gpt-5.4-nano,
+                              openai/gpt-5.4-mini, openai/gpt-5.4,
+                              openai/gpt-5.4-pro, openai/gpt-5.5,
+                              openai/gpt-5.5-pro, openai/gpt-5.2-pro,
                               anthropic/claude-haiku-4-5,
                               anthropic/claude-sonnet-4-6,
+                              anthropic/claude-sonnet-5,
                               anthropic/claude-opus-4-6,
                               anthropic/claude-opus-4-7,
+                              anthropic/claude-opus-4-8,
+                              anthropic/claude-fable-5,
                               perplexity/sonar-pro,
                               perplexity/sonar-reasoning-pro. Sonar-pro does
                               not accept reasoning_effort; the server drops
