@@ -539,6 +539,58 @@ def test_templates_fork_deprecation_warning_emits_stderr_note(
 
 
 @respx.mock
+def test_templates_fork_next_step_emits_stderr_note(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """The fork response's agent-guidance next_step prints to stderr, not stdout."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.post(f"{SERVER}/v1/templates/fork").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "workflow_id": "wf_01",
+                "slug": "example",
+                "name": "example",
+                "parent_template_id": "tpl_01",
+                "parent_template_version": 1,
+                "version_token": "vt_01",
+                "next_step": "Edit the fork and republish it as your own workflow.",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "fork", "@h/example"])
+    assert result.exit_code == 0, result.output
+    assert "Forked" in result.stdout
+    assert "Edit the fork and republish it as your own workflow." in result.stderr
+    assert "Edit the fork and republish it as your own workflow." not in result.stdout
+
+
+@respx.mock
+def test_templates_fork_no_next_step_is_silent(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    """An older server that omits next_step prints nothing extra."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.post(f"{SERVER}/v1/templates/fork").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "workflow_id": "wf_01",
+                "slug": "example",
+                "name": "example",
+                "parent_template_id": "tpl_01",
+                "parent_template_version": 1,
+                "version_token": "vt_01",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "fork", "@h/example"])
+    assert result.exit_code == 0, result.output
+    assert "Forked" in result.stdout
+    assert result.stderr == ""
+
+
+@respx.mock
 def test_templates_archive_success(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
     route = respx.post(f"{SERVER}/v1/templates/tpl_01/archive").mock(

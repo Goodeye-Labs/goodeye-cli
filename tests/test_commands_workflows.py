@@ -510,6 +510,67 @@ def test_publish_no_authoring_notes_is_silent(tmp_config_paths: ConfigPaths, mon
 
 
 @respx.mock
+def test_publish_next_step_emits_stderr_note(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    """A hand-edited authored fork's next_step is advisory and prints to stderr."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    markdown = (
+        "---\n"
+        "name: fork-with-next-step\n"
+        "description: A hand-edited fork with checks. Use when authoring.\n"
+        "outcome: Help authors finish customizing their fork.\n"
+        "---\n"
+        "# Body\n"
+    )
+    respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "workflow_id": "wf_next",
+                "version": 1,
+                "version_token": "tok-1",
+                "name": "fork-with-next-step",
+                "next_step": "Run `goodeye workflows audit` to confirm your edits still pass.",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "publish", "-"], input=markdown)
+    assert result.exit_code == 0, result.output
+    assert "Saved" in result.stdout
+    assert "Run `goodeye workflows audit` to confirm your edits still pass." in result.stderr
+    assert "Run `goodeye workflows audit` to confirm your edits still pass." not in result.stdout
+
+
+@respx.mock
+def test_publish_no_next_step_is_silent(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    markdown = (
+        "---\n"
+        "name: quiet-save\n"
+        "description: A plain save with no next_step. Use when authoring.\n"
+        "outcome: Keep saving quiet.\n"
+        "---\n"
+        "# Body\n"
+    )
+    respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "workflow_id": "wf_quiet2",
+                "version": 1,
+                "version_token": "tok-1",
+                "name": "quiet-save",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "publish", "-"], input=markdown)
+    assert result.exit_code == 0, result.output
+    assert "Saved" in result.stdout
+    assert result.stderr == ""
+
+
+@respx.mock
 def test_publish_reads_markdown_from_stdin(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
     markdown = (

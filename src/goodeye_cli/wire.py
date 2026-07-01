@@ -216,6 +216,9 @@ class WorkflowSaveResult(_WireBase):
     # referenced but not attached, or a video host that will not embed).
     # Defaults to empty so responses from older servers still parse.
     authoring_notes: list[str] = Field(default_factory=list)
+    # Agent guidance shown only for a hand-edited authored fork with checks.
+    # None when not applicable, or on an older server that predates the field.
+    next_step: str | None = None
 
 
 class SaveWorkflowInput(_WireBase):
@@ -523,6 +526,9 @@ class TemplateForkResult(_WireBase):
     redirected_to_handle: str | None = None
     deprecation_warning: str | None = None
     verifiers: list[WorkflowVerifierRefWire] = Field(default_factory=list)
+    # Agent guidance on making the fork your own. Always present on a current
+    # server; None on an older server that predates the field.
+    next_step: str | None = None
 
 
 class TemplateDeleteResult(_WireBase):
