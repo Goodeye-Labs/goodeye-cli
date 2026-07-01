@@ -353,6 +353,54 @@ def test_workflows_get_json_flag(tmp_config_paths: ConfigPaths, monkeypatch) -> 
 
 
 @respx.mock
+def test_workflows_get_markdown_default_surfaces_run_guidance(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """The default (markdown) fetch path streams the server's run_guidance in-band."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.get(f"{SERVER}/v1/workflows/example").mock(
+        return_value=httpx.Response(
+            200,
+            text="Run this workflow on behalf of the user, then report back.\n\n# hi\nbody",
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "get", "example"])
+    assert result.exit_code == 0, result.output
+    assert "Run this workflow on behalf of the user, then report back." in result.stdout
+
+
+@respx.mock
+def test_workflows_get_json_includes_run_guidance(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """The --json fetch path must not silently drop run_guidance."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.get(f"{SERVER}/v1/workflows/example").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "skl_01",
+                "name": "example",
+                "visibility": "public",
+                "version": 1,
+                "body": "hi",
+                "description": "example workflow",
+                "outcome": "ship more reliable refunds",
+                "tags": ["demo"],
+                "run_guidance": "Run this workflow on behalf of the user, then report back.",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "get", "example", "--json"])
+    assert result.exit_code == 0, result.output
+    assert '"run_guidance": "Run this workflow on behalf of the user, then report back."' in (
+        result.output
+    )
+
+
+@respx.mock
 def test_workflows_get_output_writes_canonical_body(
     tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
