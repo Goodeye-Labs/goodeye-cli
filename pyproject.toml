@@ -1,6 +1,6 @@
 [project]
 name = "goodeye"
-version = "0.21.1"
+version = "0.21.2"
 description = "Goodeye CLI: make your agent meet the standard you set, even on work too subjective for a test, from the terminal."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -36,6 +36,8 @@ dependencies = [
 goodeye = "goodeye_cli.__main__:main"
 
 [project.urls]
+Homepage = "https://goodeye.dev"
+Documentation = "https://goodeye.dev/docs"
 Repository = "https://github.com/Goodeye-Labs/goodeye-cli"
 Issues = "https://github.com/Goodeye-Labs/goodeye-cli/issues"
 
