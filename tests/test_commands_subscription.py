@@ -1,9 +1,8 @@
-"""Tests for the `goodeye subscription ...` subcommand group and the
-top-level `goodeye downgrade` alias.
+"""Tests for the `goodeye subscription ...` subcommand group.
 
 Covers starting a Pro checkout, canceling a subscription, opening the billing
-portal, the alias, and the three new billing error slugs (mirrors the
-referrals command test style).
+portal, and the three new billing error slugs (mirrors the referrals command
+test style).
 """
 
 from __future__ import annotations
@@ -269,29 +268,15 @@ def test_billing_group_is_gone(tmp_config_paths: ConfigPaths, monkeypatch) -> No
     assert "No such command" in result.output
 
 
-# ----- `goodeye downgrade` alias -----
+# ----- `goodeye downgrade` is not a command -----
 
 
-@respx.mock
-def test_downgrade_alias_dispatches_to_subscription_cancel(
-    tmp_config_paths: ConfigPaths, monkeypatch
-) -> None:
-    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE_key")
-    route = respx.post(f"{SERVER}/v1/billing/subscription/cancel").mock(
-        return_value=httpx.Response(200, json=_CANCEL_BODY)
-    )
+def test_downgrade_is_not_a_registered_command() -> None:
+    """`subscription cancel` is the only cancel path; there is no top-level alias."""
     runner = CliRunner()
     result = runner.invoke(app, ["downgrade"])
-    assert result.exit_code == 0, result.output
-    assert route.called
-    assert "active" in result.output
-
-
-def test_downgrade_alias_hidden_from_help() -> None:
-    runner = CliRunner()
-    result = runner.invoke(app, ["--help"])
-    assert result.exit_code == 0
-    assert "downgrade" not in result.output
+    assert result.exit_code != 0
+    assert "No such command" in result.output
 
 
 # ----- error slug mapping -----

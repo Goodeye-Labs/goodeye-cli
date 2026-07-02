@@ -51,11 +51,6 @@ app.command("register-verify")(register_cmd.register_verify)
 app.command("logout")(logout_cmd.logout)
 app.command("update")(update_cmd.update)
 app.command("upgrade", hidden=True)(update_cmd.update)
-# Hidden alias mirroring "upgrade" above: `goodeye downgrade` dispatches to
-# `subscription cancel`. Not `goodeye upgrade`, which is already the
-# `goodeye update` alias (self-update the CLI binary); starting a Pro
-# checkout lives at `goodeye subscription upgrade` instead.
-app.command("downgrade", hidden=True)(subscription_cmds.cancel)
 app.command("whoami")(whoami_cmd.whoami)
 app.command("usage")(usage_cmd.usage)
 app.command("design")(design_cmd.design)

@@ -3,9 +3,7 @@
 Manage your Pro subscription: `upgrade` starts a Stripe checkout to go Pro,
 `cancel` stops it from renewing at the end of the current billing period, and
 `portal` opens the Stripe billing portal to update your payment method or view
-invoices. `goodeye downgrade` is a hidden top-level alias for
-`subscription cancel` (mirrors the existing `goodeye upgrade` -> `update`
-alias).
+invoices.
 """
 
 from __future__ import annotations
