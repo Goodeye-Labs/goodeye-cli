@@ -1,10 +1,11 @@
 """`goodeye subscription ...` subcommand group.
 
 Manage your Pro subscription: `upgrade` starts a Stripe checkout to go Pro,
-and `cancel` stops it from renewing at the end of the current billing period.
-`goodeye downgrade` is a hidden top-level alias for `subscription cancel`
-(mirrors the existing `goodeye upgrade` -> `update` alias). See
-`goodeye billing portal` for updating your payment method or viewing invoices.
+`cancel` stops it from renewing at the end of the current billing period, and
+`portal` opens the Stripe billing portal to update your payment method or view
+invoices. `goodeye downgrade` is a hidden top-level alias for
+`subscription cancel` (mirrors the existing `goodeye upgrade` -> `update`
+alias).
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from rich.console import Console
 from goodeye_cli.client import GoodeyeClient
 from goodeye_cli.config import get_api_key, get_server
 from goodeye_cli.errors import AuthRequired
-from goodeye_cli.wire import CheckoutResult, SubscriptionCancelResult
+from goodeye_cli.wire import CheckoutResult, PortalResult, SubscriptionCancelResult
 
 app = typer.Typer(help="Manage your Pro subscription.", no_args_is_help=True)
 
@@ -93,4 +94,25 @@ def cancel(
         console.print("Your Pro access will end at the close of the current billing period.")
 
 
-__all__ = ["app", "cancel", "upgrade"]
+@app.command("portal")
+def portal(
+    json_output: bool = typer.Option(False, "--json", help="Print results as JSON."),
+) -> None:
+    """Open the Stripe billing portal to manage your subscription and payment method.
+
+    Prints the portal link and opens it in your default browser. Use the
+    portal to update your card, view invoices, or cancel your subscription.
+    """
+    console = Console()
+    with _require_client() as client:
+        result: PortalResult = client.open_billing_portal()
+
+    if json_output:
+        typer.echo(_json.dumps({"portal_url": result.portal_url}))
+    else:
+        console.print(f"Billing portal: [bold]{result.portal_url}[/bold]")
+        console.print("Opening in your browser...")
+    _open_url(result.portal_url)
+
+
+__all__ = ["app", "cancel", "portal", "upgrade"]

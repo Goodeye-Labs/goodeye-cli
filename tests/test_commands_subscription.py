@@ -1,8 +1,9 @@
 """Tests for the `goodeye subscription ...` subcommand group and the
 top-level `goodeye downgrade` alias.
 
-Covers starting a Pro checkout, canceling a subscription, the alias, and the
-three new billing error slugs (mirrors the referrals command test style).
+Covers starting a Pro checkout, canceling a subscription, opening the billing
+portal, the alias, and the three new billing error slugs (mirrors the
+referrals command test style).
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ SERVER = "https://example.test"
 
 _CHECKOUT_BODY = {"checkout_url": "https://checkout.stripe.com/c/pay/EXAMPLE"}
 _CANCEL_BODY = {"status": "active", "access_until": "2026-08-01T00:00:00+00:00"}
+_PORTAL_BODY = {"portal_url": "https://billing.stripe.com/p/session/EXAMPLE"}
 
 
 def _env(monkeypatch, tmp_config_paths: ConfigPaths, *, api_key: str | None) -> None:
@@ -51,9 +53,7 @@ def test_subscription_upgrade_prints_checkout_url_and_opens_browser(
         return_value=httpx.Response(200, json=_CHECKOUT_BODY)
     )
     opened: list[str] = []
-    monkeypatch.setattr(
-        "goodeye_cli.commands.subscription._open_url", lambda url: opened.append(url)
-    )
+    monkeypatch.setattr("goodeye_cli.commands.subscription._open_url", opened.append)
     runner = CliRunner()
     result = runner.invoke(app, ["subscription", "upgrade"])
     assert result.exit_code == 0, result.output
@@ -196,6 +196,79 @@ def test_subscription_cancel_surfaces_no_active_subscription(
     assert isinstance(result.exception, NoActiveSubscription)
 
 
+# ----- subscription portal -----
+
+
+@respx.mock
+def test_subscription_portal_prints_url_and_opens_browser(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE_key")
+    route = respx.post(f"{SERVER}/v1/billing/portal").mock(
+        return_value=httpx.Response(200, json=_PORTAL_BODY)
+    )
+    opened: list[str] = []
+    monkeypatch.setattr("goodeye_cli.commands.subscription._open_url", opened.append)
+    runner = CliRunner()
+    result = runner.invoke(app, ["subscription", "portal"])
+    assert result.exit_code == 0, result.output
+    assert route.called
+    assert _PORTAL_BODY["portal_url"] in result.output
+    assert opened == [_PORTAL_BODY["portal_url"]]
+
+
+@respx.mock
+def test_subscription_portal_json(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE_key")
+    respx.post(f"{SERVER}/v1/billing/portal").mock(
+        return_value=httpx.Response(200, json=_PORTAL_BODY)
+    )
+    monkeypatch.setattr("goodeye_cli.commands.subscription._open_url", lambda url: None)
+    runner = CliRunner()
+    result = runner.invoke(app, ["subscription", "portal", "--json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output.strip())
+    assert data == {"portal_url": _PORTAL_BODY["portal_url"]}
+
+
+def test_subscription_portal_no_credentials(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key=None)
+    runner = CliRunner()
+    result = runner.invoke(app, ["subscription", "portal"])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, AuthRequired)
+
+
+@respx.mock
+def test_subscription_portal_surfaces_billing_not_enabled(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE_key")
+    respx.post(f"{SERVER}/v1/billing/portal").mock(
+        return_value=httpx.Response(
+            400,
+            json={
+                "error": "billing_not_enabled",
+                "message": "self-service subscription billing is not enabled",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["subscription", "portal"])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, BillingNotEnabled)
+
+
+def test_billing_group_is_gone(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    """The portal moved under `subscription`; the standalone `billing` group
+    must no longer exist."""
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE_key")
+    runner = CliRunner()
+    result = runner.invoke(app, ["billing", "portal"])
+    assert result.exit_code != 0
+    assert "No such command" in result.output
+
+
 # ----- `goodeye downgrade` alias -----
 
 
@@ -276,6 +349,17 @@ def test_subscription_command_appears_in_help() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     assert "subscription" in result.output
+    # The standalone `billing` group was folded into `subscription`.
+    assert "billing" not in result.output
+
+
+def test_subscription_portal_listed_in_group_help() -> None:
+    runner = CliRunner()
+    result = runner.invoke(app, ["subscription", "--help"])
+    assert result.exit_code == 0
+    assert "portal" in result.output
+    assert "upgrade" in result.output
+    assert "cancel" in result.output
 
 
 # Avoid "imported but unused" if pytest is reordered.

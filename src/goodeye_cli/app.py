@@ -16,7 +16,6 @@ from goodeye_cli import __version__, sync
 from goodeye_cli import background as background_sync
 from goodeye_cli import update as update_checks
 from goodeye_cli.commands import auth as auth_cmds
-from goodeye_cli.commands import billing as billing_cmds
 from goodeye_cli.commands import design as design_cmd
 from goodeye_cli.commands import image_generators as image_generators_cmds
 from goodeye_cli.commands import images as images_cmds
@@ -81,7 +80,6 @@ app.add_typer(images_cmds.app, name="images", help="Upload and manage hosted ima
 app.add_typer(invitations_cmds.app, name="invitations", help="Manage invitations.")
 app.add_typer(referrals_cmds.app, name="referrals", help="View and redeem referral codes.")
 app.add_typer(subscription_cmds.app, name="subscription", help="Manage your Pro subscription.")
-app.add_typer(billing_cmds.app, name="billing", help="Manage billing for your Pro subscription.")
 
 
 def _version_callback(value: bool) -> None:
