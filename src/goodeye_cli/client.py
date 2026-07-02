@@ -23,6 +23,7 @@ from goodeye_cli.wire import (
     ApiKeyCreated,
     ApiKeyList,
     AuthVerifyResult,
+    CheckoutResult,
     ClaimHandleResult,
     ClientConfig,
     DeviceAuthResponse,
@@ -40,10 +41,12 @@ from goodeye_cli.wire import (
     InvitationDeclineResult,
     InvitationList,
     MeResponse,
+    PortalResult,
     RedeemResponse,
     ReferralStatusResponse,
     RenameHandleResult,
     SafetyCheckResult,
+    SubscriptionCancelResult,
     TeamCreated,
     TeamDeleteResult,
     TeamList,
@@ -294,6 +297,36 @@ class GoodeyeClient:
 
     def revoke_api_key(self, key_id: str) -> None:
         self._request("DELETE", f"/v1/api-keys/{key_id}")
+
+    # ----- billing / Pro subscription -----
+    def start_checkout(self) -> CheckoutResult:
+        """POST /v1/billing/checkout: begin a Pro subscription purchase.
+
+        Returns a Stripe-hosted checkout link. Raises ``already_subscribed``
+        when the caller already holds an active subscription, or
+        ``billing_not_enabled`` when self-service billing is off.
+        """
+        response = self._request("POST", "/v1/billing/checkout", json_body={})
+        return CheckoutResult.model_validate(response.json())
+
+    def cancel_subscription(self) -> SubscriptionCancelResult:
+        """POST /v1/billing/subscription/cancel: cancel at period end.
+
+        Pro access continues through the current paid period; this does not
+        revoke access immediately. Raises ``no_active_subscription`` when
+        there is nothing to cancel, or ``billing_not_enabled`` when
+        self-service billing is off.
+        """
+        response = self._request("POST", "/v1/billing/subscription/cancel", json_body={})
+        return SubscriptionCancelResult.model_validate(response.json())
+
+    def open_billing_portal(self) -> PortalResult:
+        """POST /v1/billing/portal: a Stripe-hosted portal link.
+
+        Raises ``billing_not_enabled`` when self-service billing is off.
+        """
+        response = self._request("POST", "/v1/billing/portal", json_body={})
+        return PortalResult.model_validate(response.json())
 
     # ----- workflows -----
     def list_workflows(

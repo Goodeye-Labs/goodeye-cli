@@ -32,6 +32,25 @@ class MeResponse(_WireBase):
     handle_claimed_at: datetime | None = None
 
 
+class SubscriptionInfo(_WireBase):
+    """Subscription renewal/cancellation state, nested in GET /v1/me/usage.
+
+    Additive: older servers that predate the Pro self-service subscription
+    omit this object entirely, so every field defaults to its "no
+    subscription on file" value. ``status`` is None for a caller who has
+    never subscribed. ``renews_at`` and ``access_until`` carry the same
+    underlying period-end date: ``renews_at`` is meaningful when the
+    subscription is set to auto-renew, ``access_until`` is when to expect
+    paid access to end either way (most relevant once
+    ``cancel_at_period_end`` is true).
+    """
+
+    status: str | None = None
+    renews_at: datetime | None = None
+    cancel_at_period_end: bool = False
+    access_until: datetime | None = None
+
+
 class UsageResponse(_WireBase):
     """Spendable-balance summary returned by GET /v1/me/usage.
 
@@ -51,6 +70,7 @@ class UsageResponse(_WireBase):
     purchased_remaining_usd: str
     referral_remaining_usd: str = "0.00"
     unpaid_balance_usd: str
+    subscription: SubscriptionInfo = Field(default_factory=SubscriptionInfo)
 
 
 class ClaimHandleResult(_WireBase):
@@ -884,3 +904,30 @@ class ImageDetail(_WireBase):
 class ImageList(_WireBase):
     items: list[ImageDetail]
     next_cursor: str | None = None
+
+
+# ----- billing / Pro subscription -----
+
+
+class CheckoutResult(_WireBase):
+    """Response from POST /v1/billing/checkout: a Stripe-hosted checkout link."""
+
+    checkout_url: str
+
+
+class SubscriptionCancelResult(_WireBase):
+    """Response from POST /v1/billing/subscription/cancel.
+
+    ``access_until`` is the ISO-8601 end of the current paid period, or None.
+    Pro access continues until then; canceling does not revoke access
+    immediately.
+    """
+
+    status: str
+    access_until: datetime | None = None
+
+
+class PortalResult(_WireBase):
+    """Response from POST /v1/billing/portal: a Stripe-hosted portal link."""
+
+    portal_url: str

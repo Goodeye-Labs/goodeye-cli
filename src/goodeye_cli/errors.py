@@ -113,6 +113,18 @@ class SafetyVerificationUnavailable(GoodeyeError):
     exit_code: ClassVar[int] = 3
 
 
+class BillingNotEnabled(GoodeyeError):
+    """Self-service Pro subscription billing is not configured on this deployment."""
+
+
+class AlreadySubscribed(GoodeyeError):
+    """Checkout was requested but the caller already has an active subscription."""
+
+
+class NoActiveSubscription(GoodeyeError):
+    """Cancel was requested but there is no cancelable subscription on file."""
+
+
 _SLUG_MAP: dict[str, type[GoodeyeError]] = {
     "auth_required": AuthRequired,
     "invalid_credentials": InvalidCredentials,
@@ -152,6 +164,10 @@ _SLUG_MAP: dict[str, type[GoodeyeError]] = {
     "quota_exceeded": ValidationFailed,
     "image_content_rejected": ValidationFailed,
     "image_screening_unavailable": ServerError,
+    # billing / Pro subscription
+    "billing_not_enabled": BillingNotEnabled,
+    "already_subscribed": AlreadySubscribed,
+    "no_active_subscription": NoActiveSubscription,
 }
 
 
