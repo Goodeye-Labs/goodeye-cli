@@ -437,6 +437,8 @@ def fork(
                 f"  * [cyan]{ref.name}[/cyan] -> {ref.verifier_id}  "
                 f"[dim](role={role}, source_workflow_id={src})[/dim]"
             )
+    if result.next_step:
+        _print_authoring_notes([result.next_step])
 
 
 @app.command("archive")

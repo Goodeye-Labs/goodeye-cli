@@ -595,7 +595,8 @@ def publish(
         f"[green]Saved[/green] {result.name} v{result.version} "
         f"(workflow_id={result.workflow_id}, version_token={result.version_token})"
     )
-    _print_authoring_notes(result.authoring_notes)
+    extra_notes = [result.next_step] if result.next_step else []
+    _print_authoring_notes([*result.authoring_notes, *extra_notes])
 
 
 @app.command("lineage")

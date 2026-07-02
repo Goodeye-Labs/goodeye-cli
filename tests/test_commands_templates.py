@@ -284,6 +284,59 @@ def test_templates_get_json_skips_wrappers(tmp_config_paths: ConfigPaths, monkey
 
 
 @respx.mock
+def test_templates_get_markdown_default_surfaces_run_guidance(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """The default (markdown) fetch path streams the server's run_guidance in-band."""
+    _setup_no_creds(monkeypatch, tmp_config_paths)
+    respx.get(f"{SERVER}/v1/templates/@h/example").mock(
+        return_value=httpx.Response(
+            200,
+            text="Run this template on behalf of the user, then report back.\n\n# template body",
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "get", "@h/example"])
+    assert result.exit_code == 0, result.output
+    assert "Run this template on behalf of the user, then report back." in result.stdout
+
+
+@respx.mock
+def test_templates_get_json_includes_run_guidance(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """The --json fetch path must not silently drop run_guidance."""
+    _setup_no_creds(monkeypatch, tmp_config_paths)
+    respx.get(f"{SERVER}/v1/templates/@h/example").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "tpl_01",
+                "slug": "example",
+                "name": "example",
+                "handle": "h",
+                "owner_user_id": "usr_01",
+                "version": 1,
+                "body": "raw body",
+                "description": "an example",
+                "outcome": "outcome",
+                "tags": [],
+                "publishing_handle": "h",
+                "safety_verification_status": "unverified",
+                "published_at": "2026-01-01T00:00:00+00:00",
+                "run_guidance": "Run this template on behalf of the user, then report back.",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "get", "@h/example", "--json"])
+    assert result.exit_code == 0, result.output
+    assert '"run_guidance": "Run this template on behalf of the user, then report back."' in (
+        result.output
+    )
+
+
+@respx.mock
 def test_templates_get_output_writes_body_without_runbook_framing(
     tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
@@ -536,6 +589,58 @@ def test_templates_fork_deprecation_warning_emits_stderr_note(
     assert "Forked" in result.stdout
     assert "wf_01" in result.stdout
     assert "Forking a deprecated version: known broken" in result.stderr
+
+
+@respx.mock
+def test_templates_fork_next_step_emits_stderr_note(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """The fork response's agent-guidance next_step prints to stderr, not stdout."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.post(f"{SERVER}/v1/templates/fork").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "workflow_id": "wf_01",
+                "slug": "example",
+                "name": "example",
+                "parent_template_id": "tpl_01",
+                "parent_template_version": 1,
+                "version_token": "vt_01",
+                "next_step": "Edit the fork and republish it as your own workflow.",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "fork", "@h/example"])
+    assert result.exit_code == 0, result.output
+    assert "Forked" in result.stdout
+    assert "Edit the fork and republish it as your own workflow." in result.stderr
+    assert "Edit the fork and republish it as your own workflow." not in result.stdout
+
+
+@respx.mock
+def test_templates_fork_no_next_step_is_silent(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    """An older server that omits next_step prints nothing extra."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.post(f"{SERVER}/v1/templates/fork").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "workflow_id": "wf_01",
+                "slug": "example",
+                "name": "example",
+                "parent_template_id": "tpl_01",
+                "parent_template_version": 1,
+                "version_token": "vt_01",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["templates", "fork", "@h/example"])
+    assert result.exit_code == 0, result.output
+    assert "Forked" in result.stdout
+    assert result.stderr == ""
 
 
 @respx.mock

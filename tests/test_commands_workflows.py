@@ -353,6 +353,54 @@ def test_workflows_get_json_flag(tmp_config_paths: ConfigPaths, monkeypatch) -> 
 
 
 @respx.mock
+def test_workflows_get_markdown_default_surfaces_run_guidance(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """The default (markdown) fetch path streams the server's run_guidance in-band."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.get(f"{SERVER}/v1/workflows/example").mock(
+        return_value=httpx.Response(
+            200,
+            text="Run this workflow on behalf of the user, then report back.\n\n# hi\nbody",
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "get", "example"])
+    assert result.exit_code == 0, result.output
+    assert "Run this workflow on behalf of the user, then report back." in result.stdout
+
+
+@respx.mock
+def test_workflows_get_json_includes_run_guidance(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """The --json fetch path must not silently drop run_guidance."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    respx.get(f"{SERVER}/v1/workflows/example").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "skl_01",
+                "name": "example",
+                "visibility": "public",
+                "version": 1,
+                "body": "hi",
+                "description": "example workflow",
+                "outcome": "ship more reliable refunds",
+                "tags": ["demo"],
+                "run_guidance": "Run this workflow on behalf of the user, then report back.",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "get", "example", "--json"])
+    assert result.exit_code == 0, result.output
+    assert '"run_guidance": "Run this workflow on behalf of the user, then report back."' in (
+        result.output
+    )
+
+
+@respx.mock
 def test_workflows_get_output_writes_canonical_body(
     tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
@@ -499,6 +547,67 @@ def test_publish_no_authoring_notes_is_silent(tmp_config_paths: ConfigPaths, mon
                 "version": 1,
                 "version_token": "tok-1",
                 "name": "quiet-demo",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "publish", "-"], input=markdown)
+    assert result.exit_code == 0, result.output
+    assert "Saved" in result.stdout
+    assert result.stderr == ""
+
+
+@respx.mock
+def test_publish_next_step_emits_stderr_note(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    """A hand-edited authored fork's next_step is advisory and prints to stderr."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    markdown = (
+        "---\n"
+        "name: fork-with-next-step\n"
+        "description: A hand-edited fork with checks. Use when authoring.\n"
+        "outcome: Help authors finish customizing their fork.\n"
+        "---\n"
+        "# Body\n"
+    )
+    respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "workflow_id": "wf_next",
+                "version": 1,
+                "version_token": "tok-1",
+                "name": "fork-with-next-step",
+                "next_step": "Run `goodeye workflows audit` to confirm your edits still pass.",
+            },
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["workflows", "publish", "-"], input=markdown)
+    assert result.exit_code == 0, result.output
+    assert "Saved" in result.stdout
+    assert "Run `goodeye workflows audit` to confirm your edits still pass." in result.stderr
+    assert "Run `goodeye workflows audit` to confirm your edits still pass." not in result.stdout
+
+
+@respx.mock
+def test_publish_no_next_step_is_silent(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _setup_creds(monkeypatch, tmp_config_paths)
+    markdown = (
+        "---\n"
+        "name: quiet-save\n"
+        "description: A plain save with no next_step. Use when authoring.\n"
+        "outcome: Keep saving quiet.\n"
+        "---\n"
+        "# Body\n"
+    )
+    respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "workflow_id": "wf_quiet2",
+                "version": 1,
+                "version_token": "tok-1",
+                "name": "quiet-save",
             },
         )
     )
