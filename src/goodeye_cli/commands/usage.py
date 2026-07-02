@@ -25,7 +25,9 @@ def format_usage_summary(body: UsageResponse | dict[str, Any]) -> str:
     """Render the usage payload as a human-readable multi-line string.
 
     The purchased-credits, referral-credits, and unpaid-balance lines only
-    render when their values are positive.
+    render when their values are positive. The subscription block only
+    renders when the caller has (or has had) a subscription on file; a
+    hobby user who has never subscribed sees unchanged output.
     """
     usage = _coerce_usage(body)
     refill_at = usage.monthly_refill_at.strftime("%m/%d/%Y")
@@ -48,6 +50,15 @@ def format_usage_summary(body: UsageResponse | dict[str, Any]) -> str:
         lines.append(f"  refills to ${usage.monthly_refill_usd} on {refill_at}")
     if float(usage.unpaid_balance_usd) > 0:
         lines.append(f"Unpaid: ${usage.unpaid_balance_usd} (deducted from next grant)")
+    subscription = usage.subscription
+    if subscription.status is not None:
+        lines.append(f"Subscription: {subscription.status}")
+        if subscription.cancel_at_period_end and subscription.access_until is not None:
+            access_until = subscription.access_until.strftime("%m/%d/%Y")
+            lines.append(f"  Cancels at period end, access until {access_until}")
+        elif subscription.renews_at is not None:
+            renews_at = subscription.renews_at.strftime("%m/%d/%Y")
+            lines.append(f"  Renews on {renews_at}")
     return "\n".join(lines)
 
 
@@ -81,6 +92,20 @@ def usage(
             "purchased_remaining_usd": result.purchased_remaining_usd,
             "referral_remaining_usd": result.referral_remaining_usd,
             "unpaid_balance_usd": result.unpaid_balance_usd,
+            "subscription": {
+                "status": result.subscription.status,
+                "renews_at": (
+                    result.subscription.renews_at.isoformat()
+                    if result.subscription.renews_at
+                    else None
+                ),
+                "cancel_at_period_end": result.subscription.cancel_at_period_end,
+                "access_until": (
+                    result.subscription.access_until.isoformat()
+                    if result.subscription.access_until
+                    else None
+                ),
+            },
         }
         typer.echo(_json.dumps(payload))
         return

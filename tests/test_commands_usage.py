@@ -124,6 +124,51 @@ def test_format_usage_summary_no_em_dash() -> None:
     assert "—" not in out
 
 
+# ----- subscription block -----
+
+
+def test_format_usage_summary_no_subscription_block_when_absent() -> None:
+    # Older servers omit the field entirely; the wire default (status=None)
+    # keeps the block suppressed so a hobby user's output is unchanged.
+    out = format_usage_summary(_body())
+    assert "Subscription" not in out
+
+
+def test_format_usage_summary_active_subscription_renewing() -> None:
+    out = format_usage_summary(
+        _body(
+            tier="pro",
+            subscription={
+                "status": "active",
+                "renews_at": "2026-08-01T00:00:00+00:00",
+                "cancel_at_period_end": False,
+                "access_until": "2026-08-01T00:00:00+00:00",
+            },
+        )
+    )
+    assert "Subscription: active" in out
+    assert "Renews" in out
+    assert "08/01/2026" in out
+    assert "cancels" not in out.lower()
+
+
+def test_format_usage_summary_subscription_set_to_cancel() -> None:
+    out = format_usage_summary(
+        _body(
+            tier="pro",
+            subscription={
+                "status": "active",
+                "renews_at": "2026-08-01T00:00:00+00:00",
+                "cancel_at_period_end": True,
+                "access_until": "2026-08-01T00:00:00+00:00",
+            },
+        )
+    )
+    assert "Subscription: active" in out
+    assert "cancels" in out.lower()
+    assert "08/01/2026" in out
+
+
 # ----- CLI command tests -----
 
 
@@ -163,6 +208,65 @@ def test_usage_command_json(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     assert data["available_usd"] == "15.00"
     assert data["monthly_refill_usd"] == "20.00"
     assert data["referral_remaining_usd"] == "0.00"
+
+
+@respx.mock
+def test_usage_command_human_renders_subscription_block(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE")
+    respx.get(f"{SERVER}/v1/me/usage").mock(
+        return_value=httpx.Response(
+            200,
+            json=_body(
+                tier="pro",
+                subscription={
+                    "status": "active",
+                    "renews_at": "2026-08-01T00:00:00+00:00",
+                    "cancel_at_period_end": True,
+                    "access_until": "2026-08-01T00:00:00+00:00",
+                },
+            ),
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["usage"])
+    assert result.exit_code == 0, result.output
+    assert "Subscription: active" in result.output
+    assert "08/01/2026" in result.output
+
+
+@respx.mock
+def test_usage_command_json_includes_subscription_block(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE")
+    respx.get(f"{SERVER}/v1/me/usage").mock(
+        return_value=httpx.Response(
+            200,
+            json=_body(
+                tier="pro",
+                subscription={
+                    "status": "active",
+                    "renews_at": "2026-08-01T00:00:00+00:00",
+                    "cancel_at_period_end": False,
+                    "access_until": "2026-08-01T00:00:00+00:00",
+                },
+            ),
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["usage", "--json"])
+    assert result.exit_code == 0, result.output
+    import json
+
+    data = json.loads(result.output.strip().splitlines()[-1])
+    assert data["subscription"] == {
+        "status": "active",
+        "renews_at": "2026-08-01T00:00:00+00:00",
+        "cancel_at_period_end": False,
+        "access_until": "2026-08-01T00:00:00+00:00",
+    }
 
 
 def test_usage_command_without_credentials_errors(
