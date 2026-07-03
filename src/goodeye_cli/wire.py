@@ -931,3 +931,21 @@ class PortalResult(_WireBase):
     """Response from POST /v1/billing/portal: a Stripe-hosted portal link."""
 
     portal_url: str
+
+
+class CreditPurchaseResult(_WireBase):
+    """Response from POST /v1/billing/credits/purchase: a one-time credit top-up.
+
+    ``status`` is ``"charged"`` when a card on file was billed immediately
+    off-session (``amount_usd`` and ``new_balance_usd`` are set), or
+    ``"checkout_required"`` when there was no payment method to charge and a
+    hosted checkout session was created instead (``checkout_url`` is set).
+    ``new_balance_usd`` is a string to preserve the exact decimal value
+    across the wire; ``amount_usd`` is a whole-dollar integer, matching the
+    request.
+    """
+
+    status: str
+    amount_usd: int | None = None
+    new_balance_usd: str | None = None
+    checkout_url: str | None = None

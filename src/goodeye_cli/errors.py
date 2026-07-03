@@ -125,6 +125,14 @@ class NoActiveSubscription(GoodeyeError):
     """Cancel was requested but there is no cancelable subscription on file."""
 
 
+class InvalidAmount(GoodeyeError):
+    """Requested credit purchase amount is outside the allowed range (HTTP 400)."""
+
+
+class NoPaymentMethod(GoodeyeError):
+    """No default payment method on file for an off-session charge (HTTP 409)."""
+
+
 _SLUG_MAP: dict[str, type[GoodeyeError]] = {
     "auth_required": AuthRequired,
     "invalid_credentials": InvalidCredentials,
@@ -168,6 +176,8 @@ _SLUG_MAP: dict[str, type[GoodeyeError]] = {
     "billing_not_enabled": BillingNotEnabled,
     "already_subscribed": AlreadySubscribed,
     "no_active_subscription": NoActiveSubscription,
+    "invalid_amount": InvalidAmount,
+    "no_payment_method": NoPaymentMethod,
 }
 
 

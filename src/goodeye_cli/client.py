@@ -26,6 +26,7 @@ from goodeye_cli.wire import (
     CheckoutResult,
     ClaimHandleResult,
     ClientConfig,
+    CreditPurchaseResult,
     DeviceAuthResponse,
     ExchangeResult,
     ImageDetail,
@@ -327,6 +328,25 @@ class GoodeyeClient:
         """
         response = self._request("POST", "/v1/billing/portal", json_body={})
         return PortalResult.model_validate(response.json())
+
+    def purchase_credits(
+        self, amount_usd: int, *, idempotency_key: str | None = None
+    ) -> CreditPurchaseResult:
+        """POST /v1/billing/credits/purchase: buy a one-time credit top-up.
+
+        Charges the default payment method on file and returns a ``charged``
+        result with the new balance when one exists, or a
+        ``checkout_required`` result with a hosted checkout link otherwise.
+        Raises ``invalid_amount`` when the requested amount is outside the
+        allowed range, or ``billing_not_enabled`` when self-service billing
+        is off. ``idempotency_key`` should be a fresh value per call so a
+        transport-level retry cannot charge the card twice.
+        """
+        body: dict[str, Any] = {"amount_usd": amount_usd}
+        if idempotency_key is not None:
+            body["idempotency_key"] = idempotency_key
+        response = self._request("POST", "/v1/billing/credits/purchase", json_body=body)
+        return CreditPurchaseResult.model_validate(response.json())
 
     # ----- workflows -----
     def list_workflows(
