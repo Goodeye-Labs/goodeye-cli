@@ -10,6 +10,18 @@ import pytest
 from goodeye_cli.config import ConfigPaths
 
 
+@pytest.fixture(autouse=True)
+def _no_real_browser(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Never open a real browser during tests.
+
+    Command groups such as billing open a checkout or portal URL through
+    webbrowser.open. Neutralizing it suite-wide means a test can never pop a
+    browser tab, even if a per-test stub targets the wrong module path. Tests
+    that assert on the opened URL patch their command module's opener directly.
+    """
+    monkeypatch.setattr("webbrowser.open", lambda *args, **kwargs: True)
+
+
 @pytest.fixture
 def tmp_config_paths(tmp_path: Path) -> ConfigPaths:
     """A ConfigPaths rooted at a temp directory, used in place of ~/.config/goodeye."""
