@@ -23,6 +23,7 @@ from goodeye_cli.wire import (
     ApiKeyCreated,
     ApiKeyList,
     AuthVerifyResult,
+    AutoTopUpResult,
     CheckoutResult,
     ClaimHandleResult,
     ClientConfig,
@@ -347,6 +348,53 @@ class GoodeyeClient:
             body["idempotency_key"] = idempotency_key
         response = self._request("POST", "/v1/billing/credits/purchase", json_body=body)
         return CreditPurchaseResult.model_validate(response.json())
+
+    def get_auto_top_up(self) -> AutoTopUpResult:
+        """GET /v1/billing/auto-top-up: your automatic credit top-up configuration.
+
+        Returns the config block plus this month's spend toward it. A caller
+        who has never configured automatic top-ups gets a disabled default
+        block, not an error.
+        """
+        response = self._request("GET", "/v1/billing/auto-top-up")
+        return AutoTopUpResult.model_validate(response.json())
+
+    def configure_auto_top_up(
+        self,
+        *,
+        amount_usd: int,
+        threshold_usd: int | None = None,
+        monthly_cap_usd: int | None = None,
+    ) -> AutoTopUpResult:
+        """PUT /v1/billing/auto-top-up: turn on automatic top-ups and set their terms.
+
+        Requires a default payment method already on file (a manual credit
+        purchase saves one). Returns the resolved config block: the server
+        defaults ``threshold_usd`` to ``amount_usd`` and ``monthly_cap_usd``
+        to four times ``amount_usd`` when either is omitted, and echoes the
+        resolved values back. Re-running this also clears any previously
+        failed automatic top-up state, acting as a retry. Raises
+        ``no_payment_method`` when no default payment method is on file, or
+        ``invalid_amount`` when the amount, threshold, or monthly cap falls
+        outside the allowed range.
+        """
+        body: dict[str, Any] = {"amount_usd": amount_usd}
+        if threshold_usd is not None:
+            body["threshold_usd"] = threshold_usd
+        if monthly_cap_usd is not None:
+            body["monthly_cap_usd"] = monthly_cap_usd
+        response = self._request("PUT", "/v1/billing/auto-top-up", json_body=body)
+        return AutoTopUpResult.model_validate(response.json())
+
+    def disable_auto_top_up(self) -> AutoTopUpResult:
+        """DELETE /v1/billing/auto-top-up: turn off automatic credit top-ups.
+
+        Returns the config block with ``enabled`` false. Leaves the
+        previously configured amount, threshold, and monthly cap in place for
+        a later re-enable.
+        """
+        response = self._request("DELETE", "/v1/billing/auto-top-up")
+        return AutoTopUpResult.model_validate(response.json())
 
     # ----- workflows -----
     def list_workflows(

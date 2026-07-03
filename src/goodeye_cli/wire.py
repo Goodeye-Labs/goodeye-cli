@@ -949,3 +949,26 @@ class CreditPurchaseResult(_WireBase):
     amount_usd: int | None = None
     new_balance_usd: str | None = None
     checkout_url: str | None = None
+
+
+class AutoTopUpResult(_WireBase):
+    """Response from GET/PUT/DELETE /v1/billing/auto-top-up.
+
+    Shared shape across all three routes. USD fields are strings to preserve
+    exact decimal values across the wire. A caller who has never configured
+    automatic top-ups gets a disabled default block (``threshold_usd``,
+    ``amount_usd``, and ``monthly_cap_usd`` all None) rather than an error;
+    disabling later leaves those terms in place for a future re-enable.
+    ``status`` is None when idle, or an in-flight or failure state reported
+    by the server (for example ``"in_progress"``, ``"pending_retry"``, or
+    ``"failed"``); ``last_failure_reason`` explains the most recent failure,
+    when there is one.
+    """
+
+    enabled: bool
+    threshold_usd: str | None = None
+    amount_usd: str | None = None
+    monthly_cap_usd: str | None = None
+    monthly_spent_usd: str | None = None
+    status: str | None = None
+    last_failure_reason: str | None = None

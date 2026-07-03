@@ -3,9 +3,11 @@
 Manage Pro subscription and one-time credit purchases: `plan upgrade` starts a
 Stripe checkout to go Pro, `plan cancel` stops it from renewing at the end of
 the current billing period, `portal` opens the Stripe billing portal to
-update your payment method or view invoices, and `buy-credits` buys a
+update your payment method or view invoices, `buy-credits` buys a
 one-time credit top-up (charging your card on file when one exists, or
-opening a hosted checkout page otherwise).
+opening a hosted checkout page otherwise), and `auto-topup show` / `set` /
+`off` manage automatic credit top-ups that trigger whenever your balance
+drops below a threshold you choose.
 """
 
 from __future__ import annotations
@@ -22,8 +24,9 @@ from rich.console import Console
 from goodeye_cli.client import GoodeyeClient
 from goodeye_cli.commands.prompts import confirm_destructive
 from goodeye_cli.config import get_api_key, get_server
-from goodeye_cli.errors import AuthRequired
+from goodeye_cli.errors import AuthRequired, NoPaymentMethod
 from goodeye_cli.wire import (
+    AutoTopUpResult,
     CheckoutResult,
     CreditPurchaseResult,
     PortalResult,
@@ -34,6 +37,9 @@ app = typer.Typer(help="Manage your Pro subscription and credits.", no_args_is_h
 
 plan_app = typer.Typer(help="Manage your Pro subscription plan.", no_args_is_help=True)
 app.add_typer(plan_app, name="plan")
+
+auto_topup_app = typer.Typer(help="Manage automatic credit top-ups.", no_args_is_help=True)
+app.add_typer(auto_topup_app, name="auto-topup")
 
 
 def _require_client() -> GoodeyeClient:
@@ -178,4 +184,157 @@ def buy_credits(
         _open_url(result.checkout_url)
 
 
-__all__ = ["app", "buy_credits", "cancel", "plan_app", "portal", "upgrade"]
+# ----- billing auto-topup -----
+
+
+def _auto_topup_payload(result: AutoTopUpResult) -> dict[str, Any]:
+    return {
+        "enabled": result.enabled,
+        "threshold_usd": result.threshold_usd,
+        "amount_usd": result.amount_usd,
+        "monthly_cap_usd": result.monthly_cap_usd,
+        "monthly_spent_usd": result.monthly_spent_usd,
+        "status": result.status,
+        "last_failure_reason": result.last_failure_reason,
+    }
+
+
+def _print_auto_topup_terms(console: Console, result: AutoTopUpResult) -> None:
+    """Print the resolved amount/threshold/cap/spend/status lines, if any are set.
+
+    A caller who has never configured automatic top-ups has ``amount_usd``
+    (and every other term) at None, so this prints a short "not configured"
+    line instead of a block of empty-looking fields.
+    """
+    if result.amount_usd is None:
+        console.print("No automatic top-up terms configured yet.")
+        return
+    console.print(f"Top-up amount: [bold]${result.amount_usd}[/bold]")
+    if result.threshold_usd is not None:
+        console.print(f"Triggers when balance drops below: ${result.threshold_usd}")
+    if result.monthly_cap_usd is not None:
+        console.print(f"Monthly cap: ${result.monthly_cap_usd}")
+    if result.monthly_spent_usd is not None:
+        console.print(f"Spent this month: ${result.monthly_spent_usd}")
+    if result.status:
+        console.print(f"Status: {result.status}")
+    if result.last_failure_reason:
+        console.print(f"[yellow]Last failure:[/yellow] {result.last_failure_reason}")
+
+
+@auto_topup_app.command("show")
+def auto_topup_show(
+    json_output: bool = typer.Option(False, "--json", help="Print results as JSON."),
+) -> None:
+    """Show your automatic credit top-up configuration and this month's spend toward it.
+
+    A caller who has never configured automatic top-ups sees a disabled
+    default block, not an error.
+    """
+    console = Console()
+    with _require_client() as client:
+        result: AutoTopUpResult = client.get_auto_top_up()
+
+    if json_output:
+        typer.echo(_json.dumps(_auto_topup_payload(result)))
+        return
+
+    if result.enabled:
+        console.print("[green]Automatic top-up is on.[/green]")
+    else:
+        console.print("Automatic top-up is off.")
+    _print_auto_topup_terms(console, result)
+
+
+@auto_topup_app.command("set")
+def auto_topup_set(
+    amount: int = typer.Option(
+        ...,
+        "--amount",
+        help="Dollar amount to add each time your balance drops below the threshold.",
+    ),
+    threshold: int | None = typer.Option(
+        None,
+        "--threshold",
+        help="Balance, in whole dollars, that triggers a top-up. Defaults to the top-up amount.",
+    ),
+    monthly_cap: int | None = typer.Option(
+        None,
+        "--monthly-cap",
+        help=(
+            "Maximum, in whole dollars, automatic top-ups can spend in a calendar "
+            "month. Defaults to 4x the top-up amount."
+        ),
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Print results as JSON."),
+) -> None:
+    """Turn on automatic credit top-ups and set (or update) their terms.
+
+    Requires a default payment method already on file: automatic top-ups
+    charge that card off-session whenever your balance drops below the
+    threshold. Prints the resolved terms, including any defaults the server
+    filled in (threshold defaults to the top-up amount, monthly cap defaults
+    to 4x the top-up amount). Re-running this also clears any previously
+    failed automatic top-up state, acting as a retry.
+    """
+    console = Console()
+    with _require_client() as client:
+        try:
+            result: AutoTopUpResult = client.configure_auto_top_up(
+                amount_usd=amount, threshold_usd=threshold, monthly_cap_usd=monthly_cap
+            )
+        except NoPaymentMethod as exc:
+            raise NoPaymentMethod(
+                slug=exc.slug,
+                message=exc.message,
+                hint=(
+                    "Automatic top-up charges a saved card off-session, and no "
+                    "payment method is on file. Run `goodeye billing buy-credits` "
+                    "once to save a card, or `goodeye billing portal` to add one."
+                ),
+                status_code=exc.status_code,
+                extras=exc.extras,
+            ) from exc
+
+    if json_output:
+        typer.echo(_json.dumps(_auto_topup_payload(result)))
+        return
+
+    console.print("[green]Automatic top-up is on.[/green]")
+    _print_auto_topup_terms(console, result)
+
+
+@auto_topup_app.command("off")
+def auto_topup_off(
+    json_output: bool = typer.Option(False, "--json", help="Print results as JSON."),
+) -> None:
+    """Turn off automatic credit top-ups.
+
+    Leaves the previously configured amount, threshold, and monthly cap in
+    place, so a later `set` with no flags is not needed to re-enable with the
+    same terms.
+    """
+    console = Console()
+    with _require_client() as client:
+        result: AutoTopUpResult = client.disable_auto_top_up()
+
+    if json_output:
+        typer.echo(_json.dumps(_auto_topup_payload(result)))
+        return
+
+    console.print("[green]Automatic top-up disabled.[/green]")
+    _print_auto_topup_terms(console, result)
+
+
+__all__ = [
+    "app",
+    "auto_topup_app",
+    "auto_topup_off",
+    "auto_topup_set",
+    "auto_topup_show",
+    "buy_credits",
+    "cancel",
+    "plan_app",
+    "portal",
+    "upgrade",
+]

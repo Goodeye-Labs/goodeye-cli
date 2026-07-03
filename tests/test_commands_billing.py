@@ -1,9 +1,9 @@
 """Tests for the `goodeye billing ...` subcommand group.
 
 Covers the `plan upgrade` / `plan cancel` subgroup, the direct `portal` and
-`buy-credits` commands, the billing error slugs, and the fact that the old
-`goodeye subscription ...` group no longer exists (mirrors the referrals
-command test style).
+`buy-credits` commands, the `auto-topup show` / `set` / `off` subgroup, the
+billing error slugs, and the fact that the old `goodeye subscription ...`
+group no longer exists (mirrors the referrals command test style).
 """
 
 from __future__ import annotations
@@ -463,6 +463,230 @@ def test_buy_credits_tolerates_no_payment_method(
     assert isinstance(result.exception, NoPaymentMethod)
 
 
+# ----- billing auto-topup -----
+
+_AUTO_TOPUP_DEFAULT_BODY = {
+    "enabled": False,
+    "threshold_usd": None,
+    "amount_usd": None,
+    "monthly_cap_usd": None,
+    "monthly_spent_usd": "0.00",
+    "status": None,
+    "last_failure_reason": None,
+}
+_AUTO_TOPUP_ENABLED_BODY = {
+    "enabled": True,
+    "threshold_usd": "25.00",
+    "amount_usd": "25.00",
+    "monthly_cap_usd": "100.00",
+    "monthly_spent_usd": "0.00",
+    "status": None,
+    "last_failure_reason": None,
+}
+_AUTO_TOPUP_DISABLED_WITH_TERMS_BODY = {
+    "enabled": False,
+    "threshold_usd": "25.00",
+    "amount_usd": "25.00",
+    "monthly_cap_usd": "100.00",
+    "monthly_spent_usd": "10.00",
+    "status": None,
+    "last_failure_reason": None,
+}
+
+
+@respx.mock
+def test_auto_topup_show_default_block_prints_off_and_not_configured(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE_key")
+    route = respx.get(f"{SERVER}/v1/billing/auto-top-up").mock(
+        return_value=httpx.Response(200, json=_AUTO_TOPUP_DEFAULT_BODY)
+    )
+    result = runner.invoke(app, ["billing", "auto-topup", "show"])
+    assert result.exit_code == 0, result.output
+    assert route.called
+    assert "off" in result.output.lower()
+    assert "configured yet" in result.output.lower()
+
+
+@respx.mock
+def test_auto_topup_show_default_block_json(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE_key")
+    respx.get(f"{SERVER}/v1/billing/auto-top-up").mock(
+        return_value=httpx.Response(200, json=_AUTO_TOPUP_DEFAULT_BODY)
+    )
+    result = runner.invoke(app, ["billing", "auto-topup", "show", "--json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output.strip())
+    assert data == _AUTO_TOPUP_DEFAULT_BODY
+
+
+@respx.mock
+def test_auto_topup_show_enabled_prints_terms(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE_key")
+    respx.get(f"{SERVER}/v1/billing/auto-top-up").mock(
+        return_value=httpx.Response(200, json=_AUTO_TOPUP_ENABLED_BODY)
+    )
+    result = runner.invoke(app, ["billing", "auto-topup", "show"])
+    assert result.exit_code == 0, result.output
+    assert "on" in result.output.lower()
+    assert "25.00" in result.output
+    assert "100.00" in result.output
+
+
+@respx.mock
+def test_auto_topup_show_surfaces_failure_status(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE_key")
+    body = {**_AUTO_TOPUP_ENABLED_BODY, "status": "failed", "last_failure_reason": "card declined"}
+    respx.get(f"{SERVER}/v1/billing/auto-top-up").mock(return_value=httpx.Response(200, json=body))
+    result = runner.invoke(app, ["billing", "auto-topup", "show"])
+    assert result.exit_code == 0, result.output
+    assert "failed" in result.output.lower()
+    assert "card declined" in result.output
+
+
+def test_auto_topup_show_no_credentials(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key=None)
+    result = runner.invoke(app, ["billing", "auto-topup", "show"])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, AuthRequired)
+
+
+@respx.mock
+def test_auto_topup_set_amount_only_prints_resolved_terms(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE_key")
+    route = respx.put(f"{SERVER}/v1/billing/auto-top-up").mock(
+        return_value=httpx.Response(200, json=_AUTO_TOPUP_ENABLED_BODY)
+    )
+    result = runner.invoke(app, ["billing", "auto-topup", "set", "--amount", "25"])
+    assert result.exit_code == 0, result.output
+    assert route.called
+    body = json.loads(route.calls.last.request.content.decode())
+    assert body == {"amount_usd": 25}
+    assert "on" in result.output.lower()
+    assert "25.00" in result.output
+    assert "100.00" in result.output
+
+
+@respx.mock
+def test_auto_topup_set_with_threshold_and_cap_sends_full_body(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE_key")
+    route = respx.put(f"{SERVER}/v1/billing/auto-top-up").mock(
+        return_value=httpx.Response(200, json=_AUTO_TOPUP_ENABLED_BODY)
+    )
+    result = runner.invoke(
+        app,
+        [
+            "billing",
+            "auto-topup",
+            "set",
+            "--amount",
+            "25",
+            "--threshold",
+            "10",
+            "--monthly-cap",
+            "100",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    body = json.loads(route.calls.last.request.content.decode())
+    assert body == {"amount_usd": 25, "threshold_usd": 10, "monthly_cap_usd": 100}
+
+
+@respx.mock
+def test_auto_topup_set_json(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE_key")
+    respx.put(f"{SERVER}/v1/billing/auto-top-up").mock(
+        return_value=httpx.Response(200, json=_AUTO_TOPUP_ENABLED_BODY)
+    )
+    result = runner.invoke(app, ["billing", "auto-topup", "set", "--amount", "25", "--json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output.strip())
+    assert data == _AUTO_TOPUP_ENABLED_BODY
+
+
+def test_auto_topup_set_no_credentials(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key=None)
+    result = runner.invoke(app, ["billing", "auto-topup", "set", "--amount", "25"])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, AuthRequired)
+
+
+@respx.mock
+def test_auto_topup_set_surfaces_no_payment_method_with_helpful_hint(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE_key")
+    respx.put(f"{SERVER}/v1/billing/auto-top-up").mock(
+        return_value=httpx.Response(
+            409,
+            json={"error": "no_payment_method", "message": "no default payment method on file"},
+        )
+    )
+    result = runner.invoke(app, ["billing", "auto-topup", "set", "--amount", "25"])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, NoPaymentMethod)
+    assert result.exception.hint is not None
+    assert "buy-credits" in result.exception.hint
+    assert "portal" in result.exception.hint
+
+
+@respx.mock
+def test_auto_topup_set_surfaces_invalid_amount(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE_key")
+    respx.put(f"{SERVER}/v1/billing/auto-top-up").mock(
+        return_value=httpx.Response(
+            400,
+            json={
+                "error": "invalid_amount",
+                "message": "top-up amount must be between $5.00 and $500.00 (got $1)",
+            },
+        )
+    )
+    result = runner.invoke(app, ["billing", "auto-topup", "set", "--amount", "1"])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, InvalidAmount)
+
+
+@respx.mock
+def test_auto_topup_off_prints_disabled_confirmation(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE_key")
+    route = respx.delete(f"{SERVER}/v1/billing/auto-top-up").mock(
+        return_value=httpx.Response(200, json=_AUTO_TOPUP_DISABLED_WITH_TERMS_BODY)
+    )
+    result = runner.invoke(app, ["billing", "auto-topup", "off"])
+    assert result.exit_code == 0, result.output
+    assert route.called
+    assert "disabled" in result.output.lower()
+
+
+@respx.mock
+def test_auto_topup_off_json(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE_key")
+    respx.delete(f"{SERVER}/v1/billing/auto-top-up").mock(
+        return_value=httpx.Response(200, json=_AUTO_TOPUP_DISABLED_WITH_TERMS_BODY)
+    )
+    result = runner.invoke(app, ["billing", "auto-topup", "off", "--json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output.strip())
+    assert data == _AUTO_TOPUP_DISABLED_WITH_TERMS_BODY
+
+
+def test_auto_topup_off_no_credentials(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    _env(monkeypatch, tmp_config_paths, api_key=None)
+    result = runner.invoke(app, ["billing", "auto-topup", "off"])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, AuthRequired)
+
+
 # ----- `goodeye subscription` no longer exists -----
 
 
@@ -572,6 +796,7 @@ def test_billing_group_help_lists_plan_portal_and_buy_credits() -> None:
     assert "plan" in result.output
     assert "portal" in result.output
     assert "buy-credits" in result.output
+    assert "auto-topup" in result.output
 
 
 def test_billing_plan_group_help_lists_upgrade_and_cancel() -> None:
@@ -579,6 +804,14 @@ def test_billing_plan_group_help_lists_upgrade_and_cancel() -> None:
     assert result.exit_code == 0
     assert "upgrade" in result.output
     assert "cancel" in result.output
+
+
+def test_billing_auto_topup_group_help_lists_show_set_off() -> None:
+    result = runner.invoke(app, ["billing", "auto-topup", "--help"])
+    assert result.exit_code == 0
+    assert "show" in result.output
+    assert "set" in result.output
+    assert "off" in result.output
 
 
 # Avoid "imported but unused" if pytest is reordered.
