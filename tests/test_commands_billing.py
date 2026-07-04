@@ -23,6 +23,7 @@ from goodeye_cli.errors import (
     AlreadySubscribed,
     AuthRequired,
     BillingNotEnabled,
+    ChargeFailed,
     InvalidAmount,
     NoActiveSubscription,
     NoPaymentMethod,
@@ -339,6 +340,25 @@ def test_buy_credits_human_decline_exits_zero_without_calling_server(
         result = runner.invoke(app, ["billing", "buy-credits", "--amount", "25"])
     assert result.exit_code == 0, result.output
     assert "Cancelled" in result.output
+
+
+def test_buy_credits_confirmation_prompt_is_card_neutral(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """The prompt must read accurately whether or not a card is on file.
+
+    Without a saved card the server returns a hosted checkout link and charges
+    nothing, so the confirmation must not assert a card will be charged.
+    """
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE_key")
+    with mock.patch(
+        "goodeye_cli.commands.billing.confirm_destructive", return_value=False
+    ) as confirm:
+        result = runner.invoke(app, ["billing", "buy-credits", "--amount", "25"])
+    assert result.exit_code == 0, result.output
+    prompt = confirm.call_args.args[0]
+    assert "card on file" not in prompt
+    assert "25" in prompt
 
 
 @respx.mock
@@ -798,6 +818,30 @@ def test_error_slug_no_payment_method() -> None:
     )
     assert isinstance(err, NoPaymentMethod)
     assert err.slug == "no_payment_method"
+
+
+def test_error_slug_charge_failed() -> None:
+    err = error_from_body(
+        402,
+        {
+            "error": "charge_failed",
+            "message": "charge did not succeed (status=requires_payment_method)",
+        },
+    )
+    assert isinstance(err, ChargeFailed)
+    assert err.slug == "charge_failed"
+
+
+def test_error_slug_card_authentication_required() -> None:
+    err = error_from_body(
+        402,
+        {
+            "error": "card_authentication_required",
+            "message": "the card requires additional authentication",
+        },
+    )
+    assert isinstance(err, ChargeFailed)
+    assert err.slug == "card_authentication_required"
 
 
 # ----- module-level guards -----

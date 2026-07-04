@@ -133,6 +133,17 @@ class NoPaymentMethod(GoodeyeError):
     """No default payment method on file for an off-session charge (HTTP 409)."""
 
 
+class ChargeFailed(GoodeyeError):
+    """An off-session credit-purchase charge did not succeed (HTTP 402, slug=charge_failed).
+
+    The card on file was declined or otherwise could not complete the charge.
+    Retry with a different card, or run `goodeye billing portal` to update the
+    payment method on file. Covers ``card_authentication_required`` too, the
+    variant where the card needs interactive authentication that cannot happen
+    off-session.
+    """
+
+
 _SLUG_MAP: dict[str, type[GoodeyeError]] = {
     "auth_required": AuthRequired,
     "invalid_credentials": InvalidCredentials,
@@ -178,6 +189,8 @@ _SLUG_MAP: dict[str, type[GoodeyeError]] = {
     "no_active_subscription": NoActiveSubscription,
     "invalid_amount": InvalidAmount,
     "no_payment_method": NoPaymentMethod,
+    "charge_failed": ChargeFailed,
+    "card_authentication_required": ChargeFailed,
 }
 
 

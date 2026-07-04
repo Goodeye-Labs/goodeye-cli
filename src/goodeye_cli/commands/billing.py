@@ -154,7 +154,7 @@ def buy_credits(
     charge your card twice.
     """
     console = Console()
-    if not confirm_destructive(f"Charge ${amount} to your card on file?", yes=yes):
+    if not confirm_destructive(f"Buy ${amount} in credits?", yes=yes):
         console.print("Cancelled.")
         raise typer.Exit(code=0)
 
