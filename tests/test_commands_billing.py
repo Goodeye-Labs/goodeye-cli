@@ -2,8 +2,8 @@
 
 Covers the `plan upgrade` / `plan cancel` subgroup, the direct `portal` and
 `buy-credits` commands, the `auto-topup show` / `set` / `off` subgroup, the
-billing error slugs, and the fact that the old `goodeye subscription ...`
-group no longer exists (mirrors the referrals command test style).
+billing error slugs, and the deprecated `goodeye subscription ...` alias that
+forwards to `billing` and prints a deprecation notice on stderr.
 """
 
 from __future__ import annotations
@@ -687,22 +687,56 @@ def test_auto_topup_off_no_credentials(tmp_config_paths: ConfigPaths, monkeypatc
     assert isinstance(result.exception, AuthRequired)
 
 
-# ----- `goodeye subscription` no longer exists -----
+# ----- deprecated `goodeye subscription` alias -----
 
 
-def test_subscription_group_is_gone(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
-    """The old `subscription` group name was hard-dropped in favor of `billing`."""
+@respx.mock
+def test_subscription_portal_forwards_with_deprecation_notice(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """`subscription portal` still works: it forwards to `billing portal` and warns."""
     _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE_key")
+    route = respx.post(f"{SERVER}/v1/billing/portal").mock(
+        return_value=httpx.Response(200, json=_PORTAL_BODY)
+    )
+    monkeypatch.setattr("goodeye_cli.commands.billing._open_url", lambda url: None)
     result = runner.invoke(app, ["subscription", "portal"])
-    assert result.exit_code != 0
-    assert "No such command" in result.output
+    assert result.exit_code == 0, result.output
+    assert route.called
+    assert _PORTAL_BODY["portal_url"] in result.output
+    assert "deprecated" in result.stderr
 
 
-def test_subscription_upgrade_is_gone(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+@respx.mock
+def test_subscription_upgrade_forwards_with_deprecation_notice(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """`subscription upgrade` forwards to `billing plan upgrade` and warns."""
     _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE_key")
+    route = respx.post(f"{SERVER}/v1/billing/checkout").mock(
+        return_value=httpx.Response(200, json=_CHECKOUT_BODY)
+    )
+    monkeypatch.setattr("goodeye_cli.commands.billing._open_url", lambda url: None)
     result = runner.invoke(app, ["subscription", "upgrade"])
-    assert result.exit_code != 0
-    assert "No such command" in result.output
+    assert result.exit_code == 0, result.output
+    assert route.called
+    assert _CHECKOUT_BODY["checkout_url"] in result.output
+    assert "deprecated" in result.stderr
+
+
+@respx.mock
+def test_subscription_cancel_forwards_with_deprecation_notice(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """`subscription cancel` forwards to `billing plan cancel` and warns."""
+    _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE_key")
+    route = respx.post(f"{SERVER}/v1/billing/subscription/cancel").mock(
+        return_value=httpx.Response(200, json=_CANCEL_BODY)
+    )
+    result = runner.invoke(app, ["subscription", "cancel"])
+    assert result.exit_code == 0, result.output
+    assert route.called
+    assert "deprecated" in result.stderr
 
 
 # ----- `goodeye downgrade` is not a command -----

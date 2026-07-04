@@ -79,6 +79,16 @@ app.add_typer(
     name="billing",
     help="Manage your Pro subscription and credits.",
 )
+# Deprecated alias for the reorganized subscription commands: kept working (and
+# hidden from top-level help) so scripts using the v0.22.0 `goodeye
+# subscription upgrade / cancel / portal` keep running while a stderr notice
+# points them at `goodeye billing`. Remove in a later release.
+app.add_typer(
+    billing_cmds.subscription_app,
+    name="subscription",
+    hidden=True,
+    help="Deprecated: use `goodeye billing` instead.",
+)
 
 
 def _version_callback(value: bool) -> None:

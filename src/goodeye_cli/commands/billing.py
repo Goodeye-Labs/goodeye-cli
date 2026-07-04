@@ -326,6 +326,54 @@ def auto_topup_off(
     _print_auto_topup_terms(console, result)
 
 
+# ----- deprecated `goodeye subscription ...` alias -----
+
+# The `subscription` group shipped in v0.22.0 with `upgrade` / `cancel` /
+# `portal`. Those commands were reorganized under `billing` (`billing plan
+# upgrade`, `billing plan cancel`, `billing portal`). The old group is kept
+# working here as a thin forwarding alias that announces the move on stderr, so
+# a released command does not disappear from under existing scripts. Remove it
+# in a later release.
+subscription_app = typer.Typer(
+    help="Deprecated: use `goodeye billing` instead.",
+    no_args_is_help=True,
+)
+
+
+def _warn_subscription_deprecated(new_command: str) -> None:
+    stderr = Console(stderr=True)
+    stderr.print(
+        f"[yellow]`goodeye subscription` is deprecated; use `{new_command}` instead.[/yellow]"
+    )
+
+
+@subscription_app.command("upgrade")
+def subscription_upgrade(
+    json_output: bool = typer.Option(False, "--json", help="Print results as JSON."),
+) -> None:
+    """Deprecated alias for `goodeye billing plan upgrade`."""
+    _warn_subscription_deprecated("goodeye billing plan upgrade")
+    upgrade(json_output=json_output)
+
+
+@subscription_app.command("cancel")
+def subscription_cancel(
+    json_output: bool = typer.Option(False, "--json", help="Print results as JSON."),
+) -> None:
+    """Deprecated alias for `goodeye billing plan cancel`."""
+    _warn_subscription_deprecated("goodeye billing plan cancel")
+    cancel(json_output=json_output)
+
+
+@subscription_app.command("portal")
+def subscription_portal(
+    json_output: bool = typer.Option(False, "--json", help="Print results as JSON."),
+) -> None:
+    """Deprecated alias for `goodeye billing portal`."""
+    _warn_subscription_deprecated("goodeye billing portal")
+    portal(json_output=json_output)
+
+
 __all__ = [
     "app",
     "auto_topup_app",
@@ -336,5 +384,9 @@ __all__ = [
     "cancel",
     "plan_app",
     "portal",
+    "subscription_app",
+    "subscription_cancel",
+    "subscription_portal",
+    "subscription_upgrade",
     "upgrade",
 ]
