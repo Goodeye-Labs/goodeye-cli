@@ -83,7 +83,7 @@ These command areas cover the whole surface. Run `goodeye --help` or `goodeye <a
 | `teams` | Create teams and manage membership so a workflow can be shared with a group | https://goodeye.dev/docs/teams |
 | `referrals` | View your referral code and redeem someone else's | https://goodeye.dev/docs/referrals |
 | `invitations` | Accept, decline, or cancel team and ownership-transfer invitations | https://goodeye.dev/docs/cli |
-| `subscription` | Upgrade to Pro, cancel your subscription, or open the billing portal | https://goodeye.dev/docs/cli |
+| `billing` | Upgrade to or cancel Pro (`plan upgrade` / `plan cancel`), open the billing portal, buy a one-time credit top-up, or manage automatic top-ups (`auto-topup show` / `set` / `off`) | https://goodeye.dev/docs/cli |
 | `auth`, `me`, `usage` | Manage API keys, claim your handle, and check credit usage | https://goodeye.dev/docs/cli |
 | `design` | Print the workflow-designer prompt for your agent | https://goodeye.dev/docs/cli |
 
