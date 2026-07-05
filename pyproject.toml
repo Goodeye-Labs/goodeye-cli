@@ -1,6 +1,6 @@
 [project]
 name = "goodeye"
-version = "0.22.0"
+version = "0.23.0"
 description = "Goodeye CLI: make your agent meet the standard you set, even on work too subjective for a test, from the terminal."
 readme = "README.md"
 license = { file = "LICENSE" }
