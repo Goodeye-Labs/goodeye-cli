@@ -466,6 +466,7 @@ class GoodeyeClient:
         outcome: str | None = None,
         tags: list[str] | None = None,
         expected_version_token: str | None = None,
+        workflow_id: str | None = None,
         source: str | None = None,
         verifiers: list[dict[str, Any]] | None = None,
         image_generators: list[dict[str, Any]] | None = None,
@@ -478,6 +479,11 @@ class GoodeyeClient:
         and ``tags`` are top-level discovery facets surfaced by
         ``list_workflows``. ``source`` is an optional provenance marker
         (e.g. 'manual' or 'teach').
+
+        ``workflow_id`` targets a specific workflow to update by id (the
+        caller's own or one shared with them at edit access); omit it to save
+        by name in the caller's own namespace (create-or-update). When set,
+        ``name`` must match that workflow's name.
 
         ``files`` controls the workflow file tree. Omit it (``None``) to carry
         the existing tree forward unchanged. Pass an empty list to clear the
@@ -493,6 +499,8 @@ class GoodeyeClient:
             "body": body,
             "expected_version_token": expected_version_token,
         }
+        if workflow_id is not None:
+            payload["workflow_id"] = workflow_id
         if outcome:
             payload["outcome"] = outcome
         if tags:

@@ -2469,6 +2469,7 @@ def _push_candidate(
             outcome=outcome,
             tags=tags,
             expected_version_token=entry.version_token,
+            workflow_id=entry.workflow_id,
             source="manual",
             verifiers=_verifier_payload(entry),
             files=files_payload,

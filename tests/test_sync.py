@@ -1934,6 +1934,45 @@ def test_push_edited_metadata_reaches_request(
 
 
 @respx.mock
+def test_push_addresses_workflow_by_id_not_name(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    """A push carries the tracked workflow_id so the server resolves by id.
+
+    An edit-granted workflow the caller does not own has no row in the caller's
+    own namespace, so a name-only save is ambiguous and the server rejects it.
+    Sending the tracked workflow_id addresses that exact row instead, which is
+    what makes syncing a shared, edit-granted workflow work at all.
+    """
+    _me_route()
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="all")])
+    body = _push_body(slug="shared-runbook")
+    _write_skill(target_dir, "shared-runbook", body)
+    state = SyncState(
+        entries=[
+            _modified_entry(
+                target_dir,
+                id_="skl_shared",
+                slug="shared-runbook",
+                token="tok-1",
+                role="edit",
+            )
+        ]
+    )
+    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+        return_value=_save_response(workflow_id="skl_shared", name="shared-runbook", token="tok-2")
+    )
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
+
+    sent = json.loads(save_route.calls[0].request.content)
+    assert sent["workflow_id"] == "skl_shared"
+    assert sent["name"] == "shared-runbook"
+    assert [(i.slug, i.action) for i in result.items] == [("shared-runbook", "pushed")]
+
+
+@respx.mock
 def test_push_conflict_leaves_entry_unchanged(
     tmp_path: Path, tmp_config_paths: ConfigPaths
 ) -> None:
