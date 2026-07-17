@@ -1207,7 +1207,7 @@ def _reconcile_deletions(
             continue
 
         confirmed = confirm_destructive(
-            f"Workflow {entry.slug!r} is gone from the registry. "
+            f"Skill {entry.slug!r} is gone from the registry. "
             f"Remove its local copy under {stored_target}?",
             yes=yes,
         )
