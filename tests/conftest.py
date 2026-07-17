@@ -2,12 +2,30 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import re
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
 
 from goodeye_cli.config import ConfigPaths
+
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+@pytest.fixture
+def plain() -> Callable[[str], str]:
+    """Return a callable that strips terminal styling from command output.
+
+    Help output styles each flag as several separately escaped runs, so
+    ``--skill-id`` is never one literal substring once styling is on. Whether it
+    is on depends on the host, so assert against this rather than raw output.
+    """
+
+    def _plain(text: str) -> str:
+        return _ANSI_ESCAPE.sub("", text)
+
+    return _plain
 
 
 @pytest.fixture(autouse=True)

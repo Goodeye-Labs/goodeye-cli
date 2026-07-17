@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -384,16 +385,19 @@ def test_verifiers_run_forwards_provenance_via_canonical_skill_flags(
     assert result.exit_code == 0, result.output
 
 
-def test_verifiers_run_help_shows_skill_flags_hides_workflow_flags() -> None:
+def test_verifiers_run_help_shows_skill_flags_hides_workflow_flags(
+    plain: Callable[[str], str],
+) -> None:
     """`--skill-*` is canonical; `--workflow-*` still works but stays hidden from help."""
     result = runner.invoke(app, ["verifiers", "run", "--help"])
     assert result.exit_code == 0, result.output
-    assert "--skill-id" in result.output
-    assert "--skill-version" in result.output
-    assert "--skill-ref" in result.output
-    assert "--workflow-id" not in result.output
-    assert "--workflow-version" not in result.output
-    assert "--workflow-ref" not in result.output
+    help_text = plain(result.output)
+    assert "--skill-id" in help_text
+    assert "--skill-version" in help_text
+    assert "--skill-ref" in help_text
+    assert "--workflow-id" not in help_text
+    assert "--workflow-version" not in help_text
+    assert "--workflow-ref" not in help_text
 
 
 @respx.mock
