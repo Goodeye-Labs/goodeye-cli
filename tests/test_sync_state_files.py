@@ -144,6 +144,48 @@ def test_old_workflow_id_key_loads_operates_and_rewrites_as_skill_id(
     assert reloaded.entries[0].skill_id == "wfl_legacy"
 
 
+def test_entry_with_both_id_keys_keeps_skill_id_and_drops_workflow_id(
+    tmp_config_paths: ConfigPaths,
+) -> None:
+    """An entry carrying both the old and new id keys resolves to `skill_id`.
+
+    The degenerate case (a mixed index with `workflow_id` and `skill_id` in the
+    same entry) must keep the canonical `skill_id`, drop the stray
+    `workflow_id`, and rewrite cleanly on save. This locks in the migration's
+    idempotent skill-id-wins behavior so a later change to the load path cannot
+    silently let the legacy key overwrite the current one.
+    """
+    mixed_state = {
+        "version": 1,
+        "identity": "user@example.com",
+        "entries": [
+            {
+                "workflow_id": "wfl_stale",
+                "skill_id": "wfl_current",
+                "slug": "mixed-workflow",
+                "target_path": "~/.claude/skills",
+                "synced_version": 3,
+                "version_token": "tok-mixed",
+                "body_sha256": body_sha256("mixed body"),
+                "verifier_bindings": [],
+                "effective_role": "owner",
+                "read_only": False,
+            }
+        ],
+    }
+    tmp_config_paths.sync_state_file.parent.mkdir(parents=True, exist_ok=True)
+    tmp_config_paths.sync_state_file.write_text(json.dumps(mixed_state), encoding="utf-8")
+
+    loaded = load_sync_state(tmp_config_paths)
+    assert loaded.entries[0].skill_id == "wfl_current"
+
+    save_sync_state(loaded, tmp_config_paths)
+    on_disk = json.loads(tmp_config_paths.sync_state_file.read_text(encoding="utf-8"))
+    rewritten_entry = on_disk["entries"][0]
+    assert rewritten_entry["skill_id"] == "wfl_current"
+    assert "workflow_id" not in rewritten_entry
+
+
 def test_file_state_tracks_executable(tmp_config_paths: ConfigPaths) -> None:
     """A FileState with executable=True round-trips True after save/load."""
     entry = _base_entry(files=[FileState(path="deploy.sh", sha256="deadbeef", executable=True)])
