@@ -136,10 +136,10 @@ def format_auto_pull_summary(result: sync.PullResult) -> str | None:
     follow_up = ""
     if skipped:
         summary += f"; {skipped} skipped (local edits)"
-        follow_up = " Next: goodeye workflows sync status"
+        follow_up = " Next: goodeye skills sync status"
     if gone:
         summary += f"; {gone} gone from the registry"
-        follow_up = " Next: goodeye workflows sync status"
+        follow_up = " Next: goodeye skills sync status"
     return summary + follow_up
 
 

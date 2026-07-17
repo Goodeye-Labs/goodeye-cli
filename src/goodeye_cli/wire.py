@@ -129,7 +129,7 @@ class WorkflowList(_WireBase):
 
 
 class WorkflowSearchItem(_WireBase):
-    """One ranked row from POST /v1/workflows/search."""
+    """One ranked row from POST /v1/skills/search."""
 
     id: str
     rank: int
@@ -171,7 +171,7 @@ class WorkflowImageGeneratorRefWire(_WireBase):
 
 
 class WorkflowFileEntry(_WireBase):
-    """One row in the file manifest returned by GET /v1/workflows/{id}."""
+    """One row in the file manifest returned by GET /v1/skills/{id}."""
 
     path: str
     sha256: str | None = None
@@ -185,7 +185,7 @@ class WorkflowFileEntry(_WireBase):
 
 
 class FileEntryWire(_WireBase):
-    """One file entry in the POST /v1/workflows `files` array.
+    """One file entry in the POST /v1/skills `files` array.
 
     An inline entry carries exactly one content channel: ``content`` for
     verbatim UTF-8 text, or ``content_base64`` for base64-encoded bytes
@@ -245,7 +245,7 @@ class WorkflowSaveResult(_WireBase):
 
 
 class SaveWorkflowInput(_WireBase):
-    """Flat POST /v1/workflows body the CLI constructs (documentation + parity)."""
+    """Flat POST /v1/skills body the CLI constructs (documentation + parity)."""
 
     name: str
     description: str

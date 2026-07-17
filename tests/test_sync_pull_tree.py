@@ -132,7 +132,7 @@ def _tracked_entry(
     files: list[FileState] | None = None,
 ) -> SyncEntry:
     return SyncEntry(
-        workflow_id=id_,
+        skill_id=id_,
         slug=slug,
         target_path=normalize_target_path(str(target_dir)),
         synced_version=version,
@@ -158,10 +158,10 @@ def test_pull_writes_full_tree(tmp_path: Path, tmp_config_paths: ConfigPaths) ->
     sibling_bin = b"\x00\x01\x02\x03binary"
     sibling_bin_b64 = base64.b64encode(sibling_bin).decode()
 
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response([_summary_dict(id_="wf1", name="my-wf", token="t1")])
     )
-    respx.get(f"{SERVER}/v1/workflows/wf1").mock(
+    respx.get(f"{SERVER}/v1/skills/wf1").mock(
         return_value=_detail_response(
             id_="wf1",
             name="my-wf",
@@ -186,7 +186,7 @@ def test_pull_writes_full_tree(tmp_path: Path, tmp_config_paths: ConfigPaths) ->
         )
     )
     # Batch file fetch (called with two paths)
-    respx.get(f"{SERVER}/v1/workflows/wf1/files").mock(
+    respx.get(f"{SERVER}/v1/skills/wf1/files").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -242,10 +242,10 @@ def test_pull_applies_executable_bit(tmp_path: Path, tmp_config_paths: ConfigPat
     exec_content = "#!/bin/sh\necho hi"
     plain_content = "plain text"
 
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response([_summary_dict(id_="wf_exec", name="exec-wf", token="t1")])
     )
-    respx.get(f"{SERVER}/v1/workflows/wf_exec").mock(
+    respx.get(f"{SERVER}/v1/skills/wf_exec").mock(
         return_value=_detail_response(
             id_="wf_exec",
             name="exec-wf",
@@ -269,7 +269,7 @@ def test_pull_applies_executable_bit(tmp_path: Path, tmp_config_paths: ConfigPat
             ],
         )
     )
-    respx.get(f"{SERVER}/v1/workflows/wf_exec/files").mock(
+    respx.get(f"{SERVER}/v1/skills/wf_exec/files").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -357,12 +357,12 @@ def test_pull_force_clears_stale_executable_bit(
 
     # Registry advanced (new token) and the manifest now marks the path
     # non-executable with new content.
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [_summary_dict(id_="wf_flip", name="flip-wf", token="t2", version=2)]
         )
     )
-    respx.get(f"{SERVER}/v1/workflows/wf_flip").mock(
+    respx.get(f"{SERVER}/v1/skills/wf_flip").mock(
         return_value=_detail_response(
             id_="wf_flip",
             name="flip-wf",
@@ -380,7 +380,7 @@ def test_pull_force_clears_stale_executable_bit(
             ],
         )
     )
-    respx.get(f"{SERVER}/v1/workflows/wf_flip/files").mock(
+    respx.get(f"{SERVER}/v1/skills/wf_flip/files").mock(
         return_value=httpx.Response(
             200,
             json={"files": [_file_envelope("tool", content=new_content, executable=False)]},
@@ -433,7 +433,7 @@ def test_pull_incremental_fetches_only_changed(
     state = SyncState(
         entries=[
             SyncEntry(
-                workflow_id="wf_inc",
+                skill_id="wf_inc",
                 slug="inc-wf",
                 target_path=normalize_target_path(str(target_dir)),
                 synced_version=1,
@@ -453,12 +453,12 @@ def test_pull_incremental_fetches_only_changed(
 
     new_changed_sha = _sha256_text(changed_content_v2)
 
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [_summary_dict(id_="wf_inc", name="inc-wf", token="t2", version=2)]
         )
     )
-    respx.get(f"{SERVER}/v1/workflows/wf_inc").mock(
+    respx.get(f"{SERVER}/v1/skills/wf_inc").mock(
         return_value=_detail_response(
             id_="wf_inc",
             name="inc-wf",
@@ -485,7 +485,7 @@ def test_pull_incremental_fetches_only_changed(
     )
 
     # The batch endpoint should be called with only "changed.txt".
-    files_route = respx.get(f"{SERVER}/v1/workflows/wf_inc/files").mock(
+    files_route = respx.get(f"{SERVER}/v1/skills/wf_inc/files").mock(
         return_value=httpx.Response(
             200,
             json={"files": [_file_envelope("changed.txt", content=changed_content_v2)]},
@@ -567,12 +567,12 @@ def test_pull_restores_locally_deleted_sibling_when_server_unchanged(
     )
 
     # Server is unchanged (same token t1, same version).
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [_summary_dict(id_="wf_del", name="del-wf", token="t1", version=1)]
         )
     )
-    respx.get(f"{SERVER}/v1/workflows/wf_del").mock(
+    respx.get(f"{SERVER}/v1/skills/wf_del").mock(
         return_value=_detail_response(
             id_="wf_del",
             name="del-wf",
@@ -590,7 +590,7 @@ def test_pull_restores_locally_deleted_sibling_when_server_unchanged(
             ],
         )
     )
-    respx.get(f"{SERVER}/v1/workflows/wf_del/files").mock(
+    respx.get(f"{SERVER}/v1/skills/wf_del/files").mock(
         return_value=httpx.Response(
             200,
             json={"files": [_file_envelope("helpers/run.sh", content=sibling_content)]},
@@ -641,7 +641,7 @@ def test_delete_only_removes_tracked_files_keeps_untracked(
     state = SyncState(
         entries=[
             SyncEntry(
-                workflow_id="wf_gone",
+                skill_id="wf_gone",
                 slug="gone",
                 target_path=normalize_target_path(str(target_dir)),
                 synced_version=1,
@@ -659,7 +659,7 @@ def test_delete_only_removes_tracked_files_keeps_untracked(
     )
 
     # Workflow is gone server-side (soft-deleted).
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [_summary_dict(id_="wf_gone", name="gone", archived_at="2026-01-01T00:00:00Z")]
         )
@@ -721,7 +721,7 @@ def test_delete_rmdirs_only_if_empty(tmp_path: Path, tmp_config_paths: ConfigPat
     state = SyncState(
         entries=[
             SyncEntry(
-                workflow_id="wf_clean",
+                skill_id="wf_clean",
                 slug="clean-wf",
                 target_path=normalize_target_path(str(target_dir)),
                 synced_version=1,
@@ -730,7 +730,7 @@ def test_delete_rmdirs_only_if_empty(tmp_path: Path, tmp_config_paths: ConfigPat
                 files=[FileState(path="helper.txt", sha256=_sha256_text(sibling_content))],
             ),
             SyncEntry(
-                workflow_id="wf_dirty",
+                skill_id="wf_dirty",
                 slug="dirty-wf",
                 target_path=normalize_target_path(str(target_dir)),
                 synced_version=1,
@@ -742,7 +742,7 @@ def test_delete_rmdirs_only_if_empty(tmp_path: Path, tmp_config_paths: ConfigPat
     )
 
     # Both workflows are gone server-side.
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [
                 _summary_dict(id_="wf_clean", name="clean-wf", archived_at="2026-01-01T00:00:00Z"),
@@ -800,7 +800,7 @@ def test_unpushed_sibling_edit_blocks_deletion(
     state = SyncState(
         entries=[
             SyncEntry(
-                workflow_id="wf_mod",
+                skill_id="wf_mod",
                 slug="modified-wf",
                 target_path=normalize_target_path(str(target_dir)),
                 synced_version=1,
@@ -820,7 +820,7 @@ def test_unpushed_sibling_edit_blocks_deletion(
     )
 
     # Workflow is gone server-side.
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [_summary_dict(id_="wf_mod", name="modified-wf", archived_at="2026-01-01T00:00:00Z")]
         )
@@ -880,7 +880,7 @@ def test_unpushed_sibling_edit_blocks_unforced_overwrite(
     state = SyncState(
         entries=[
             SyncEntry(
-                workflow_id="wf_drop",
+                skill_id="wf_drop",
                 slug="drop-wf",
                 target_path=normalize_target_path(str(target_dir)),
                 synced_version=1,
@@ -902,12 +902,12 @@ def test_unpushed_sibling_edit_blocks_unforced_overwrite(
     # Workflow is still live but the registry advanced (new token) and the new
     # manifest no longer carries the sibling. The detail/files routes must never
     # be reached: the guard returns first.
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [_summary_dict(id_="wf_drop", name="drop-wf", token="t2", version=2)]
         )
     )
-    detail_route = respx.get(f"{SERVER}/v1/workflows/wf_drop").mock(
+    detail_route = respx.get(f"{SERVER}/v1/skills/wf_drop").mock(
         return_value=_detail_response(
             id_="wf_drop", name="drop-wf", body=skill_body, token="t2", version=2, files=[]
         )
@@ -961,10 +961,10 @@ def test_pull_skips_undeliverable_sibling_and_reports_incomplete(
     small_text = "small helper"
     big_bin = b"\x00" * 2048  # stands in for a binary over the inline ceiling
 
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response([_summary_dict(id_="wf_big", name="big-wf", token="t1")])
     )
-    respx.get(f"{SERVER}/v1/workflows/wf_big").mock(
+    respx.get(f"{SERVER}/v1/skills/wf_big").mock(
         return_value=_detail_response(
             id_="wf_big",
             name="big-wf",
@@ -1003,7 +1003,7 @@ def test_pull_skips_undeliverable_sibling_and_reports_incomplete(
             },
         )
 
-    respx.get(f"{SERVER}/v1/workflows/wf_big/files").mock(side_effect=_files_side_effect)
+    respx.get(f"{SERVER}/v1/skills/wf_big/files").mock(side_effect=_files_side_effect)
 
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
         result = pull(
@@ -1053,10 +1053,10 @@ def test_pull_recovers_over_ceiling_binary_via_raw(
     big_bin = bytes(range(256)) * 6  # 1536 bytes, non-text
     big_sha = _sha256(big_bin)
 
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response([_summary_dict(id_="wf_img", name="img-wf", token="t1")])
     )
-    respx.get(f"{SERVER}/v1/workflows/wf_img").mock(
+    respx.get(f"{SERVER}/v1/skills/wf_img").mock(
         return_value=_detail_response(
             id_="wf_img",
             name="img-wf",
@@ -1101,7 +1101,7 @@ def test_pull_recovers_over_ceiling_binary_via_raw(
             },
         )
 
-    respx.get(f"{SERVER}/v1/workflows/wf_img/files").mock(side_effect=_files_side_effect)
+    respx.get(f"{SERVER}/v1/skills/wf_img/files").mock(side_effect=_files_side_effect)
 
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
         result = pull(
@@ -1150,10 +1150,10 @@ def test_pull_recovers_batch_cap_overflow_via_single_fetch(
     first_text = "first sibling"
     overflow_text = "overflow sibling content that the batch could not inline"
 
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response([_summary_dict(id_="wf_cap", name="cap-wf", token="t1")])
     )
-    respx.get(f"{SERVER}/v1/workflows/wf_cap").mock(
+    respx.get(f"{SERVER}/v1/skills/wf_cap").mock(
         return_value=_detail_response(
             id_="wf_cap",
             name="cap-wf",
@@ -1195,7 +1195,7 @@ def test_pull_recovers_batch_cap_overflow_via_single_fetch(
             },
         )
 
-    respx.get(f"{SERVER}/v1/workflows/wf_cap/files").mock(side_effect=_files_side_effect)
+    respx.get(f"{SERVER}/v1/skills/wf_cap/files").mock(side_effect=_files_side_effect)
 
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
         result = pull(
@@ -1250,10 +1250,10 @@ def test_pull_rejects_unsafe_sibling_paths_and_writes_nothing_outside_slug_dir(
     outside_canary = tmp_path / "escape.sh"
     outside_canary.write_text("ORIGINAL", encoding="utf-8")
 
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response([_summary_dict(id_="wf_evil", name="evil-wf", token="t1")])
     )
-    respx.get(f"{SERVER}/v1/workflows/wf_evil").mock(
+    respx.get(f"{SERVER}/v1/skills/wf_evil").mock(
         return_value=_detail_response(
             id_="wf_evil",
             name="evil-wf",
@@ -1291,7 +1291,7 @@ def test_pull_rejects_unsafe_sibling_paths_and_writes_nothing_outside_slug_dir(
     # are filtered before fetching), but a hostile server can still return an
     # unsafe ``path`` inside an envelope. Include such an envelope to exercise the
     # second containment layer in the envelope writer.
-    respx.get(f"{SERVER}/v1/workflows/wf_evil/files").mock(
+    respx.get(f"{SERVER}/v1/skills/wf_evil/files").mock(
         return_value=httpx.Response(
             200,
             json={

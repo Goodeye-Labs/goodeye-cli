@@ -11,6 +11,7 @@ import respx
 from goodeye_cli.client import GoodeyeClient, request_device_authorization
 from goodeye_cli.errors import (
     AuthRequired,
+    Conflict,
     InvalidCredentials,
     NetworkError,
     NotFound,
@@ -117,7 +118,7 @@ def test_get_template_json_preserves_verifier_snapshots() -> None:
 
 @respx.mock
 def test_no_auth_header_when_missing_key() -> None:
-    route = respx.get(f"{SERVER}/v1/workflows").mock(
+    route = respx.get(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(200, json={"items": [], "next_cursor": None})
     )
     with GoodeyeClient(SERVER) as client:
@@ -159,11 +160,67 @@ def test_error_translation_invalid_credentials() -> None:
 
 @respx.mock
 def test_error_translation_not_found() -> None:
-    respx.get(f"{SERVER}/v1/workflows/nope").mock(
+    respx.get(f"{SERVER}/v1/skills/nope").mock(
         return_value=httpx.Response(404, json={"error": "not_found", "message": "nope"})
     )
     with GoodeyeClient(SERVER, api_key="k") as client, pytest.raises(NotFound):
         client.get_workflow("nope")
+
+
+@respx.mock
+def test_error_translation_ambiguous_skill_reference() -> None:
+    """The canonical /v1/skills routes raise the new slug."""
+    respx.get(f"{SERVER}/v1/skills/nope").mock(
+        return_value=httpx.Response(
+            409, json={"error": "ambiguous_skill_reference", "message": "ambiguous"}
+        )
+    )
+    with GoodeyeClient(SERVER, api_key="k") as client, pytest.raises(ValidationFailed):
+        client.get_workflow("nope")
+
+
+@respx.mock
+def test_error_translation_ambiguous_workflow_reference() -> None:
+    """The deprecated alias routes still raise the old slug during the grace window."""
+    respx.get(f"{SERVER}/v1/skills/nope").mock(
+        return_value=httpx.Response(
+            409, json={"error": "ambiguous_workflow_reference", "message": "ambiguous"}
+        )
+    )
+    with GoodeyeClient(SERVER, api_key="k") as client, pytest.raises(ValidationFailed):
+        client.get_workflow("nope")
+
+
+@respx.mock
+def test_error_translation_skill_ownership_must_transfer() -> None:
+    """The canonical slug for an account delete blocked by an owned skill."""
+    respx.get(f"{SERVER}/v1/me").mock(
+        return_value=httpx.Response(
+            409,
+            json={
+                "error": "skill_ownership_must_transfer",
+                "message": "transfer or delete owned skills first",
+            },
+        )
+    )
+    with GoodeyeClient(SERVER, api_key="k") as client, pytest.raises(Conflict):
+        client.get_me()
+
+
+@respx.mock
+def test_error_translation_workflow_ownership_must_transfer() -> None:
+    """The deprecated alias slug for the same case, during the grace window."""
+    respx.get(f"{SERVER}/v1/me").mock(
+        return_value=httpx.Response(
+            409,
+            json={
+                "error": "workflow_ownership_must_transfer",
+                "message": "transfer or delete owned workflows first",
+            },
+        )
+    )
+    with GoodeyeClient(SERVER, api_key="k") as client, pytest.raises(Conflict):
+        client.get_me()
 
 
 @respx.mock
@@ -253,7 +310,7 @@ def test_error_translation_unstructured_400() -> None:
 
 @respx.mock
 def test_get_workflow_markdown_returns_raw_text() -> None:
-    route = respx.get(f"{SERVER}/v1/workflows/example").mock(
+    route = respx.get(f"{SERVER}/v1/skills/example").mock(
         return_value=httpx.Response(
             200, text="# hello\nbody", headers={"content-type": "text/markdown"}
         )
@@ -277,7 +334,7 @@ def test_get_workflow_json_returns_detail_model() -> None:
         "outcome": "ship reliable refunds",
         "tags": ["demo"],
     }
-    respx.get(f"{SERVER}/v1/workflows/example").mock(return_value=httpx.Response(200, json=payload))
+    respx.get(f"{SERVER}/v1/skills/example").mock(return_value=httpx.Response(200, json=payload))
     with GoodeyeClient(SERVER) as client:
         result = client.get_workflow("example", accept_markdown=False)
     assert not isinstance(result, str)
@@ -297,7 +354,7 @@ def test_get_workflow_json_ignores_unknown_fields() -> None:
         "description": "ex",
         "unexpected": {"tags": ["x"]},
     }
-    respx.get(f"{SERVER}/v1/workflows/example").mock(return_value=httpx.Response(200, json=payload))
+    respx.get(f"{SERVER}/v1/skills/example").mock(return_value=httpx.Response(200, json=payload))
     with GoodeyeClient(SERVER) as client:
         result = client.get_workflow("example", accept_markdown=False)
     assert not isinstance(result, str)
@@ -308,7 +365,7 @@ def test_get_workflow_json_ignores_unknown_fields() -> None:
 
 @respx.mock
 def test_list_workflows_params_passthrough() -> None:
-    route = respx.get(f"{SERVER}/v1/workflows").mock(
+    route = respx.get(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(200, json={"items": [], "next_cursor": None})
     )
     with GoodeyeClient(SERVER, api_key="k") as client:
@@ -323,7 +380,7 @@ def test_list_workflows_params_passthrough() -> None:
 
 @respx.mock
 def test_save_workflow_sends_expected_version_token() -> None:
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -351,7 +408,7 @@ def test_save_workflow_sends_expected_version_token() -> None:
 
 @respx.mock
 def test_save_workflow_sends_explicit_empty_verifiers() -> None:
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -383,11 +440,11 @@ def test_save_workflow_sends_workflow_id_when_present() -> None:
     caller's own or one shared at edit access), which is what lets a save target
     a workflow the caller does not own without hitting name-only ambiguity.
     """
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
-                "workflow_id": "skl_shared",
+                "skill_id": "skl_shared",
                 "version": 4,
                 "version_token": "tok-next",
                 "name": "example",
@@ -396,7 +453,7 @@ def test_save_workflow_sends_workflow_id_when_present() -> None:
         )
     )
     with GoodeyeClient(SERVER, api_key="k") as client:
-        client.save_workflow(
+        result = client.save_workflow(
             name="example",
             description="desc",
             body="body",
@@ -404,18 +461,19 @@ def test_save_workflow_sends_workflow_id_when_present() -> None:
             workflow_id="skl_shared",
         )
     body = _json.loads(route.calls.last.request.content.decode())
-    assert body["workflow_id"] == "skl_shared"
+    assert body["skill_id"] == "skl_shared"
+    assert result.workflow_id == "skl_shared"
 
 
 @respx.mock
 def test_save_workflow_omits_workflow_id_when_none() -> None:
     """When workflow_id is not passed, the key must be absent so the server saves
     in the caller's own namespace by name (create-or-update)."""
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
-                "workflow_id": "skl_01",
+                "skill_id": "skl_01",
                 "version": 1,
                 "version_token": "tok",
                 "name": "example",
@@ -426,15 +484,15 @@ def test_save_workflow_omits_workflow_id_when_none() -> None:
     with GoodeyeClient(SERVER, api_key="k") as client:
         client.save_workflow(name="example", description="desc", body="body")
     body = _json.loads(route.calls.last.request.content.decode())
-    assert "workflow_id" not in body
+    assert "skill_id" not in body
 
 
 @respx.mock
 def test_workflow_grant_client_methods() -> None:
-    grant_route = respx.post(f"{SERVER}/v1/workflows/wf_1/grants").mock(
+    grant_route = respx.post(f"{SERVER}/v1/skills/wf_1/grants").mock(
         return_value=httpx.Response(201, json={"workflow_id": "wf_1", "role": "edit"})
     )
-    respx.get(f"{SERVER}/v1/workflows/wf_1/grants").mock(
+    respx.get(f"{SERVER}/v1/skills/wf_1/grants").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -451,10 +509,10 @@ def test_workflow_grant_client_methods() -> None:
             },
         )
     )
-    revoke_route = respx.delete(f"{SERVER}/v1/workflows/wf_1/grants").mock(
+    revoke_route = respx.delete(f"{SERVER}/v1/skills/wf_1/grants").mock(
         return_value=httpx.Response(200, json={"workflow_id": "wf_1", "revoked": True})
     )
-    leave_route = respx.post(f"{SERVER}/v1/workflows/wf_1/leave").mock(
+    leave_route = respx.post(f"{SERVER}/v1/skills/wf_1/leave").mock(
         return_value=httpx.Response(200, json={"workflow_id": "wf_1", "removed_direct_grants": 1})
     )
 
@@ -474,7 +532,7 @@ def test_workflow_grant_client_methods() -> None:
 
 @respx.mock
 def test_grant_workflow_include_history_true_sends_flag() -> None:
-    grant_route = respx.post(f"{SERVER}/v1/workflows/wf_1/grants").mock(
+    grant_route = respx.post(f"{SERVER}/v1/skills/wf_1/grants").mock(
         return_value=httpx.Response(201, json={"workflow_id": "wf_1", "role": "view"})
     )
 
@@ -487,7 +545,7 @@ def test_grant_workflow_include_history_true_sends_flag() -> None:
 
 @respx.mock
 def test_grant_workflow_default_include_history_sends_false() -> None:
-    grant_route = respx.post(f"{SERVER}/v1/workflows/wf_1/grants").mock(
+    grant_route = respx.post(f"{SERVER}/v1/skills/wf_1/grants").mock(
         return_value=httpx.Response(201, json={"workflow_id": "wf_1", "role": "view"})
     )
 
@@ -500,7 +558,7 @@ def test_grant_workflow_default_include_history_sends_false() -> None:
 
 @respx.mock
 def test_list_workflow_grants_parses_history_fields() -> None:
-    respx.get(f"{SERVER}/v1/workflows/wf_1/grants").mock(
+    respx.get(f"{SERVER}/v1/skills/wf_1/grants").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -565,7 +623,7 @@ def test_team_client_methods_send_identifier_payloads() -> None:
 @respx.mock
 def test_transfer_workflow_ownership_client_method() -> None:
     inv_id = "dddddddd-dddd-dddd-dddd-dddddddddddd"
-    route = respx.post(f"{SERVER}/v1/workflows/wf_1/transfer-ownership").mock(
+    route = respx.post(f"{SERVER}/v1/skills/wf_1/transfer-ownership").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -623,7 +681,7 @@ def test_exchange_sends_hostname() -> None:
 
 @respx.mock
 def test_delete_workflow_happy_path() -> None:
-    respx.delete(f"{SERVER}/v1/workflows/skl_01").mock(
+    respx.delete(f"{SERVER}/v1/skills/skl_01").mock(
         return_value=httpx.Response(
             200, json={"workflow_id": "skl_01", "name": "skl_01", "deleted": True}
         )
@@ -635,7 +693,7 @@ def test_delete_workflow_happy_path() -> None:
 
 @respx.mock
 def test_get_design_prompt_roundtrip() -> None:
-    respx.get(f"{SERVER}/v1/design/workflow-prompt").mock(
+    respx.get(f"{SERVER}/v1/design/skill-prompt").mock(
         return_value=httpx.Response(200, json={"prompt": "hello"})
     )
     with GoodeyeClient(SERVER, api_key="k") as client:

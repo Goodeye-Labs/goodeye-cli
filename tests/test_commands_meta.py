@@ -293,7 +293,7 @@ def test_design_renders_skill_md_and_references(tmp_config_paths: ConfigPaths, m
     """The server returns ``{skill_md, references}``; the CLI should
     concatenate both into one pipe-ready markdown doc."""
     _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE")
-    respx.get(f"{SERVER}/v1/design/workflow-prompt").mock(
+    respx.get(f"{SERVER}/v1/design/skill-prompt").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -323,7 +323,7 @@ def test_design_renders_skill_md_and_references(tmp_config_paths: ConfigPaths, m
 def test_design_legacy_prompt_key_still_renders(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     """Legacy payload shape (``{"prompt": ...}``) remains supported."""
     _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE")
-    respx.get(f"{SERVER}/v1/design/workflow-prompt").mock(
+    respx.get(f"{SERVER}/v1/design/skill-prompt").mock(
         return_value=httpx.Response(200, json={"prompt": "Hello designer."})
     )
     runner = CliRunner()
@@ -335,7 +335,7 @@ def test_design_legacy_prompt_key_still_renders(tmp_config_paths: ConfigPaths, m
 @respx.mock
 def test_design_json_flag(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _env(monkeypatch, tmp_config_paths, api_key="good_live_EXAMPLE")
-    respx.get(f"{SERVER}/v1/design/workflow-prompt").mock(
+    respx.get(f"{SERVER}/v1/design/skill-prompt").mock(
         return_value=httpx.Response(200, json={"skill_md": "# x", "references": {}})
     )
     runner = CliRunner()

@@ -16,7 +16,7 @@ SERVER = "https://example.test"
 @respx.mock
 def test_save_payload_omits_files_when_none() -> None:
     """When `files` is not passed, the POST body must NOT contain a `files` key."""
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -38,7 +38,7 @@ def test_save_payload_omits_files_when_none() -> None:
 @respx.mock
 def test_save_payload_sends_files_when_present() -> None:
     """When `files` is passed (even empty list), the key must appear in the body."""
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -74,7 +74,7 @@ def test_save_payload_sends_files_when_present() -> None:
 @respx.mock
 def test_save_payload_sends_empty_files_list() -> None:
     """Passing `files=[]` must send the key with an empty list (server clears the tree)."""
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -97,7 +97,7 @@ def test_save_payload_sends_empty_files_list() -> None:
 @respx.mock
 def test_save_payload_omits_image_generators_when_none() -> None:
     """When `image_generators` is not passed, the POST body must NOT contain the key."""
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -119,7 +119,7 @@ def test_save_payload_omits_image_generators_when_none() -> None:
 def test_save_payload_sends_image_generators_when_present() -> None:
     """A non-empty `image_generators` list is forwarded verbatim, and the saved
     result parses the bindings back."""
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -148,7 +148,7 @@ def test_save_payload_sends_image_generators_when_present() -> None:
 @respx.mock
 def test_save_payload_sends_empty_image_generators_list() -> None:
     """Passing `image_generators=[]` sends the key with an empty list (clears bindings)."""
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -191,7 +191,7 @@ def test_client_config_parses_ignore_defaults() -> None:
 
 @respx.mock
 def test_get_workflow_parses_manifest() -> None:
-    respx.get(f"{SERVER}/v1/workflows/wf_1").mock(
+    respx.get(f"{SERVER}/v1/skills/wf_1").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -230,8 +230,8 @@ def test_get_workflow_parses_manifest() -> None:
 
 @respx.mock
 def test_get_workflow_file_fetches_single() -> None:
-    """get_workflow_file must hit /v1/workflows/{id}/files?path=... and return the envelope."""
-    route = respx.get(f"{SERVER}/v1/workflows/wf_1/files").mock(
+    """get_workflow_file must hit /v1/skills/{id}/files?path=... and return the envelope."""
+    route = respx.get(f"{SERVER}/v1/skills/wf_1/files").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -279,8 +279,8 @@ def test_get_template_file_raw_returns_bytes() -> None:
 
 @respx.mock
 def test_get_workflow_files_fetches_batch() -> None:
-    """get_workflow_files must hit /v1/workflows/{id}/files with repeated paths= params."""
-    route = respx.get(f"{SERVER}/v1/workflows/wf_1/files").mock(
+    """get_workflow_files must hit /v1/skills/{id}/files with repeated paths= params."""
+    route = respx.get(f"{SERVER}/v1/skills/wf_1/files").mock(
         return_value=httpx.Response(
             200,
             json={

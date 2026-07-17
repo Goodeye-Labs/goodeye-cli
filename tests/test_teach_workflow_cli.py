@@ -39,7 +39,7 @@ def test_workflows_teach_help_documents_required_publish_metadata() -> None:
 
 @respx.mock
 def test_teach_workflow_client_posts_no_body() -> None:
-    route = respx.post(f"{SERVER}/v1/workflows/wf_1/teach").mock(
+    route = respx.post(f"{SERVER}/v1/skills/wf_1/teach").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -62,7 +62,7 @@ def test_workflows_teach_command_prints_skill_md(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.post(f"{SERVER}/v1/workflows/wf_1/teach").mock(
+    respx.post(f"{SERVER}/v1/skills/wf_1/teach").mock(
         return_value=httpx.Response(
             200,
             json={

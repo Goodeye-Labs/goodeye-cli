@@ -30,7 +30,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from goodeye_cli.config import ConfigPaths, _load_json, _write_json_0600
 from goodeye_cli.errors import Conflict, Forbidden, GoodeyeError, NotFound, ValidationFailed
 from goodeye_cli.frontmatter import (
-    coerce_outcome,
     coerce_required_text,
     coerce_tags,
     parse_front_matter,
@@ -446,7 +445,7 @@ class SyncEntry(_SyncBase):
     by older CLI versions omit it and load with ``files == []``.
     """
 
-    workflow_id: str
+    skill_id: str
     slug: str
     target_path: str
     synced_version: int
@@ -501,10 +500,19 @@ def stamp_auto_pull(state: SyncState, now: datetime) -> None:
     state.last_auto_pull_at = now
 
 
+def _migrate_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    if "workflow_id" in entry and "skill_id" not in entry:
+        entry["skill_id"] = entry.pop("workflow_id")
+    return entry
+
+
 def load_sync_state(paths: ConfigPaths) -> SyncState:
     """Load the sync index, returning a default when the file is absent.
 
     Raises ``ValidationFailed`` when the file exists but cannot be parsed.
+    Each entry is normalized to the current key shape before validation, so
+    an index written by an older CLI still loads; the next save rewrites it
+    in the current shape.
     """
     if not paths.sync_state_file.exists():
         return SyncState()
@@ -515,6 +523,10 @@ def load_sync_state(paths: ConfigPaths) -> SyncState:
             message=f"Could not parse sync index at {paths.sync_state_file}.",
             hint="Fix the JSON by hand, or delete the file to re-sync from the registry.",
         )
+    if isinstance(data, dict) and isinstance(data.get("entries"), list):
+        data["entries"] = [
+            _migrate_entry(entry) if isinstance(entry, dict) else entry for entry in data["entries"]
+        ]
     return SyncState.model_validate(data)
 
 
@@ -1151,7 +1163,7 @@ def _reconcile_deletions(
         # reused slug that the caller pulled into the index already rewrote this
         # entry's id to the live one via `upsert_entry`; anything still pointing
         # at an id absent from the live set is genuinely gone.
-        if entry.workflow_id in live_ids:
+        if entry.skill_id in live_ids:
             surviving.append(entry)
             continue
 
@@ -1166,7 +1178,7 @@ def _reconcile_deletions(
                     slug=entry.slug,
                     target_path=stored_target,
                     action="deleted-on-server",
-                    workflow_id=entry.workflow_id,
+                    workflow_id=entry.skill_id,
                 )
             )
             continue
@@ -1186,7 +1198,7 @@ def _reconcile_deletions(
                     slug=entry.slug,
                     target_path=stored_target,
                     action="deleted-on-server",
-                    workflow_id=entry.workflow_id,
+                    workflow_id=entry.skill_id,
                 )
             )
             continue
@@ -1203,7 +1215,7 @@ def _reconcile_deletions(
                     slug=entry.slug,
                     target_path=stored_target,
                     action="deleted-local",
-                    workflow_id=entry.workflow_id,
+                    workflow_id=entry.skill_id,
                 )
             )
             # Drop the entry by not carrying it into the surviving list.
@@ -1214,7 +1226,7 @@ def _reconcile_deletions(
                 slug=entry.slug,
                 target_path=stored_target,
                 action="deleted-on-server",
-                workflow_id=entry.workflow_id,
+                workflow_id=entry.skill_id,
             )
         )
     state.entries = surviving
@@ -1557,7 +1569,7 @@ def _pull_one(
     upsert_entry(
         state,
         SyncEntry(
-            workflow_id=detail.id,
+            skill_id=detail.id,
             slug=slug,
             target_path=stored_target,
             synced_version=detail.version,
@@ -1659,7 +1671,7 @@ def _classify_tracked(
     read_only = entry.effective_role == "view"
     base = StatusItem(
         slug=entry.slug,
-        workflow_id=entry.workflow_id,
+        workflow_id=entry.skill_id,
         target_path=stored_target,
         state="clean",
         read_only=read_only,
@@ -1764,7 +1776,7 @@ def _status_for_target(
         if not slug_in_target_scope(target, entry.slug):
             continue
         tracked_slugs.add(entry.slug)
-        summary = by_id.get(entry.workflow_id)
+        summary = by_id.get(entry.skill_id)
         items.append(
             _classify_tracked(entry, summary, target=target, ignore_defaults=ignore_defaults)
         )
@@ -1865,8 +1877,11 @@ def _verifier_payload(entry: SyncEntry) -> list[dict[str, Any]]:
     return payload
 
 
-def _push_metadata(body: str, slug: str) -> tuple[str, str, list[str]] | str:
+def _push_metadata(body: str, slug: str) -> tuple[str, str | None, list[str]] | str:
     """Derive (description, outcome, tags) from an edited body's front-matter.
+
+    ``outcome`` is optional discovery metadata: it passes through as-is
+    (``None`` when absent) with no validation of its own.
 
     Returns the validated metadata tuple, or a human-readable error string when
     the body attempts a rename or omits a required facet. The caller turns an
@@ -1889,15 +1904,13 @@ def _push_metadata(body: str, slug: str) -> tuple[str, str, list[str]] | str:
             field_name="description",
             missing_message="Missing `description` in the workflow front-matter.",
         )
-        outcome = coerce_outcome(front_matter.get("outcome"))
+        outcome = front_matter.get("outcome")
         # Push cannot clear tags: an absent/empty `tags:` coerces to [], and
         # save_workflow drops a falsy tags value rather than emptying the list,
         # so removing the line leaves the registry tags untouched (same as publish).
         tags = coerce_tags(front_matter.get("tags"))
     except ValidationFailed as exc:
         return exc.message
-    if outcome is None:
-        return "Missing `outcome` in the workflow front-matter."
     return description, outcome, tags
 
 
@@ -1972,7 +1985,7 @@ def push(
         # coherent rather than racing each other to the registry.
         by_workflow: dict[str, list[_PushCandidate]] = {}
         for candidate in candidates:
-            by_workflow.setdefault(candidate.entry.workflow_id, []).append(candidate)
+            by_workflow.setdefault(candidate.entry.skill_id, []).append(candidate)
         for group in by_workflow.values():
             result.items.extend(
                 _push_workflow_group(
@@ -2100,7 +2113,7 @@ def _read_only_item(candidate: _PushCandidate) -> PushItem:
     """
     return PushItem(
         slug=candidate.entry.slug,
-        workflow_id=candidate.entry.workflow_id,
+        workflow_id=candidate.entry.skill_id,
         target_path=normalize_target_path(candidate.target.path),
         action="skipped-read-only",
         detail=_READ_ONLY_DETAIL,
@@ -2111,7 +2124,7 @@ def _diverged_item(candidate: _PushCandidate) -> PushItem:
     """Build the ``diverged`` item for one copy of a multi-target workflow."""
     return PushItem(
         slug=candidate.entry.slug,
-        workflow_id=candidate.entry.workflow_id,
+        workflow_id=candidate.entry.skill_id,
         target_path=normalize_target_path(candidate.target.path),
         action="diverged",
         detail=(
@@ -2182,7 +2195,7 @@ def _converge_siblings(
     for entry in state.entries:
         if entry is source.entry:
             continue
-        if entry.workflow_id != source.entry.workflow_id:
+        if entry.skill_id != source.entry.skill_id:
             continue
         stored_target = normalize_target_path(entry.target_path)
         if stored_target == source_target:
@@ -2230,7 +2243,7 @@ def _converge_siblings(
         items.append(
             PushItem(
                 slug=entry.slug,
-                workflow_id=entry.workflow_id,
+                workflow_id=entry.skill_id,
                 target_path=stored_target,
                 action="converged",
                 detail=f"Rewritten to match the copy pushed from {source_target}.",
@@ -2260,7 +2273,7 @@ def _pull_required_item(entry: SyncEntry, stored_target: str, source_target: str
     """
     return PushItem(
         slug=entry.slug,
-        workflow_id=entry.workflow_id,
+        workflow_id=entry.skill_id,
         target_path=stored_target,
         action="pull-required",
         detail=(
@@ -2279,7 +2292,7 @@ def _diverged_sibling_item(entry: SyncEntry, stored_target: str) -> PushItem:
     """
     return PushItem(
         slug=entry.slug,
-        workflow_id=entry.workflow_id,
+        workflow_id=entry.skill_id,
         target_path=stored_target,
         action="diverged",
         detail=(
@@ -2444,7 +2457,7 @@ def _push_candidate(
     stored_target = normalize_target_path(target.path)
     base = PushItem(
         slug=entry.slug,
-        workflow_id=entry.workflow_id,
+        workflow_id=entry.skill_id,
         target_path=stored_target,
         action="pushed",
     )
@@ -2469,7 +2482,7 @@ def _push_candidate(
             outcome=outcome,
             tags=tags,
             expected_version_token=entry.version_token,
-            workflow_id=entry.workflow_id,
+            workflow_id=entry.skill_id,
             source="manual",
             verifiers=_verifier_payload(entry),
             files=files_payload,

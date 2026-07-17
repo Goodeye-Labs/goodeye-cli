@@ -378,7 +378,7 @@ def publish(
     outcome_override: str | None = typer.Option(
         None,
         "--outcome",
-        help="Override the `outcome` from front-matter. Required for skill discovery.",
+        help="Override the `outcome` from front-matter. Optional discovery metadata.",
     ),
     tag: Annotated[
         list[str] | None,
@@ -467,8 +467,8 @@ def publish(
     # tags: [sre, postmortem]
     ---
 
-    ``name``, ``description``, and ``outcome`` are required, either as
-    flags or front-matter. Tags are optional.
+    ``name`` and ``description`` are required, either as flags or
+    front-matter. ``outcome`` and tags are optional.
 
     Skills are always private to the caller. To share a skill as a
     public template, run ``goodeye templates publish <skill-uuid-or-name>`` as a
@@ -524,11 +524,6 @@ def publish(
     outcome, tags = _extract_discovery_facets(front_matter)
     if outcome_override is not None:
         outcome = _coerce_outcome(outcome_override)
-    if outcome is None:
-        raise ValidationFailed(
-            slug="validation_error",
-            message="Missing `outcome`. Add `outcome:` to the front-matter or pass --outcome.",
-        )
     if tag:
         tags = list(tag)
     if clear_verifiers and verifier:

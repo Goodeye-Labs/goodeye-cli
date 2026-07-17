@@ -268,12 +268,12 @@ def test_pull_json_default_shape(
     target_dir = tmp_path / "skills"
     _seed_target(monkeypatch, tmp_config_paths, str(target_dir))
 
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [{"id": "skl_01", "name": "alpha", "current_version": 1, "version_token": "tok"}]
         )
     )
-    respx.get(f"{SERVER}/v1/workflows/skl_01").mock(
+    respx.get(f"{SERVER}/v1/skills/skl_01").mock(
         return_value=_detail_response(id_="skl_01", name="alpha", body="alpha body")
     )
 
@@ -295,12 +295,12 @@ def test_pull_table_mode(tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: P
     monkeypatch.setenv("COLUMNS", "200")
     target_dir = tmp_path / "skills"
     _seed_target(monkeypatch, tmp_config_paths, str(target_dir))
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [{"id": "skl_01", "name": "alpha", "current_version": 1, "version_token": "tok"}]
         )
     )
-    respx.get(f"{SERVER}/v1/workflows/skl_01").mock(
+    respx.get(f"{SERVER}/v1/skills/skl_01").mock(
         return_value=_detail_response(id_="skl_01", name="alpha", body="alpha body")
     )
     runner = CliRunner()
@@ -325,7 +325,7 @@ def test_pull_table_hint_on_skipped(
     skill = target_dir / "alpha" / "SKILL.md"
     skill.parent.mkdir(parents=True)
     skill.write_text("hand written", encoding="utf-8")
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [{"id": "skl_01", "name": "alpha", "current_version": 1, "version_token": "tok"}]
         )
@@ -350,12 +350,12 @@ def test_pull_force_overwrites(tmp_config_paths: ConfigPaths, monkeypatch, tmp_p
     skill = target_dir / "alpha" / "SKILL.md"
     skill.parent.mkdir(parents=True)
     skill.write_text("hand written", encoding="utf-8")
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [{"id": "skl_01", "name": "alpha", "current_version": 1, "version_token": "tok"}]
         )
     )
-    respx.get(f"{SERVER}/v1/workflows/skl_01").mock(
+    respx.get(f"{SERVER}/v1/skills/skl_01").mock(
         return_value=_detail_response(id_="skl_01", name="alpha", body="registry body")
     )
     runner = CliRunner()
@@ -376,12 +376,12 @@ def test_pull_target_option_scopes_to_one(
     second = tmp_path / "second"
     _seed_target(monkeypatch, tmp_config_paths, str(first))
     _seed_target(monkeypatch, tmp_config_paths, str(second))
-    list_route = respx.get(f"{SERVER}/v1/workflows").mock(
+    list_route = respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [{"id": "skl_01", "name": "alpha", "current_version": 1, "version_token": "tok"}]
         )
     )
-    respx.get(f"{SERVER}/v1/workflows/skl_01").mock(
+    respx.get(f"{SERVER}/v1/skills/skl_01").mock(
         return_value=_detail_response(id_="skl_01", name="alpha", body="alpha body")
     )
     runner = CliRunner()
@@ -425,7 +425,7 @@ def _seed_index_entry(
     sync.upsert_entry(
         state,
         sync.SyncEntry(
-            workflow_id=workflow_id,
+            skill_id=workflow_id,
             slug=slug,
             target_path=sync.normalize_target_path(str(target_dir)),
             synced_version=version,
@@ -466,7 +466,7 @@ def test_status_json_default_shape(
     )
     (target_dir / "alpha" / "SKILL.md").write_text("locally edited", encoding="utf-8")
 
-    list_route = respx.get(f"{SERVER}/v1/workflows").mock(
+    list_route = respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [
                 {
@@ -479,7 +479,7 @@ def test_status_json_default_shape(
         )
     )
     # Registered only to prove status never fetches a body.
-    detail_route = respx.get(f"{SERVER}/v1/workflows/skl_01").mock(
+    detail_route = respx.get(f"{SERVER}/v1/skills/skl_01").mock(
         return_value=_detail_response(id_="skl_01", name="alpha", body="x")
     )
 
@@ -515,7 +515,7 @@ def test_status_table_mode(tmp_config_paths: ConfigPaths, monkeypatch, tmp_path:
         token="t1",
     )
     # Server token advanced past the recorded one: behind-server -> pull.
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [{"id": "skl_01", "name": "alpha", "current_version": 2, "version_token": "t2"}]
         )
@@ -552,7 +552,7 @@ def test_status_table_modified_local_hint_points_at_push(
     # Disk diverges from the recorded hash, but the server token is unchanged:
     # modified-local -> push.
     (target_dir / "alpha" / "SKILL.md").write_text("locally edited", encoding="utf-8")
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [{"id": "skl_01", "name": "alpha", "current_version": 4, "version_token": "tok"}]
         )
@@ -587,7 +587,7 @@ def test_status_table_conflict_hint_points_at_pull_not_push(
     # Both sides moved: disk diverges from the recorded hash AND the server
     # token advanced past the recorded one -> conflict (next_action resolve).
     (target_dir / "alpha" / "SKILL.md").write_text("locally edited", encoding="utf-8")
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [{"id": "skl_01", "name": "alpha", "current_version": 5, "version_token": "t2"}]
         )
@@ -651,7 +651,7 @@ def _seed_modified_entry(
     sync.upsert_entry(
         state,
         sync.SyncEntry(
-            workflow_id=workflow_id,
+            skill_id=workflow_id,
             slug=slug,
             target_path=sync.normalize_target_path(str(target_dir)),
             synced_version=1,
@@ -668,7 +668,7 @@ def _save_response(*, workflow_id: str, name: str) -> httpx.Response:
     return httpx.Response(
         200,
         json={
-            "workflow_id": workflow_id,
+            "skill_id": workflow_id,
             "version": 2,
             "name": name,
             "version_token": "tok-2",
@@ -702,7 +702,7 @@ def test_push_json_default_shape(
         slug="alpha",
         body=_push_body(slug="alpha"),
     )
-    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+    save_route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=_save_response(workflow_id="skl_01", name="alpha")
     )
     runner = CliRunner()
@@ -730,7 +730,7 @@ def test_push_table_mode(tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: P
         slug="alpha",
         body=_push_body(slug="alpha"),
     )
-    respx.post(f"{SERVER}/v1/workflows").mock(
+    respx.post(f"{SERVER}/v1/skills").mock(
         return_value=_save_response(workflow_id="skl_01", name="alpha")
     )
     runner = CliRunner()
@@ -757,7 +757,7 @@ def test_push_table_conflict_hint(
         slug="alpha",
         body=_push_body(slug="alpha"),
     )
-    respx.post(f"{SERVER}/v1/workflows").mock(
+    respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             409, json={"error": "conflict", "message": "version token mismatch"}
         )
@@ -789,7 +789,7 @@ def test_push_ambiguous_reference_skips_item_and_continues(
         slug="alpha",
         body=_push_body(slug="alpha"),
     )
-    respx.post(f"{SERVER}/v1/workflows").mock(
+    respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             409,
             json={
@@ -831,7 +831,7 @@ def test_push_target_option_scopes_to_one(
         slug="beta",
         body=_push_body(slug="beta"),
     )
-    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+    save_route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=_save_response(workflow_id="skl_b", name="beta")
     )
     runner = CliRunner()
@@ -877,12 +877,12 @@ def test_sync_umbrella_pulls_then_shows_status(
     _seed_target(monkeypatch, tmp_config_paths, str(target_dir))
     # status lists with include_archived, pull lists without; both hit the same
     # route, so one mock serves both passes.
-    list_route = respx.get(f"{SERVER}/v1/workflows").mock(
+    list_route = respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [{"id": "skl_01", "name": "alpha", "current_version": 1, "version_token": "tok"}]
         )
     )
-    detail_route = respx.get(f"{SERVER}/v1/workflows/skl_01").mock(
+    detail_route = respx.get(f"{SERVER}/v1/skills/skl_01").mock(
         return_value=_detail_response(id_="skl_01", name="alpha", body="alpha body")
     )
 
@@ -911,12 +911,12 @@ def test_sync_umbrella_table_mode_renders_status(
     monkeypatch.setenv("COLUMNS", "200")
     target_dir = tmp_path / "skills"
     _seed_target(monkeypatch, tmp_config_paths, str(target_dir))
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [{"id": "skl_01", "name": "alpha", "current_version": 1, "version_token": "tok"}]
         )
     )
-    respx.get(f"{SERVER}/v1/workflows/skl_01").mock(
+    respx.get(f"{SERVER}/v1/skills/skl_01").mock(
         return_value=_detail_response(id_="skl_01", name="alpha", body="alpha body")
     )
     runner = CliRunner()
@@ -946,8 +946,8 @@ def test_sync_umbrella_identity_mismatch_surfaces_conflict(
     sync.save_sync_state(state, tmp_config_paths)
 
     # Registered to prove the guard fires before any listing or materialization.
-    list_route = respx.get(f"{SERVER}/v1/workflows")
-    detail_route = respx.get(f"{SERVER}/v1/workflows/skl_01")
+    list_route = respx.get(f"{SERVER}/v1/skills")
+    detail_route = respx.get(f"{SERVER}/v1/skills/skl_01")
 
     runner = CliRunner()
     result = runner.invoke(app, ["skills", "sync"])
@@ -981,12 +981,12 @@ def test_sync_pull_subcommand_still_works(
     _me_route()
     target_dir = tmp_path / "skills"
     _seed_target(monkeypatch, tmp_config_paths, str(target_dir))
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [{"id": "skl_01", "name": "alpha", "current_version": 1, "version_token": "tok"}]
         )
     )
-    respx.get(f"{SERVER}/v1/workflows/skl_01").mock(
+    respx.get(f"{SERVER}/v1/skills/skl_01").mock(
         return_value=_detail_response(id_="skl_01", name="alpha", body="alpha body")
     )
     runner = CliRunner()
@@ -1016,7 +1016,7 @@ def test_pull_yes_removes_deleted_local_copy(
         slug="gone",
         body="registry body",
     )
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [
                 {
@@ -1029,7 +1029,7 @@ def test_pull_yes_removes_deleted_local_copy(
             ]
         )
     )
-    delete_route = respx.delete(f"{SERVER}/v1/workflows/skl_gone")
+    delete_route = respx.delete(f"{SERVER}/v1/skills/skl_gone")
 
     runner = CliRunner()
     result = runner.invoke(app, ["skills", "sync", "pull", "--yes"])
@@ -1057,7 +1057,7 @@ def test_pull_table_hint_on_deleted_on_server(
         slug="gone",
         body="registry body",
     )
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [
                 {
@@ -1108,7 +1108,7 @@ def test_push_converges_sibling_target_once(
     _seed_modified_entry(
         tmp_config_paths, target_dir=second, workflow_id="skl_a", slug="alpha", body=body
     )
-    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+    save_route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=_save_response(workflow_id="skl_a", name="alpha")
     )
 
@@ -1145,7 +1145,7 @@ def test_push_diverged_hint(tmp_config_paths: ConfigPaths, monkeypatch, tmp_path
         slug="alpha",
         body=_push_body(slug="alpha", description="Edit B differs from A."),
     )
-    save_route = respx.post(f"{SERVER}/v1/workflows")
+    save_route = respx.post(f"{SERVER}/v1/skills")
 
     runner = CliRunner()
     result = runner.invoke(app, ["skills", "sync", "push", "--table"])

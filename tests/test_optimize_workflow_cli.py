@@ -29,7 +29,7 @@ def _setup_creds(monkeypatch, tmp_config_paths: ConfigPaths) -> None:
 
 @respx.mock
 def test_optimize_workflow_client_omits_query_when_default() -> None:
-    route = respx.post(f"{SERVER}/v1/workflows/wf_1/optimize").mock(
+    route = respx.post(f"{SERVER}/v1/skills/wf_1/optimize").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -46,7 +46,7 @@ def test_optimize_workflow_client_omits_query_when_default() -> None:
 
     assert route.calls.last.request.content == b""
     parsed = urlparse(str(route.calls.last.request.url))
-    assert parsed.path == "/v1/workflows/wf_1/optimize"
+    assert parsed.path == "/v1/skills/wf_1/optimize"
     assert parse_qs(parsed.query) == {}
     assert result.workflow_id == "wf_1"
     assert result.max_iterations == 20
@@ -56,7 +56,7 @@ def test_optimize_workflow_client_omits_query_when_default() -> None:
 
 @respx.mock
 def test_optimize_workflow_client_passes_max_iterations() -> None:
-    route = respx.post(f"{SERVER}/v1/workflows/wf_1/optimize").mock(
+    route = respx.post(f"{SERVER}/v1/skills/wf_1/optimize").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -81,7 +81,7 @@ def test_workflows_optimize_command_prints_skill_md_and_references(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    route = respx.post(f"{SERVER}/v1/workflows/wf_1/optimize").mock(
+    route = respx.post(f"{SERVER}/v1/skills/wf_1/optimize").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -98,7 +98,7 @@ def test_workflows_optimize_command_prints_skill_md_and_references(
 
     assert result.exit_code == 0, result.output
     parsed = urlparse(str(route.calls.last.request.url))
-    assert parsed.path == "/v1/workflows/wf_1/optimize"
+    assert parsed.path == "/v1/skills/wf_1/optimize"
     assert parse_qs(parsed.query) == {}
     assert "Optimize pack" in result.output
     assert "wf_1" in result.output
@@ -114,7 +114,7 @@ def test_workflows_optimize_command_passes_max_iterations(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    route = respx.post(f"{SERVER}/v1/workflows/wf_1/optimize").mock(
+    route = respx.post(f"{SERVER}/v1/skills/wf_1/optimize").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -165,7 +165,7 @@ def test_workflows_optimize_accepts_max_iterations_above_legacy_cap(
     with an in-range value above 50.
     """
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.post(f"{SERVER}/v1/workflows/wf_1/optimize").mock(
+    respx.post(f"{SERVER}/v1/skills/wf_1/optimize").mock(
         return_value=httpx.Response(
             200,
             json={

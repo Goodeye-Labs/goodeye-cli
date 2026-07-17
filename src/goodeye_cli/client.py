@@ -121,6 +121,19 @@ def _raise_for_status(response: httpx.Response) -> None:
     raise error_from_body(response.status_code, body)
 
 
+def _alias_skill_id(data: Any) -> Any:
+    """Copy the ``skill_id`` response key onto ``workflow_id`` for parsing.
+
+    The wire models below carry the addressed resource under a
+    ``workflow_id`` attribute; the server response carries it as
+    ``skill_id``. Leaves the payload untouched when ``skill_id`` is absent
+    (an optional field on that response) or ``workflow_id`` is already set.
+    """
+    if isinstance(data, dict) and "skill_id" in data and "workflow_id" not in data:
+        data = {**data, "workflow_id": data["skill_id"]}
+    return data
+
+
 class GoodeyeClient:
     """Sync HTTP client for the Goodeye REST API.
 
@@ -417,7 +430,7 @@ class GoodeyeClient:
             params["cursor"] = cursor
         if include_archived:
             params["include_archived"] = "true"
-        response = self._request("GET", "/v1/workflows", params=params)
+        response = self._request("GET", "/v1/skills", params=params)
         return WorkflowList.model_validate(response.json())
 
     def search_workflows(
@@ -435,7 +448,7 @@ class GoodeyeClient:
         }
         if tag is not None:
             body["tag"] = tag
-        response = self._request("POST", "/v1/workflows/search", json_body=body)
+        response = self._request("POST", "/v1/skills/search", json_body=body)
         return WorkflowSearchResponse.model_validate(response.json())
 
     def get_workflow(
@@ -452,7 +465,7 @@ class GoodeyeClient:
         if version is not None:
             params["version"] = version
         accept = "text/markdown" if accept_markdown else "application/json"
-        response = self._request("GET", f"/v1/workflows/{id_or_slug}", params=params, accept=accept)
+        response = self._request("GET", f"/v1/skills/{id_or_slug}", params=params, accept=accept)
         if accept_markdown:
             return response.text
         return WorkflowDetail.model_validate(response.json())
@@ -472,7 +485,7 @@ class GoodeyeClient:
         image_generators: list[dict[str, Any]] | None = None,
         files: list[dict[str, Any]] | None = None,
     ) -> WorkflowSaveResult:
-        """POST /v1/workflows with the flat ``save_workflow`` payload.
+        """POST /v1/skills with the flat ``save_workflow`` payload.
 
         Workflows are always private to the caller. Public sharing is a
         separate explicit step (``publish_template_version``). ``outcome``
@@ -500,7 +513,7 @@ class GoodeyeClient:
             "expected_version_token": expected_version_token,
         }
         if workflow_id is not None:
-            payload["workflow_id"] = workflow_id
+            payload["skill_id"] = workflow_id
         if outcome:
             payload["outcome"] = outcome
         if tags:
@@ -513,26 +526,26 @@ class GoodeyeClient:
             payload["image_generators"] = list(image_generators)
         if files is not None:
             payload["files"] = list(files)
-        response = self._request("POST", "/v1/workflows", json_body=payload)
-        return WorkflowSaveResult.model_validate(response.json())
+        response = self._request("POST", "/v1/skills", json_body=payload)
+        return WorkflowSaveResult.model_validate(_alias_skill_id(response.json()))
 
     def archive_workflow(self, workflow_id: str) -> WorkflowArchiveResult:
-        response = self._request("POST", f"/v1/workflows/{workflow_id}/archive", json_body={})
-        return WorkflowArchiveResult.model_validate(response.json())
+        response = self._request("POST", f"/v1/skills/{workflow_id}/archive", json_body={})
+        return WorkflowArchiveResult.model_validate(_alias_skill_id(response.json()))
 
     def unarchive_workflow(self, workflow_id: str) -> WorkflowUnarchiveResult:
-        response = self._request("POST", f"/v1/workflows/{workflow_id}/unarchive", json_body={})
-        return WorkflowUnarchiveResult.model_validate(response.json())
+        response = self._request("POST", f"/v1/skills/{workflow_id}/unarchive", json_body={})
+        return WorkflowUnarchiveResult.model_validate(_alias_skill_id(response.json()))
 
     def delete_workflow(self, workflow_id: str) -> WorkflowDeleteResult:
-        response = self._request("DELETE", f"/v1/workflows/{workflow_id}")
-        return WorkflowDeleteResult.model_validate(response.json())
+        response = self._request("DELETE", f"/v1/skills/{workflow_id}")
+        return WorkflowDeleteResult.model_validate(_alias_skill_id(response.json()))
 
     def delete_workflow_version(
         self, workflow_id: str, version: int
     ) -> WorkflowDeleteVersionResult:
-        response = self._request("DELETE", f"/v1/workflows/{workflow_id}/versions/{version}")
-        return WorkflowDeleteVersionResult.model_validate(response.json())
+        response = self._request("DELETE", f"/v1/skills/{workflow_id}/versions/{version}")
+        return WorkflowDeleteVersionResult.model_validate(_alias_skill_id(response.json()))
 
     def grant_workflow(
         self,
@@ -543,57 +556,57 @@ class GoodeyeClient:
     ) -> WorkflowGrantResult:
         response = self._request(
             "POST",
-            f"/v1/workflows/{workflow_id}/grants",
+            f"/v1/skills/{workflow_id}/grants",
             json_body={
                 "grantee_email_or_at_team_handle": grantee_email_or_at_team_handle,
                 "role": role,
                 "include_history": include_history,
             },
         )
-        return WorkflowGrantResult.model_validate(response.json())
+        return WorkflowGrantResult.model_validate(_alias_skill_id(response.json()))
 
     def revoke_workflow_grant(
         self, workflow_id: str, grantee_email_or_at_team_handle: str
     ) -> WorkflowGrantRevokeResult:
         response = self._request(
             "DELETE",
-            f"/v1/workflows/{workflow_id}/grants",
+            f"/v1/skills/{workflow_id}/grants",
             json_body={"grantee_email_or_at_team_handle": grantee_email_or_at_team_handle},
         )
-        return WorkflowGrantRevokeResult.model_validate(response.json())
+        return WorkflowGrantRevokeResult.model_validate(_alias_skill_id(response.json()))
 
     def list_workflow_grants(self, workflow_id: str) -> WorkflowGrantList:
-        response = self._request("GET", f"/v1/workflows/{workflow_id}/grants")
+        response = self._request("GET", f"/v1/skills/{workflow_id}/grants")
         return WorkflowGrantList.model_validate(response.json())
 
     def leave_shared_workflow(self, workflow_id: str) -> WorkflowLeaveResult:
-        response = self._request("POST", f"/v1/workflows/{workflow_id}/leave")
-        return WorkflowLeaveResult.model_validate(response.json())
+        response = self._request("POST", f"/v1/skills/{workflow_id}/leave")
+        return WorkflowLeaveResult.model_validate(_alias_skill_id(response.json()))
 
     def transfer_workflow_ownership(
         self, workflow_id: str, new_owner_user_id_or_email: str
     ) -> dict[str, Any]:
         response = self._request(
             "POST",
-            f"/v1/workflows/{workflow_id}/transfer-ownership",
+            f"/v1/skills/{workflow_id}/transfer-ownership",
             json_body={"new_owner_user_id_or_email": new_owner_user_id_or_email},
         )
         return response.json()
 
     def lookup_workflow_lineage(self, id_or_slug: str) -> WorkflowLineage:
-        response = self._request("GET", f"/v1/workflows/{id_or_slug}/lineage")
-        return WorkflowLineage.model_validate(response.json())
+        response = self._request("GET", f"/v1/skills/{id_or_slug}/lineage")
+        return WorkflowLineage.model_validate(_alias_skill_id(response.json()))
 
     def teach_workflow(self, workflow_id: str) -> WorkflowTeachResult:
-        response = self._request("POST", f"/v1/workflows/{workflow_id}/teach")
-        return WorkflowTeachResult.model_validate(response.json())
+        response = self._request("POST", f"/v1/skills/{workflow_id}/teach")
+        return WorkflowTeachResult.model_validate(_alias_skill_id(response.json()))
 
     def optimize_workflow(
         self, workflow_id: str, *, max_iterations: int | None = None
     ) -> WorkflowOptimizeResult:
-        """POST /v1/workflows/{id}/optimize with optional max_iterations.
+        """POST /v1/skills/{id}/optimize with optional max_iterations.
 
-        Returns the SKILL pack (skill_md + references), the workflow id, and
+        Returns the SKILL pack (skill_md + references), the skill id, and
         the validated iteration cap. The server defaults max_iterations to 20
         and accepts values from 1 to 1000.
         """
@@ -602,17 +615,17 @@ class GoodeyeClient:
             params["max_iterations"] = max_iterations
         response = self._request(
             "POST",
-            f"/v1/workflows/{workflow_id}/optimize",
+            f"/v1/skills/{workflow_id}/optimize",
             params=params or None,
         )
-        return WorkflowOptimizeResult.model_validate(response.json())
+        return WorkflowOptimizeResult.model_validate(_alias_skill_id(response.json()))
 
     def optimize_description(
         self, workflow_id: str, *, max_iterations: int | None = None
     ) -> WorkflowOptimizeResult:
-        """POST /v1/workflows/{id}/optimize-description with optional max_iterations.
+        """POST /v1/skills/{id}/optimize-description with optional max_iterations.
 
-        Returns the SKILL pack (skill_md + references), the workflow id, and
+        Returns the SKILL pack (skill_md + references), the skill id, and
         the validated iteration cap for the description-tuning loop. The server
         defaults max_iterations to 10 and accepts values from 1 to 1000. The
         response shape matches the optimize pack, so it reuses
@@ -623,30 +636,30 @@ class GoodeyeClient:
             params["max_iterations"] = max_iterations
         response = self._request(
             "POST",
-            f"/v1/workflows/{workflow_id}/optimize-description",
+            f"/v1/skills/{workflow_id}/optimize-description",
             params=params or None,
         )
-        return WorkflowOptimizeResult.model_validate(response.json())
+        return WorkflowOptimizeResult.model_validate(_alias_skill_id(response.json()))
 
     def audit_workflow(self, workflow_id: str | None = None) -> WorkflowAuditResult:
         """Fetch the audit SKILL pack.
 
-        With a workflow_id, POST /v1/workflows/{id}/audit returns the pack plus
-        the workflow id. Without one, GET /v1/audit/workflow-prompt returns the
+        With a workflow_id, POST /v1/skills/{id}/audit returns the pack plus
+        the skill id. Without one, GET /v1/audit/skill-prompt returns the
         pack for auditing a local skill that is not on Goodeye yet.
         """
         if workflow_id is not None:
-            response = self._request("POST", f"/v1/workflows/{workflow_id}/audit")
+            response = self._request("POST", f"/v1/skills/{workflow_id}/audit")
         else:
-            response = self._request("GET", "/v1/audit/workflow-prompt")
-        return WorkflowAuditResult.model_validate(response.json())
+            response = self._request("GET", "/v1/audit/skill-prompt")
+        return WorkflowAuditResult.model_validate(_alias_skill_id(response.json()))
 
     def check_workflow_safety(
         self, workflow_id: str, *, version: int | None = None
     ) -> SafetyCheckResult:
-        """POST /v1/workflows/{workflow_id}/safety-check.
+        """POST /v1/skills/{workflow_id}/safety-check.
 
-        Runs the block and advisory safety verifiers against the workflow
+        Runs the block and advisory safety verifiers against the skill
         body and returns a combined verdict. Auth required.
         """
         params: dict[str, Any] = {}
@@ -654,13 +667,13 @@ class GoodeyeClient:
             params["version"] = version
         response = self._request(
             "POST",
-            f"/v1/workflows/{workflow_id}/safety-check",
+            f"/v1/skills/{workflow_id}/safety-check",
             params=params or None,
         )
         return SafetyCheckResult.model_validate(response.json())
 
     def get_workflow_file(self, workflow_id: str, path: str) -> dict[str, Any]:
-        """GET /v1/workflows/{workflow_id}/files?path=<path>.
+        """GET /v1/skills/{workflow_id}/files?path=<path>.
 
         Returns the file envelope for a single file. The envelope contains
         ``path``, ``content_kind``, ``size_bytes``, ``executable``, ``purpose``,
@@ -669,13 +682,13 @@ class GoodeyeClient:
         """
         response = self._request(
             "GET",
-            f"/v1/workflows/{workflow_id}/files",
+            f"/v1/skills/{workflow_id}/files",
             params={"path": path},
         )
         return response.json()
 
     def get_workflow_files(self, workflow_id: str, paths: list[str]) -> dict[str, Any]:
-        """GET /v1/workflows/{workflow_id}/files?paths=A&paths=B (batch).
+        """GET /v1/skills/{workflow_id}/files?paths=A&paths=B (batch).
 
         Returns ``{"files": [<envelope>, ...]}``. Envelopes are returned in
         lexicographic path order. An envelope may carry ``error`` instead of
@@ -683,7 +696,7 @@ class GoodeyeClient:
         """
         response = self._request(
             "GET",
-            f"/v1/workflows/{workflow_id}/files",
+            f"/v1/skills/{workflow_id}/files",
             params=[("paths", p) for p in paths],
         )
         return response.json()
@@ -691,7 +704,7 @@ class GoodeyeClient:
     def get_workflow_file_raw(
         self, workflow_id: str, path: str, *, sha256: str | None = None
     ) -> bytes:
-        """GET /v1/workflows/{workflow_id}/files?path=<path>&format=raw.
+        """GET /v1/skills/{workflow_id}/files?path=<path>&format=raw.
 
         Returns the file's raw bytes (the response body). Unlike the JSON
         ``get_workflow_file`` route, raw serving applies no inline binary
@@ -708,7 +721,7 @@ class GoodeyeClient:
             params["sha256"] = sha256
         response = self._request(
             "GET",
-            f"/v1/workflows/{workflow_id}/files",
+            f"/v1/skills/{workflow_id}/files",
             params=params,
         )
         return response.content
@@ -830,7 +843,7 @@ class GoodeyeClient:
     def publish_template_version(
         self, workflow_id: str, *, release_notes: str | None = None
     ) -> TemplatePublishResult:
-        body: dict[str, Any] = {"workflow_id": workflow_id}
+        body: dict[str, Any] = {"skill_id": workflow_id}
         if release_notes is not None:
             body["release_notes"] = release_notes
         response = self._request("POST", "/v1/templates", json_body=body)
@@ -853,7 +866,7 @@ class GoodeyeClient:
         if name is not None:
             body["name"] = name
         response = self._request("POST", "/v1/templates/fork", json_body=body)
-        return TemplateForkResult.model_validate(response.json())
+        return TemplateForkResult.model_validate(_alias_skill_id(response.json()))
 
     def archive_template(
         self, template_id: str, *, archive_reason: str | None = None
@@ -1190,12 +1203,12 @@ class GoodeyeClient:
         return InvitationCancelResult.model_validate(response.json())
 
     def get_design_prompt(self) -> dict[str, Any]:
-        response = self._request("GET", "/v1/design/workflow-prompt")
+        response = self._request("GET", "/v1/design/skill-prompt")
         data = response.json()
         if not isinstance(data, dict):
             raise GoodeyeError(
                 slug="internal_error",
-                message="Unexpected response from /v1/design/workflow-prompt.",
+                message="Unexpected response from /v1/design/skill-prompt.",
             )
         return data
 

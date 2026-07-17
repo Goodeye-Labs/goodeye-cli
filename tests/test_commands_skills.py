@@ -33,7 +33,7 @@ def _setup_creds(monkeypatch, tmp_config_paths: ConfigPaths) -> None:
 @respx.mock
 def test_workflows_list_renders_table(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -69,7 +69,7 @@ def test_workflows_list_defaults_to_one_compact_json_page(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    route = respx.get(f"{SERVER}/v1/workflows").mock(
+    route = respx.get(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -103,7 +103,7 @@ def test_workflows_list_default_filter_is_all(tmp_config_paths: ConfigPaths, mon
     # With no --filter, the CLI must match the server default ("all" = owned +
     # shared) so workflows shared via grants are not hidden by default.
     _setup_creds(monkeypatch, tmp_config_paths)
-    route = respx.get(f"{SERVER}/v1/workflows").mock(
+    route = respx.get(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -146,7 +146,7 @@ def test_workflows_list_all_follows_cursor(tmp_config_paths: ConfigPaths, monkey
             },
         ),
     ]
-    route = respx.get(f"{SERVER}/v1/workflows").mock(side_effect=responses)
+    route = respx.get(f"{SERVER}/v1/skills").mock(side_effect=responses)
 
     runner = CliRunner()
     result = runner.invoke(app, ["skills", "list", "--filter", "all", "--all"])
@@ -161,7 +161,7 @@ def test_workflows_list_table_prints_next_page_hint(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -193,7 +193,7 @@ def test_workflows_list_next_page_hint_keeps_include_archived(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -222,7 +222,7 @@ def test_workflows_search_posts_to_search_endpoint(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    route = respx.post(f"{SERVER}/v1/workflows/search").mock(
+    route = respx.post(f"{SERVER}/v1/skills/search").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -247,7 +247,7 @@ def test_workflows_search_posts_to_search_endpoint(
     assert route.call_count == 1
     req = route.calls[0].request
     assert req.method == "POST"
-    assert req.url.path == "/v1/workflows/search"
+    assert req.url.path == "/v1/skills/search"
     body = _json.loads(req.content.decode())
     assert body["query"] == "chart critique"
     assert result.output == (
@@ -262,7 +262,7 @@ def test_workflows_search_table_flag_renders_table(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.post(f"{SERVER}/v1/workflows/search").mock(
+    respx.post(f"{SERVER}/v1/skills/search").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -291,7 +291,7 @@ def test_workflows_search_table_flag_renders_table(
 @respx.mock
 def test_workflows_get_markdown_default(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.get(f"{SERVER}/v1/workflows/example").mock(
+    respx.get(f"{SERVER}/v1/skills/example").mock(
         return_value=httpx.Response(200, text="This is your Goodeye workflow\n\n# hi\nbody")
     )
     runner = CliRunner()
@@ -311,7 +311,7 @@ def test_workflows_get_stdout_has_no_execute_markers(
 ) -> None:
     """CLI prints the server markdown body without adding hardcoded framing markers."""
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.get(f"{SERVER}/v1/workflows/some-slug").mock(
+    respx.get(f"{SERVER}/v1/skills/some-slug").mock(
         return_value=httpx.Response(
             200, text="This is your Goodeye workflow\n\n# Body\nDo the thing."
         )
@@ -327,7 +327,7 @@ def test_workflows_get_stdout_has_no_execute_markers(
 @respx.mock
 def test_workflows_get_json_flag(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.get(f"{SERVER}/v1/workflows/example").mock(
+    respx.get(f"{SERVER}/v1/skills/example").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -358,7 +358,7 @@ def test_workflows_get_markdown_default_surfaces_run_guidance(
 ) -> None:
     """The default (markdown) fetch path streams the server's run_guidance in-band."""
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.get(f"{SERVER}/v1/workflows/example").mock(
+    respx.get(f"{SERVER}/v1/skills/example").mock(
         return_value=httpx.Response(
             200,
             text="Run this workflow on behalf of the user, then report back.\n\n# hi\nbody",
@@ -376,7 +376,7 @@ def test_workflows_get_json_includes_run_guidance(
 ) -> None:
     """The --json fetch path must not silently drop run_guidance."""
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.get(f"{SERVER}/v1/workflows/example").mock(
+    respx.get(f"{SERVER}/v1/skills/example").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -416,7 +416,7 @@ def test_workflows_get_output_writes_canonical_body(
         "---\nname: example\ndescription: Do the thing.\noutcome: Ship it.\n---\n"
         "# Example\n\nDo the thing.\n"
     )
-    route = respx.get(f"{SERVER}/v1/workflows/example").mock(
+    route = respx.get(f"{SERVER}/v1/skills/example").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -459,7 +459,7 @@ def test_publish_minimal_front_matter(
         "---\n"
         "# Hello\n\nGreet the user.\n"
     )
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -505,7 +505,7 @@ def test_publish_surfaces_authoring_notes_to_stderr(
         "---\n"
         "# Body\n"
     )
-    respx.post(f"{SERVER}/v1/workflows").mock(
+    respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -539,7 +539,7 @@ def test_publish_no_authoring_notes_is_silent(tmp_config_paths: ConfigPaths, mon
         "---\n"
         "# Body\n"
     )
-    respx.post(f"{SERVER}/v1/workflows").mock(
+    respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -569,7 +569,7 @@ def test_publish_next_step_emits_stderr_note(tmp_config_paths: ConfigPaths, monk
         "---\n"
         "# Body\n"
     )
-    respx.post(f"{SERVER}/v1/workflows").mock(
+    respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -600,7 +600,7 @@ def test_publish_no_next_step_is_silent(tmp_config_paths: ConfigPaths, monkeypat
         "---\n"
         "# Body\n"
     )
-    respx.post(f"{SERVER}/v1/workflows").mock(
+    respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -631,7 +631,7 @@ def test_publish_reads_markdown_from_stdin(tmp_config_paths: ConfigPaths, monkey
         "# Body\n\n"
         "Use this generated workflow body.\n"
     )
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -662,7 +662,7 @@ def test_publish_accepts_body_only_stdin_with_metadata_flags(
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
     markdown = "# Workflow body\n\nUse this generated workflow body.\n"
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -718,7 +718,7 @@ def test_publish_cli_metadata_flags_override_front_matter(
         "---\n"
         "# Body\n"
     )
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -774,7 +774,7 @@ def test_publish_forwards_verifier_bindings(
         "---\n"
         "# Body\n",
     )
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -816,7 +816,7 @@ def test_publish_update_without_verifier_flags_preserves_server_bindings(
     workflow_file.write_text(
         "---\nname: hello\ndescription: Say hi.\noutcome: Greet users.\n---\n# Hello\n"
     )
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -856,7 +856,7 @@ def test_publish_clear_verifiers_sends_explicit_empty_list(
     workflow_file.write_text(
         "---\nname: hello\ndescription: Say hi.\noutcome: Greet users.\n---\n# Hello\n"
     )
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -896,7 +896,7 @@ def test_publish_sends_image_generator_bindings(
     workflow_file.write_text(
         "---\nname: hello\ndescription: Say hi.\noutcome: Greet users.\n---\n# Hello\n"
     )
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -938,7 +938,7 @@ def test_publish_update_without_image_generator_flags_preserves_bindings(
     workflow_file.write_text(
         "---\nname: hello\ndescription: Say hi.\noutcome: Greet users.\n---\n# Hello\n"
     )
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -965,7 +965,7 @@ def test_publish_clear_image_generators_sends_explicit_empty_list(
     workflow_file.write_text(
         "---\nname: hello\ndescription: Say hi.\noutcome: Greet users.\n---\n# Hello\n"
     )
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -1028,7 +1028,7 @@ def test_publish_accepts_slug_alias_in_front_matter(
         "---\n"
         "Body\n",
     )
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -1081,19 +1081,32 @@ def test_publish_stdin_missing_description_errors(
     assert "description" in str(result.exception).lower()
 
 
-def test_publish_missing_outcome_errors(
+@respx.mock
+def test_publish_succeeds_without_outcome(
     tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
+    """Outcome is optional metadata: publishing without it reaches the registry."""
     _setup_creds(monkeypatch, tmp_config_paths)
     workflow_file = tmp_path / "no-outcome.md"
     workflow_file.write_text("---\nname: no-outcome\ndescription: Has no outcome.\n---\nBody\n")
+    route = respx.post(f"{SERVER}/v1/skills").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "skill_id": "skl_01",
+                "version": 1,
+                "version_token": "tok-1",
+                "name": "no-outcome",
+            },
+        )
+    )
     runner = CliRunner()
 
     result = runner.invoke(app, ["skills", "publish", str(workflow_file)])
 
-    assert result.exit_code != 0
-    assert result.exception is not None
-    assert "outcome" in str(result.exception).lower()
+    assert result.exit_code == 0, result.output
+    sent = _json.loads(route.calls.last.request.content.decode())
+    assert "outcome" not in sent
 
 
 def test_publish_malformed_front_matter_errors_cleanly(
@@ -1198,7 +1211,7 @@ def test_publish_tags_and_outcome(
         "---\n"
         "# Body\n",
     )
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -1230,7 +1243,7 @@ def test_publish_source_flag_is_forwarded(
     workflow_file.write_text(
         "---\nname: hello\ndescription: Say hi.\noutcome: Greet users.\n---\n# Hello\n"
     )
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -1259,7 +1272,7 @@ def test_publish_omits_source_when_flag_absent(
     workflow_file.write_text(
         "---\nname: hello\ndescription: Say hi.\noutcome: Greet users.\n---\n# Hello\n"
     )
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -1299,7 +1312,7 @@ def test_publish_unknown_front_matter_is_not_special(
         "---\n"
         "# Body\n",
     )
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -1348,7 +1361,7 @@ def test_publish_top_level_outcome_ignores_unknown_front_matter(
         "---\n"
         "# Body\n",
     )
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -1371,7 +1384,7 @@ def test_publish_top_level_outcome_ignores_unknown_front_matter(
 @respx.mock
 def test_workflows_delete_with_yes_flag(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.delete(f"{SERVER}/v1/workflows/skl_01").mock(
+    respx.delete(f"{SERVER}/v1/skills/skl_01").mock(
         return_value=httpx.Response(
             200, json={"workflow_id": "skl_01", "name": "skl_01", "deleted": True}
         )
@@ -1385,7 +1398,7 @@ def test_workflows_delete_with_yes_flag(tmp_config_paths: ConfigPaths, monkeypat
 @respx.mock
 def test_workflows_archive_success(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    route = respx.post(f"{SERVER}/v1/workflows/skl_01/archive").mock(
+    route = respx.post(f"{SERVER}/v1/skills/skl_01/archive").mock(
         return_value=httpx.Response(
             200, json={"workflow_id": "skl_01", "name": "skl_01", "archived": True}
         )
@@ -1401,7 +1414,7 @@ def test_workflows_archive_success(tmp_config_paths: ConfigPaths, monkeypatch) -
 @respx.mock
 def test_workflows_unarchive_success(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    route = respx.post(f"{SERVER}/v1/workflows/skl_01/unarchive").mock(
+    route = respx.post(f"{SERVER}/v1/skills/skl_01/unarchive").mock(
         return_value=httpx.Response(
             200, json={"workflow_id": "skl_01", "name": "skl_01", "archived": False}
         )
@@ -1417,7 +1430,7 @@ def test_workflows_unarchive_success(tmp_config_paths: ConfigPaths, monkeypatch)
 @respx.mock
 def test_workflows_delete_version_with_yes_flag(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    route = respx.delete(f"{SERVER}/v1/workflows/skl_01/versions/3").mock(
+    route = respx.delete(f"{SERVER}/v1/skills/skl_01/versions/3").mock(
         return_value=httpx.Response(
             200, json={"workflow_id": "skl_01", "version": 3, "deleted": True}
         )
@@ -1435,7 +1448,7 @@ def test_workflows_list_include_archived_sends_param_and_marks_rows(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    route = respx.get(f"{SERVER}/v1/workflows").mock(
+    route = respx.get(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -1477,7 +1490,7 @@ def test_workflows_list_omits_archived_column_by_default(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    route = respx.get(f"{SERVER}/v1/workflows").mock(
+    route = respx.get(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -1504,10 +1517,10 @@ def test_workflows_list_omits_archived_column_by_default(
 @respx.mock
 def test_workflow_grant_commands(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    grant_route = respx.post(f"{SERVER}/v1/workflows/wf_1/grants").mock(
+    grant_route = respx.post(f"{SERVER}/v1/skills/wf_1/grants").mock(
         return_value=httpx.Response(201, json={"workflow_id": "wf_1", "role": "admin"})
     )
-    respx.get(f"{SERVER}/v1/workflows/wf_1/grants").mock(
+    respx.get(f"{SERVER}/v1/skills/wf_1/grants").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -1524,10 +1537,10 @@ def test_workflow_grant_commands(tmp_config_paths: ConfigPaths, monkeypatch) -> 
             },
         )
     )
-    revoke_route = respx.delete(f"{SERVER}/v1/workflows/wf_1/grants").mock(
+    revoke_route = respx.delete(f"{SERVER}/v1/skills/wf_1/grants").mock(
         return_value=httpx.Response(200, json={"workflow_id": "wf_1", "revoked": True})
     )
-    respx.post(f"{SERVER}/v1/workflows/wf_1/leave").mock(
+    respx.post(f"{SERVER}/v1/skills/wf_1/leave").mock(
         return_value=httpx.Response(200, json={"workflow_id": "wf_1", "removed_direct_grants": 1})
     )
 
@@ -1552,7 +1565,7 @@ def test_workflows_grants_defaults_to_compact_json_envelope(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.get(f"{SERVER}/v1/workflows/wf_1/grants").mock(
+    respx.get(f"{SERVER}/v1/skills/wf_1/grants").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -1584,7 +1597,7 @@ def test_workflows_grants_defaults_to_compact_json_envelope(
 @respx.mock
 def test_grant_include_history_flag_passes_true(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    grant_route = respx.post(f"{SERVER}/v1/workflows/wf_2/grants").mock(
+    grant_route = respx.post(f"{SERVER}/v1/skills/wf_2/grants").mock(
         return_value=httpx.Response(201, json={"workflow_id": "wf_2", "role": "view"})
     )
 
@@ -1604,7 +1617,7 @@ def test_grant_omitting_include_history_flag_passes_false(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    grant_route = respx.post(f"{SERVER}/v1/workflows/wf_2/grants").mock(
+    grant_route = respx.post(f"{SERVER}/v1/skills/wf_2/grants").mock(
         return_value=httpx.Response(201, json={"workflow_id": "wf_2", "role": "view"})
     )
 
@@ -1620,7 +1633,7 @@ def test_grant_omitting_include_history_flag_passes_false(
 @respx.mock
 def test_grants_table_surfaces_history_scope(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.get(f"{SERVER}/v1/workflows/wf_3/grants").mock(
+    respx.get(f"{SERVER}/v1/skills/wf_3/grants").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -1661,7 +1674,7 @@ def test_grants_table_surfaces_history_scope(tmp_config_paths: ConfigPaths, monk
 @respx.mock
 def test_grants_json_includes_history_fields(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.get(f"{SERVER}/v1/workflows/wf_3/grants").mock(
+    respx.get(f"{SERVER}/v1/skills/wf_3/grants").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -1708,7 +1721,7 @@ def test_grants_json_includes_history_fields(tmp_config_paths: ConfigPaths, monk
 def test_workflows_transfer_ownership_command(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
     inv_id = "dddddddd-dddd-dddd-dddd-dddddddddddd"
-    route = respx.post(f"{SERVER}/v1/workflows/wf_1/transfer-ownership").mock(
+    route = respx.post(f"{SERVER}/v1/skills/wf_1/transfer-ownership").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -1732,7 +1745,7 @@ def test_workflows_transfer_ownership_command(tmp_config_paths: ConfigPaths, mon
 @respx.mock
 def test_workflows_lineage_renders_not_a_fork(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.get(f"{SERVER}/v1/workflows/wf_1/lineage").mock(
+    respx.get(f"{SERVER}/v1/skills/wf_1/lineage").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -1759,7 +1772,7 @@ def test_workflows_lineage_renders_not_a_fork(tmp_config_paths: ConfigPaths, mon
 @respx.mock
 def test_workflows_lineage_renders_clean_fork(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.get(f"{SERVER}/v1/workflows/wf_1/lineage").mock(
+    respx.get(f"{SERVER}/v1/skills/wf_1/lineage").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -1791,7 +1804,7 @@ def test_workflows_lineage_surfaces_archived_and_deprecated_parent(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.get(f"{SERVER}/v1/workflows/wf_1/lineage").mock(
+    respx.get(f"{SERVER}/v1/skills/wf_1/lineage").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -1827,7 +1840,7 @@ def test_workflows_lineage_surfaces_permanently_deleted_parent(
     # surface the deletion rather than mislabel the fork as "not a fork" or
     # print "template None".
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.get(f"{SERVER}/v1/workflows/wf_1/lineage").mock(
+    respx.get(f"{SERVER}/v1/skills/wf_1/lineage").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -1859,7 +1872,7 @@ def test_workflows_lineage_json_includes_all_fields(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.get(f"{SERVER}/v1/workflows/wf_1/lineage").mock(
+    respx.get(f"{SERVER}/v1/skills/wf_1/lineage").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -2007,7 +2020,7 @@ def test_check_safety_rejects_non_numeric_suffix_with_clear_error(
 def test_workflows_check_safety_clean(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
     workflow_uuid = "11111111-1111-1111-1111-111111111111"
-    route = respx.post(f"{SERVER}/v1/workflows/{workflow_uuid}/safety-check").mock(
+    route = respx.post(f"{SERVER}/v1/skills/{workflow_uuid}/safety-check").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -2049,7 +2062,7 @@ def test_workflows_check_safety_strips_at_version_suffix(
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
     workflow_id = "my-workflow"
-    route = respx.post(f"{SERVER}/v1/workflows/{workflow_id}/safety-check").mock(
+    route = respx.post(f"{SERVER}/v1/skills/{workflow_id}/safety-check").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -2091,7 +2104,7 @@ def test_workflows_check_safety_requires_auth(tmp_config_paths: ConfigPaths, mon
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_config_paths.config_dir.parent))
     monkeypatch.delenv("GOODEYE_API_KEY", raising=False)
     monkeypatch.setenv("GOODEYE_SERVER", SERVER)
-    route = respx.post(f"{SERVER}/v1/workflows/whatever/safety-check").mock(
+    route = respx.post(f"{SERVER}/v1/skills/whatever/safety-check").mock(
         return_value=httpx.Response(500, json={"error": "should not be called"})
     )
     runner = CliRunner()
@@ -2107,7 +2120,7 @@ def test_workflows_check_safety_version_flag_overrides_at_suffix(
     """``--version 5`` wins over ``@3`` parsed from the identifier."""
     _setup_creds(monkeypatch, tmp_config_paths)
     workflow_id = "my-workflow"
-    route = respx.post(f"{SERVER}/v1/workflows/{workflow_id}/safety-check").mock(
+    route = respx.post(f"{SERVER}/v1/skills/{workflow_id}/safety-check").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -2150,7 +2163,7 @@ def test_workflows_check_safety_escapes_rich_markup_in_reasoning(
     _setup_creds(monkeypatch, tmp_config_paths)
     workflow_uuid = "11111111-1111-1111-1111-111111111111"
     hostile = "Contains [bold red]injected[/bold red] markup tags."
-    respx.post(f"{SERVER}/v1/workflows/{workflow_uuid}/safety-check").mock(
+    respx.post(f"{SERVER}/v1/skills/{workflow_uuid}/safety-check").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -2188,7 +2201,7 @@ def test_workflows_check_safety_handles_null_verifier_id_on_error(
     """An ``error`` placeholder side from the server has null verifier_id and version."""
     _setup_creds(monkeypatch, tmp_config_paths)
     workflow_uuid = "11111111-1111-1111-1111-111111111111"
-    respx.post(f"{SERVER}/v1/workflows/{workflow_uuid}/safety-check").mock(
+    respx.post(f"{SERVER}/v1/skills/{workflow_uuid}/safety-check").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -2228,7 +2241,7 @@ def test_workflows_check_safety_handles_null_verifier_id_on_error(
 def test_skills_list_works(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     """`goodeye skills list` is the canonical command: no deprecation notice."""
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(200, json={"items": [], "next_cursor": None})
     )
     runner = CliRunner()
@@ -2248,7 +2261,7 @@ def test_workflows_list_forwards_with_verbatim_deprecation_notice(
     naming the replacement command and the removal date.
     """
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(200, json={"items": [], "next_cursor": None})
     )
     runner = CliRunner()

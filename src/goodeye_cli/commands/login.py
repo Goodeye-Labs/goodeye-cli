@@ -51,7 +51,7 @@ def _print_post_login_banner(server: str, api_key: str, console: Console) -> Non
     commands: list[str] = []
     if n > 0:
         clauses.append(f"{wf_count} {wf_noun} shared with you")
-        commands.append("'goodeye workflows list --filter shared-with-me'")
+        commands.append("'goodeye skills list --filter shared-with-me'")
     if m > 0:
         clauses.append(f"{inv_count} pending {inv_noun}")
         commands.append("'goodeye invitations list'")

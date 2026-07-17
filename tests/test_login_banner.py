@@ -67,7 +67,7 @@ def test_login_banner_interactive_shows_counts(tmp_config_paths: ConfigPaths, mo
         respx.get(f"{SERVER}/.well-known/goodeye-client-config").mock(
             return_value=httpx.Response(200, json=_CLIENT_CONFIG_BODY)
         )
-        respx.get(f"{SERVER}/v1/workflows").mock(
+        respx.get(f"{SERVER}/v1/skills").mock(
             return_value=httpx.Response(200, json={"items": _WORKFLOW_ITEMS, "next_cursor": None})
         )
         respx.get(f"{SERVER}/v1/invitations").mock(
@@ -82,7 +82,7 @@ def test_login_banner_interactive_shows_counts(tmp_config_paths: ConfigPaths, mo
     flat = " ".join(result.output.split())
     assert "shared with you" in flat
     assert "pending invitation" in flat
-    assert "goodeye workflows list --filter shared-with-me" in flat
+    assert "goodeye skills list --filter shared-with-me" in flat
     assert "goodeye invitations list" in flat
     # Confirm the counts appear
     assert "2" in flat  # 2 workflows
@@ -107,7 +107,7 @@ def test_login_banner_only_workflows_omits_zero_invitations(
         respx.get(f"{SERVER}/.well-known/goodeye-client-config").mock(
             return_value=httpx.Response(200, json=_CLIENT_CONFIG_BODY)
         )
-        respx.get(f"{SERVER}/v1/workflows").mock(
+        respx.get(f"{SERVER}/v1/skills").mock(
             return_value=httpx.Response(200, json={"items": _WORKFLOW_ITEMS, "next_cursor": None})
         )
         respx.get(f"{SERVER}/v1/invitations").mock(
@@ -120,7 +120,7 @@ def test_login_banner_only_workflows_omits_zero_invitations(
     assert result.exit_code == 0, result.output
     flat = " ".join(result.output.split())
     assert "shared with you" in flat
-    assert "goodeye workflows list --filter shared-with-me" in flat
+    assert "goodeye skills list --filter shared-with-me" in flat
     # The zero category is omitted entirely: no "0 ..." count, no invitation copy.
     assert "pending invitation" not in flat
     assert "goodeye invitations list" not in flat
@@ -144,7 +144,7 @@ def test_login_banner_only_invitations_omits_zero_workflows(
         respx.get(f"{SERVER}/.well-known/goodeye-client-config").mock(
             return_value=httpx.Response(200, json=_CLIENT_CONFIG_BODY)
         )
-        respx.get(f"{SERVER}/v1/workflows").mock(
+        respx.get(f"{SERVER}/v1/skills").mock(
             return_value=httpx.Response(200, json={"items": [], "next_cursor": None})
         )
         respx.get(f"{SERVER}/v1/invitations").mock(
@@ -160,7 +160,7 @@ def test_login_banner_only_invitations_omits_zero_workflows(
     assert "goodeye invitations list" in flat
     # The zero category is omitted entirely: no "0 ..." count, no workflow copy.
     assert "shared with you" not in flat
-    assert "goodeye workflows list --filter shared-with-me" not in flat
+    assert "goodeye skills list --filter shared-with-me" not in flat
 
 
 def test_login_banner_no_tty_prints_nothing(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
@@ -179,7 +179,7 @@ def test_login_banner_no_tty_prints_nothing(tmp_config_paths: ConfigPaths, monke
         respx.get(f"{SERVER}/.well-known/goodeye-client-config").mock(
             return_value=httpx.Response(200, json=_CLIENT_CONFIG_BODY)
         )
-        wf_route = respx.get(f"{SERVER}/v1/workflows").mock(
+        wf_route = respx.get(f"{SERVER}/v1/skills").mock(
             return_value=httpx.Response(200, json={"items": _WORKFLOW_ITEMS, "next_cursor": None})
         )
         inv_route = respx.get(f"{SERVER}/v1/invitations").mock(
@@ -214,7 +214,7 @@ def test_login_banner_api_error_prints_nothing_and_login_succeeds(
         respx.get(f"{SERVER}/.well-known/goodeye-client-config").mock(
             return_value=httpx.Response(200, json=_CLIENT_CONFIG_BODY)
         )
-        respx.get(f"{SERVER}/v1/workflows").mock(
+        respx.get(f"{SERVER}/v1/skills").mock(
             return_value=httpx.Response(
                 500,
                 json={"error": "server_error", "message": "Internal error."},
