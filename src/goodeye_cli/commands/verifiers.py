@@ -359,7 +359,14 @@ def run(
         )
     # --workflow-id/--workflow-version/--workflow-ref are deprecated hidden
     # aliases for --skill-id/--skill-version/--skill-ref; the canonical flag
-    # wins when both are supplied.
+    # wins when both are supplied. Announce the deprecation on stderr when a
+    # caller still uses one, matching the `goodeye workflows` group notice.
+    if workflow_id is not None or workflow_version is not None or workflow_ref is not None:
+        typer.echo(
+            "--workflow-id/--workflow-version/--workflow-ref are deprecated and "
+            "will be removed on 2026-10-01; use --skill-id/--skill-version/--skill-ref.",
+            err=True,
+        )
     effective_skill_id = skill_id if skill_id is not None else workflow_id
     effective_skill_version = skill_version if skill_version is not None else workflow_version
     effective_skill_ref = skill_ref if skill_ref is not None else workflow_ref

@@ -316,6 +316,7 @@ def test_verifiers_run_forwards_provenance_flags(
         ],
     )
     assert result.exit_code == 0, result.output
+    assert "--workflow-id/--workflow-version/--workflow-ref are deprecated" in result.stderr
 
 
 @respx.mock

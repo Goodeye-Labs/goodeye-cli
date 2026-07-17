@@ -554,6 +554,7 @@ def test_image_generators_generate_forwards_provenance_flags(
         ],
     )
     assert result.exit_code == 0, result.output
+    assert "--workflow-id/--workflow-version/--workflow-ref are deprecated" in result.stderr
 
 
 @respx.mock
