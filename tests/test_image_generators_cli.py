@@ -528,9 +528,9 @@ def test_image_generators_generate_forwards_provenance_flags(
 
     def check(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content.decode())
-        assert body["workflow_id"] == "wf_123"
-        assert body["workflow_version"] == 5
-        assert body["workflow_ref"] == "my-workflow"
+        assert body["skill_id"] == "wf_123"
+        assert body["skill_version"] == 5
+        assert body["skill_ref"] == "my-workflow"
         assert body["run_id"] == "trace-xyz"
         return httpx.Response(201, json=_run_response())
 
@@ -564,9 +564,9 @@ def test_image_generators_generate_forwards_provenance_via_canonical_skill_flags
 
     def check(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content.decode())
-        assert body["workflow_id"] == "skl_123"
-        assert body["workflow_version"] == 5
-        assert body["workflow_ref"] == "my-skill"
+        assert body["skill_id"] == "skl_123"
+        assert body["skill_version"] == 5
+        assert body["skill_ref"] == "my-skill"
         return httpx.Response(201, json=_run_response())
 
     respx.post(f"{SERVER}/v1/image-generators/system:image-standard/runs").mock(side_effect=check)

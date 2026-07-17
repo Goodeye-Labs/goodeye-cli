@@ -1029,11 +1029,11 @@ class GoodeyeClient:
         if version is not None:
             body["version"] = version
         if workflow_id is not None:
-            body["workflow_id"] = workflow_id
+            body["skill_id"] = workflow_id
         if workflow_version is not None:
-            body["workflow_version"] = workflow_version
+            body["skill_version"] = workflow_version
         if workflow_ref is not None:
-            body["workflow_ref"] = workflow_ref
+            body["skill_ref"] = workflow_ref
         if run_id is not None:
             body["run_id"] = run_id
         response = self._request(
@@ -1143,11 +1143,11 @@ class GoodeyeClient:
         if version is not None:
             body["version"] = version
         if workflow_id is not None:
-            body["workflow_id"] = workflow_id
+            body["skill_id"] = workflow_id
         if workflow_version is not None:
-            body["workflow_version"] = workflow_version
+            body["skill_version"] = workflow_version
         if workflow_ref is not None:
-            body["workflow_ref"] = workflow_ref
+            body["skill_ref"] = workflow_ref
         if run_id is not None:
             body["run_id"] = run_id
         body["visibility"] = visibility

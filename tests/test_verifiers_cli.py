@@ -277,9 +277,9 @@ def test_verifiers_run_forwards_provenance_flags(
 
     def check_request(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content.decode())
-        assert body["workflow_id"] == "wf_123"
-        assert body["workflow_version"] == 4
-        assert body["workflow_ref"] == "lesson-quality"
+        assert body["skill_id"] == "wf_123"
+        assert body["skill_version"] == 4
+        assert body["skill_ref"] == "lesson-quality"
         assert body["run_id"] == "trace-abc"
         return httpx.Response(
             201,
@@ -347,9 +347,9 @@ def test_verifiers_run_forwards_provenance_via_canonical_skill_flags(
 
     def check_request(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content.decode())
-        assert body["workflow_id"] == "skl_123"
-        assert body["workflow_version"] == 4
-        assert body["workflow_ref"] == "lesson-quality"
+        assert body["skill_id"] == "skl_123"
+        assert body["skill_version"] == 4
+        assert body["skill_ref"] == "lesson-quality"
         return httpx.Response(
             201,
             json={
