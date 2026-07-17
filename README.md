@@ -8,13 +8,13 @@ Goodeye makes an AI agent meet your standard before you ever see the output, eve
 
 ## How it works
 
-You capture the work that moves an outcome as a markdown runbook, called a workflow, and pair it with checks, called verifiers, that score an agent's output against the standard you set. The agent runs the workflow, the verifiers judge the result, and the agent revises until the output clears your bar. Workflows stay private to you until you choose to share one publicly as a template.
+You capture the work that moves an outcome as a markdown runbook, called a skill, and pair it with checks, called verifiers, that score an agent's output against the standard you set. The agent runs the skill, the verifiers judge the result, and the agent revises until the output clears your bar. Skills stay private to you until you choose to share one publicly as a template.
 
 A verifier can be deterministic (format, schema, tests, numeric bounds) or an LLM judge for the calls no test can make, like tone or image quality. The full picture is at https://goodeye.dev/docs/overview.
 
 ## Your AI agent is the primary caller
 
-The CLI is built to be driven by an AI coding agent on your behalf, though every command also works when you run it yourself. The intended loop: you ask your agent to run a Goodeye workflow, it fetches the body with `goodeye workflows get <name>` (or `goodeye templates get @handle/slug`), and it executes those instructions as your runbook instead of printing or summarizing them. The `get` commands wrap the body in agent-facing markers so the calling agent knows to run it. Pass `--output PATH` or `--json` when you want the raw content instead.
+The CLI is built to be driven by an AI coding agent on your behalf, though every command also works when you run it yourself. The intended loop: you ask your agent to run a Goodeye skill, it fetches the body with `goodeye skills get <name>` (or `goodeye templates get @handle/slug`), and it executes those instructions as your runbook instead of printing or summarizing them. The `get` commands wrap the body in agent-facing markers so the calling agent knows to run it. Pass `--output PATH` or `--json` when you want the raw content instead.
 
 ## Install
 
@@ -39,7 +39,7 @@ goodeye templates list
 goodeye templates get @randalolson/high-signal-chart-workflow
 ```
 
-`templates get` prints the workflow body, and your agent follows it: it finds a dataset, renders a chart, and runs the template's pinned verifier, revising until the chart passes. That verifier run is the step your agent makes, drawing on a small per-network credit grant:
+`templates get` prints the template body (the skill), and your agent follows it: it finds a dataset, renders a chart, and runs the template's pinned verifier, revising until the chart passes. That verifier run is the step your agent makes, drawing on a small per-network credit grant:
 
 ```sh
 # what your agent runs against the finished chart:
@@ -47,26 +47,26 @@ goodeye verifiers run 89dcc843-d056-44d9-ae34-ebcff4903885 \
   --version 1 --media-url '<public-https-chart-url>' --anonymous
 ```
 
-### Author your own workflow
+### Author your own skill
 
 ```sh
 goodeye login                          # or: goodeye register --email you@example.com
 goodeye me claim-handle your-handle    # one time, required before you publish a template
 
-goodeye design                         # prints the designer prompt; pipe it to your agent to draft a workflow and its verifiers
+goodeye design                         # prints the designer prompt; pipe it to your agent to draft a skill and its verifiers
 
 # save the draft from your agent's output (stdin keeps a stray file out of the working directory):
-goodeye workflows publish - \
-  --name my-workflow \
+goodeye skills publish - \
+  --name my-skill \
   --description "One sentence on what this does and when to use it." \
-  --outcome "The result this workflow moves" <<'EOF'
+  --outcome "The result this skill moves" <<'EOF'
 # Body
 
-The workflow body your agent will execute.
+The skill body your agent will execute.
 EOF
 
-goodeye workflows get my-workflow      # fetch it back for an agent to run
-goodeye templates publish my-workflow  # share it publicly as a template
+goodeye skills get my-skill            # fetch it back for an agent to run
+goodeye templates publish my-skill     # share it publicly as a template
 ```
 
 ## What the CLI can do
@@ -75,17 +75,17 @@ These command areas cover the whole surface. Run `goodeye --help` or `goodeye <a
 
 | Area | What it does | Docs |
 |---|---|---|
-| `workflows` | Find, save, version, run, share, and improve your private workflows, including teach, optimize, audit, and local file sync | https://goodeye.dev/docs/workflows |
-| `templates` | Browse the public catalog, publish a workflow as a template, and fork one to customize | https://goodeye.dev/docs/templates |
-| `verifiers` | Deploy and run the LLM-judge checks a workflow calls to grade agent output | https://goodeye.dev/docs/verifiers |
-| `image-generators` | Deploy reusable image generators and generate images a workflow can call | https://goodeye.dev/docs/image-generators |
+| `skills` | Find, save, version, run, share, and improve your private skills, including teach, optimize, audit, and local file sync | https://goodeye.dev/docs/skills |
+| `templates` | Browse the public catalog, publish a skill as a template, and fork one to customize | https://goodeye.dev/docs/templates |
+| `verifiers` | Deploy and run the LLM-judge checks a skill calls to grade agent output | https://goodeye.dev/docs/verifiers |
+| `image-generators` | Deploy reusable image generators and generate images a skill can call | https://goodeye.dev/docs/image-generators |
 | `images` | Upload and manage hosted images with stable URLs | https://goodeye.dev/docs/images |
-| `teams` | Create teams and manage membership so a workflow can be shared with a group | https://goodeye.dev/docs/teams |
+| `teams` | Create teams and manage membership so a skill can be shared with a group | https://goodeye.dev/docs/teams |
 | `referrals` | View your referral code and redeem someone else's | https://goodeye.dev/docs/referrals |
 | `invitations` | Accept, decline, or cancel team and ownership-transfer invitations | https://goodeye.dev/docs/cli |
 | `billing` | Upgrade to or cancel Pro (`plan upgrade` / `plan cancel`), open the billing portal, buy a one-time credit top-up, or manage automatic top-ups (`auto-topup show` / `set` / `off`) | https://goodeye.dev/docs/cli |
 | `auth`, `me`, `usage` | Manage API keys, claim your handle, and check credit usage | https://goodeye.dev/docs/cli |
-| `design` | Print the workflow-designer prompt for your agent | https://goodeye.dev/docs/cli |
+| `design` | Print the skill-designer prompt for your agent | https://goodeye.dev/docs/cli |
 
 Session commands sit at the top level: `login`, `register`, `logout`, `whoami`, and `update`.
 
@@ -105,14 +105,14 @@ The CLI reads credentials from `GOODEYE_API_KEY` first, then from `~/.config/goo
 
 ## CLI, MCP, or REST
 
-The CLI is a convenience layer over the public `/v1` REST API. For a stable programmatic contract, call that REST API directly (https://goodeye.dev/docs/rest-api). To drive Goodeye from an MCP client, connect to `mcp.goodeye.dev/mcp` (https://goodeye.dev/docs/mcp). Your workflows and their verifiers reach your agent on every surface.
+The CLI is a convenience layer over the public `/v1` REST API. For a stable programmatic contract, call that REST API directly (https://goodeye.dev/docs/rest-api). To drive Goodeye from an MCP client, connect to `mcp.goodeye.dev/mcp` (https://goodeye.dev/docs/mcp). Your skills and their verifiers reach your agent on every surface.
 
 ## Documentation
 
 - Overview and mental model: https://goodeye.dev/docs/overview
 - Getting started: https://goodeye.dev/docs/getting-started
 - CLI reference, every command and flag: https://goodeye.dev/docs/cli
-- Workflows: https://goodeye.dev/docs/workflows
+- Skills: https://goodeye.dev/docs/skills
 - Verifiers: https://goodeye.dev/docs/verifiers
 - Templates: https://goodeye.dev/docs/templates
 - Public template catalog: https://goodeye.dev

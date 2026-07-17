@@ -1,6 +1,6 @@
-"""Best-effort automatic-pull tail for the local workflow mirror.
+"""Best-effort automatic-pull tail for the local skill mirror.
 
-When the user opts in (`workflows sync auto on`), the CLI keeps the safe set of
+When the user opts in (`skills sync auto on`), the CLI keeps the safe set of
 its configured sync targets fresh in the background. The work runs as a tail
 after the user's command finishes (registered through ``atexit`` in ``app.py``),
 so it never delays or alters the exit status of the command the user actually
@@ -51,7 +51,7 @@ def should_run_auto_pull(
 
     - the invocation is not suppressed (not CI, ``--json``, ``--help``,
       ``--version``, the bare/``help``/``update`` forms, or an explicit
-      ``workflows sync ...`` command),
+      ``skills sync ...`` command),
     - credentials exist (the caller is authenticated),
     - automatic pull is enabled and at least one target is configured,
     - the throttle interval has elapsed since the last automatic pull.
@@ -136,10 +136,10 @@ def format_auto_pull_summary(result: sync.PullResult) -> str | None:
     follow_up = ""
     if skipped:
         summary += f"; {skipped} skipped (local edits)"
-        follow_up = " Next: goodeye workflows sync status"
+        follow_up = " Next: goodeye skills sync status"
     if gone:
         summary += f"; {gone} gone from the registry"
-        follow_up = " Next: goodeye workflows sync status"
+        follow_up = " Next: goodeye skills sync status"
     return summary + follow_up
 
 

@@ -30,16 +30,16 @@ def test_workflows_teach_help_documents_required_publish_metadata() -> None:
     plain_output = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
     normalized = " ".join(plain_output.split())
     assert (
-        "goodeye workflows publish - --name <name> --description <description> "
+        "goodeye skills publish - --name <name> --description <description> "
         "--outcome <outcome> --source teach --expected-version-token "
         "<captured at stage 2>"
     ) in normalized
-    assert "goodeye workflows publish - --source teach --expected-version-token" not in normalized
+    assert "goodeye skills publish - --source teach --expected-version-token" not in normalized
 
 
 @respx.mock
 def test_teach_workflow_client_posts_no_body() -> None:
-    route = respx.post(f"{SERVER}/v1/workflows/wf_1/teach").mock(
+    route = respx.post(f"{SERVER}/v1/skills/wf_1/teach").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -62,7 +62,7 @@ def test_workflows_teach_command_prints_skill_md(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
     _setup_creds(monkeypatch, tmp_config_paths)
-    respx.post(f"{SERVER}/v1/workflows/wf_1/teach").mock(
+    respx.post(f"{SERVER}/v1/skills/wf_1/teach").mock(
         return_value=httpx.Response(
             200,
             json={

@@ -1,9 +1,9 @@
-"""`goodeye workflows sync ...` subcommand group.
+"""`goodeye skills sync ...` subcommand group.
 
-This layer configures where the caller's registry workflows are mirrored
-locally and pulls workflow bodies down to those directories. It exposes the
+This layer configures where the caller's hosted skills are mirrored
+locally and pulls skill bodies down to those directories. It exposes the
 ``target`` subcommands (add, list, remove) that read and write the local sync
-config, plus ``pull`` which writes registry workflows to disk and records what
+config, plus ``pull`` which writes hosted skills to disk and records what
 it wrote in the local index.
 """
 
@@ -22,7 +22,7 @@ from goodeye_cli.errors import AuthRequired, ValidationFailed
 from goodeye_cli.output import echo_json, items_envelope, resolve_output_mode
 
 app = typer.Typer(
-    help="Sync workflows between the registry and local skill directories.",
+    help="Sync hosted skills with local skill directories.",
     invoke_without_command=True,
 )
 
@@ -58,7 +58,7 @@ def _sync_root(
         False,
         "--yes",
         help=(
-            "Skip the confirmation prompt before removing a deleted workflow's local copy. "
+            "Skip the confirmation prompt before removing a deleted skill's local copy. "
             "Applies to the bare command's pull; ignored when a subcommand is given."
         ),
     ),
@@ -70,8 +70,8 @@ def _sync_root(
     """Pull every configured target, then show the resulting status.
 
     Run with no subcommand, this brings the local mirror up to date (the same
-    work as `goodeye workflows sync pull`) and then prints where each workflow
-    stands afterward (the same view as `goodeye workflows sync status`). Pass a
+    work as `goodeye skills sync pull`) and then prints where each skill
+    stands afterward (the same view as `goodeye skills sync status`). Pass a
     subcommand (`target`, `pull`, `status`, `push`) to run just that step. The
     `--force` and `--yes` options apply to the pull the bare command runs; they
     are ignored when a subcommand is invoked. Requires authentication.
@@ -132,7 +132,7 @@ def _coerce_scope(raw: str) -> sync.SyncScope:
 def target_add(
     path: str | None = typer.Argument(
         None,
-        help="Directory to mirror workflows into. Omit when using --preset.",
+        help="Directory to mirror skills into. Omit when using --preset.",
     ),
     preset: str | None = typer.Option(
         None,
@@ -142,26 +142,26 @@ def target_add(
     scope: str | None = typer.Option(
         None,
         "--scope",
-        help="Which workflows to mirror here: owned, all, or selected.",
+        help="Which skills to mirror here: owned, all, or selected.",
     ),
     only: list[str] = typer.Option(
         [],
         "--only",
         help=(
-            "Workflow slug or glob (repeatable). With an existing target it is appended to "
+            "Skill slug or glob (repeatable). With an existing target it is appended to "
             "the selected allowlist (duplicates ignored). Only valid with --scope selected."
         ),
     ),
     json_output: bool = typer.Option(False, "--json", help="Print the added target as JSON."),
     table_output: bool = typer.Option(False, "--table", help="Print the added target as a table."),
 ) -> None:
-    """Add a sync target, or add workflows to an existing target's selected allowlist.
+    """Add a sync target, or add skills to an existing target's selected allowlist.
 
     Without --only, creates a new target directory. With --only (and --scope
-    selected), manages individual workflows: a missing target is created with
+    selected), manages individual skills: a missing target is created with
     them allowlisted; an existing target has them appended (duplicates ignored).
     This is local configuration: it does not contact the registry. Run
-    `goodeye workflows sync pull` afterward to materialize them.
+    `goodeye skills sync pull` afterward to materialize them.
     """
     mode = resolve_output_mode(json_output=json_output, table_output=table_output)
     only_list = list(only)
@@ -209,13 +209,13 @@ def target_add(
         console = Console()
         if added:
             console.print(
-                f"[green]Added[/green] {len(added)} workflow(s) to the allowlist of "
+                f"[green]Added[/green] {len(added)} skill(s) to the allowlist of "
                 f"{stored_path}: {', '.join(added)}"
             )
             pull_args = " ".join(added)
             console.print(
                 f"[yellow]Next:[/yellow] run "
-                f"`goodeye workflows sync pull {pull_args}` to materialize them."
+                f"`goodeye skills sync pull {pull_args}` to materialize them."
             )
         else:
             console.print(
@@ -286,17 +286,17 @@ def target_remove(
         [],
         "--only",
         help=(
-            "Workflow slug or glob to drop from the target's selected allowlist (repeatable). "
+            "Skill slug or glob to drop from the target's selected allowlist (repeatable). "
             "Without --only the whole target is removed."
         ),
     ),
     json_output: bool = typer.Option(False, "--json", help="Print the result as JSON."),
     table_output: bool = typer.Option(False, "--table", help="Print a one-line confirmation."),
 ) -> None:
-    """Remove a whole sync target, or remove individual workflows from its allowlist.
+    """Remove a whole sync target, or remove individual skills from its allowlist.
 
     Without --only, the entire target is removed and its directory is no longer
-    synced. With --only, only the named workflows are dropped from the target's
+    synced. With --only, only the named skills are dropped from the target's
     allowlist and the target itself is kept.
     """
     mode = resolve_output_mode(json_output=json_output, table_output=table_output)
@@ -319,7 +319,7 @@ def target_remove(
         console = Console()
         if removed_entries:
             console.print(
-                f"[green]Removed[/green] {len(removed_entries)} workflow(s) from the "
+                f"[green]Removed[/green] {len(removed_entries)} skill(s) from the "
                 f"allowlist of {stored_path}: {', '.join(removed_entries)}"
             )
         else:
@@ -367,7 +367,7 @@ def _auto_root(
     """Show whether automatic background pulls are on, with the interval and last run.
 
     Automatic pull is off by default. When on, the CLI refreshes the safe set of
-    your configured targets (new and behind-registry workflows) in the
+    your configured targets (new and behind-registry skills) in the
     background after a command finishes, no more often than the interval. It
     never overwrites local edits, never deletes a local copy, and never blocks
     your command. Run with `on` or `off` to change the setting.
@@ -435,7 +435,7 @@ def auto_on(
     if not config.targets:
         console.print(
             "[yellow]Next:[/yellow] add a target with "
-            "`goodeye workflows sync target add <dir>` so there is something to keep fresh."
+            "`goodeye skills sync target add <dir>` so there is something to keep fresh."
         )
 
 
@@ -469,7 +469,7 @@ _SKIPPED_ACTIONS = frozenset({"skipped-modified", "skipped-conflict"})
 def _pull_hints(items: list[sync.PullItem]) -> list[str]:
     """Build neutral next-step hints for a pull pass.
 
-    Workflows that kept local edits point at ``--force``. A workflow gone from
+    Skills that kept local edits point at ``--force``. A skill gone from
     the registry but kept on disk points at the same pull to remove it: ``--yes``
     when the caller merely declined the prompt, ``--force`` when the local copy
     has un-pushed edits the pull preserved (``--yes`` alone will not discard
@@ -478,20 +478,20 @@ def _pull_hints(items: list[sync.PullItem]) -> list[str]:
     hints: list[str] = []
     if any(item.action in _SKIPPED_ACTIONS for item in items):
         hints.append(
-            "some workflows kept their local edits; re-run with --force to overwrite "
+            "some skills kept their local edits; re-run with --force to overwrite "
             "them with the registry copy"
         )
     gone = sum(1 for item in items if item.action == "deleted-on-server")
     if gone:
         hints.append(
-            f"{gone} workflow(s) are gone from the registry but kept on disk; re-run "
-            "`goodeye workflows sync pull --yes` to remove their local copies "
+            f"{gone} skill(s) are gone from the registry but kept on disk; re-run "
+            "`goodeye skills sync pull --yes` to remove their local copies "
             "(use --force if they have local edits)"
         )
     incomplete = sum(1 for item in items if item.action == "pulled-incomplete")
     if incomplete:
         hints.append(
-            f"{incomplete} workflow(s) pulled with missing sibling files (some assets could "
+            f"{incomplete} skill(s) pulled with missing sibling files (some assets could "
             "not be retrieved); those files were left out of the local directory and were not "
             "recorded as synced"
         )
@@ -502,7 +502,7 @@ def _pull_hints(items: list[sync.PullItem]) -> list[str]:
 def pull(
     slugs: list[str] = typer.Argument(
         None,
-        help="Workflow slugs to pull. Omit to pull everything in scope.",
+        help="Skill slugs to pull. Omit to pull everything in scope.",
     ),
     target: str | None = typer.Option(
         None,
@@ -517,16 +517,16 @@ def pull(
     yes: bool = typer.Option(
         False,
         "--yes",
-        help="Skip the confirmation prompt before removing a deleted workflow's local copy.",
+        help="Skip the confirmation prompt before removing a deleted skill's local copy.",
     ),
     json_output: bool = typer.Option(False, "--json", help="Print results as JSON."),
     table_output: bool = typer.Option(False, "--table", help="Print results as a table."),
 ) -> None:
-    """Pull registry workflows down to the configured local directories.
+    """Pull hosted skills down to the configured local directories.
 
-    Each in-scope workflow is written to <target>/<slug>/SKILL.md. A local file
-    that has been edited since the last pull is preserved unless --force is
-    given. A workflow that has been deleted on the registry has its local copy
+    Each in-scope skill is written to <target>/<slug>/SKILL.md. A local skill
+    file that has been edited since the last pull is preserved unless --force is
+    given. A skill that has been deleted on the registry has its local copy
     removed after a confirmation prompt (--yes skips the prompt); this only ever
     removes the local directory and never deletes anything on the registry.
     Requires authentication.
@@ -554,9 +554,9 @@ def pull(
 
     console = Console()
     if not result.items:
-        console.print("[dim]No workflows in scope to pull.[/dim]")
+        console.print("[dim]No skills in scope to pull.[/dim]")
         return
-    table = Table(title="Pulled workflows")
+    table = Table(title="Pulled skills")
     table.add_column("Slug", no_wrap=True)
     table.add_column("Target", no_wrap=True)
     table.add_column("Action")
@@ -578,7 +578,7 @@ def _render_status(result: sync.StatusResult) -> None:
     """
     console = Console()
     if not result.items:
-        console.print("[dim]No workflows in scope.[/dim]")
+        console.print("[dim]No skills in scope.[/dim]")
         return
     table = Table(title="Sync status")
     table.add_column("Slug", no_wrap=True)
@@ -598,13 +598,13 @@ def _status_hints(items: list[sync.StatusItem]) -> list[str]:
     """Build neutral next-step hints that name only commands that exist now.
 
     Each hint points at the command that reconciles that state, and every
-    command named here exists today. ``behind-server`` workflows update with
-    ``pull``. ``modified-local`` workflows upload with ``push`` (their
-    ``next_action`` is ``push``). ``conflict`` workflows moved on both sides, so
+    command named here exists today. ``behind-server`` skills update with
+    ``pull``. ``modified-local`` skills upload with ``push`` (their
+    ``next_action`` is ``push``). ``conflict`` skills moved on both sides, so
     they point at ``pull`` first to merge, then ``status`` to recheck before a
     later push (their ``next_action`` is ``resolve``); they are never sent
-    straight to push. ``untracked`` local directories become registry workflows
-    through ``workflows publish``.
+    straight to push. ``untracked`` local directories become hosted skills
+    through ``skills publish``.
     """
     hints: list[str] = []
     behind = sum(1 for i in items if i.state == "behind-server")
@@ -612,23 +612,20 @@ def _status_hints(items: list[sync.StatusItem]) -> list[str]:
     conflicted = sum(1 for i in items if i.state == "conflict")
     untracked = sum(1 for i in items if i.state == "untracked")
     if behind:
-        hints.append(
-            f"run `goodeye workflows sync pull` to update {behind} behind-server workflow(s)"
-        )
+        hints.append(f"run `goodeye skills sync pull` to update {behind} behind-server skill(s)")
     if modified:
         hints.append(
-            f"{modified} workflow(s) have local edits; run `goodeye workflows sync push` "
-            "to upload them"
+            f"{modified} skill(s) have local edits; run `goodeye skills sync push` to upload them"
         )
     if conflicted:
         hints.append(
-            f"{conflicted} workflow(s) moved on both sides; run `goodeye workflows sync pull` "
-            "to merge, then `goodeye workflows sync status` before pushing"
+            f"{conflicted} skill(s) moved on both sides; run `goodeye skills sync pull` "
+            "to merge, then `goodeye skills sync status` before pushing"
         )
     if untracked:
         hints.append(
-            f"{untracked} local workflow(s) are not yet in the registry; create them "
-            "with `goodeye workflows publish`"
+            f"{untracked} local skill(s) are not yet in the registry; create them "
+            "with `goodeye skills publish`"
         )
     return hints
 
@@ -645,7 +642,7 @@ def status(
 ) -> None:
     """Report drift between the registry and the local skill directories.
 
-    For each in-scope workflow this compares what the registry reports against
+    For each in-scope skill this compares what the registry reports against
     what was last mirrored locally and what is on disk, classifying each one as
     clean, edited locally, behind the registry, conflicted, deleted upstream, or
     a local directory the registry does not track yet. It reads only: nothing is
@@ -670,39 +667,39 @@ def _push_hints(items: list[sync.PushItem]) -> list[str]:
     """Build neutral next-step hints for a push pass.
 
     A conflict points the caller at the existing ``pull`` and ``status``
-    commands. A diverged workflow points at ``--target`` to pick the copy to
-    keep. An untracked local directory points at ``workflows publish``, the only
-    path that creates a new registry workflow. A ``pull-required`` copy was
+    commands. A diverged skill points at ``--target`` to pick the copy to
+    keep. An untracked local directory points at ``skills publish``, the only
+    path that creates a new hosted skill. A ``pull-required`` copy was
     deferred because the push changed sibling files it does not have, so it points
     at ``pull`` to refresh. Every command named here exists today. A ``converged``
     sibling needs no hint: it is already reconciled.
     """
     hints: list[str] = []
     conflicts = sum(1 for i in items if i.action == "conflict")
-    # A workflow diverged across targets emits one item per copy; count the
-    # distinct workflows so the hint reads as one decision per workflow.
+    # A skill diverged across targets emits one item per copy; count the
+    # distinct skills so the hint reads as one decision per skill.
     diverged = len({i.workflow_id for i in items if i.action == "diverged"})
     untracked = sum(1 for i in items if i.action == "untracked")
     pull_required = sum(1 for i in items if i.action == "pull-required")
     if conflicts:
         hints.append(
-            f"{conflicts} workflow(s) conflict; run `goodeye workflows sync pull` "
-            "to merge then push again (check `goodeye workflows sync status` first)"
+            f"{conflicts} skill(s) conflict; run `goodeye skills sync pull` "
+            "to merge then push again (check `goodeye skills sync status` first)"
         )
     if diverged:
         hints.append(
-            f"{diverged} workflow(s) were edited differently across targets; re-run "
-            "`goodeye workflows sync push --target <dir>` to pick the copy to keep"
+            f"{diverged} skill(s) were edited differently across targets; re-run "
+            "`goodeye skills sync push --target <dir>` to pick the copy to keep"
         )
     if untracked:
         hints.append(
-            f"{untracked} local workflow(s) are not in the registry; create them "
-            "with `goodeye workflows publish`"
+            f"{untracked} local skill(s) are not in the registry; create them "
+            "with `goodeye skills publish`"
         )
     if pull_required:
         hints.append(
-            f"{pull_required} other copy(ies) of a pushed workflow changed sibling files; "
-            "run `goodeye workflows sync pull` to refresh them"
+            f"{pull_required} other copy(ies) of a pushed skill changed sibling files; "
+            "run `goodeye skills sync pull` to refresh them"
         )
     return hints
 
@@ -711,7 +708,7 @@ def _push_hints(items: list[sync.PushItem]) -> list[str]:
 def push(
     slugs: list[str] = typer.Argument(
         None,
-        help="Workflow slugs to push. Omit to push every locally edited workflow in scope.",
+        help="Skill slugs to push. Omit to push every locally edited skill in scope.",
     ),
     target: str | None = typer.Option(
         None,
@@ -721,15 +718,15 @@ def push(
     json_output: bool = typer.Option(False, "--json", help="Print results as JSON."),
     table_output: bool = typer.Option(False, "--table", help="Print results as a table."),
 ) -> None:
-    """Push locally edited workflows back to the registry.
+    """Push locally edited skills back to the registry.
 
-    Only workflows whose on-disk SKILL.md differs from the last sync are sent;
+    Only skills whose on-disk SKILL.md differs from the last sync are sent;
     each send includes the full directory tree, not just SKILL.md.
     Each upload is optimistic-locked: if the registry moved since the last sync,
-    the workflow is reported as a conflict and left untouched, and you reconcile
-    with `goodeye workflows sync pull` before pushing again. Renaming through
-    push is not supported (the directory name is the workflow identity), and a
-    workflow you hold only a view grant on is never uploaded. Requires
+    the skill is reported as a conflict and left untouched, and you reconcile
+    with `goodeye skills sync pull` before pushing again. Renaming through
+    push is not supported (the directory name is the skill identity), and a
+    skill you hold only a view grant on is never uploaded. Requires
     authentication.
     """
     mode = resolve_output_mode(json_output=json_output, table_output=table_output)
@@ -753,9 +750,9 @@ def push(
 
     console = Console()
     if not result.items:
-        console.print("[dim]No locally edited workflows to push.[/dim]")
+        console.print("[dim]No locally edited skills to push.[/dim]")
         return
-    table = Table(title="Pushed workflows")
+    table = Table(title="Pushed skills")
     table.add_column("Slug", no_wrap=True)
     table.add_column("Target", no_wrap=True)
     table.add_column("Action")

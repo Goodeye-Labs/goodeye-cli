@@ -14,7 +14,7 @@ from goodeye_cli.errors import AuthRequired
 
 
 def _render_prompt_pack(payload: dict[str, Any]) -> str | None:
-    """Collapse a `design_workflow` payload into pipe-ready markdown.
+    """Collapse a `design_skill` payload into pipe-ready markdown.
 
     The MCP tool returns ``{"skill_md": <SKILL.md>, "references": {path: body}}``.
     Emit the SKILL.md first, then each reference file as a sub-section so the
@@ -38,10 +38,10 @@ def _render_prompt_pack(payload: dict[str, Any]) -> str | None:
 def design(
     json_output: bool = typer.Option(False, "--json", help="Print the full response as JSON."),
 ) -> None:
-    """Create a new workflow from scratch: a guided session that designs the workflow
+    """Create a new skill from scratch: a guided session that designs the skill
     and its verifiers.
 
-    Pipe it into your AI assistant to start designing a workflow + verifier:
+    Pipe it into your AI assistant to start designing a skill + verifier:
 
     \b
         goodeye design > prompt.md

@@ -49,7 +49,7 @@ def test_single_file_publish_omits_files_key(
     md_file = tmp_path / "my-skill.md"
     md_file.write_text(_SKILL_MD)
 
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(201, json=_SAVE_RESPONSE)
     )
 
@@ -70,7 +70,7 @@ def test_clear_files_sends_empty_list(
     md_file = tmp_path / "my-skill.md"
     md_file.write_text(_SKILL_MD)
 
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(201, json=_SAVE_RESPONSE)
     )
 
@@ -95,7 +95,7 @@ def test_directory_publish_uploads_tree(
     (skill_dir / "SKILL.md").write_text(_SKILL_MD)
     (skill_dir / "run.sh").write_text("#!/bin/bash\necho hi\n")
 
-    route = respx.post(f"{SERVER}/v1/workflows").mock(
+    route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(201, json=_SAVE_RESPONSE)
     )
     # client-config needed to fetch ignore_defaults during directory publish

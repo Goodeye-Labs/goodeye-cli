@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -93,7 +94,7 @@ def test_verifiers_list_table_shows_role_and_source_workflow(
     result = runner.invoke(app, ["verifiers", "list", "--table"])
     assert result.exit_code == 0, result.output
     assert "Role" in result.output
-    assert "Source wf" in result.output
+    assert "Source skill" in result.output
     assert "exec" in result.output
     assert "wf_shared" in result.output
 
@@ -277,9 +278,9 @@ def test_verifiers_run_forwards_provenance_flags(
 
     def check_request(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content.decode())
-        assert body["workflow_id"] == "wf_123"
-        assert body["workflow_version"] == 4
-        assert body["workflow_ref"] == "lesson-quality"
+        assert body["skill_id"] == "wf_123"
+        assert body["skill_version"] == 4
+        assert body["skill_ref"] == "lesson-quality"
         assert body["run_id"] == "trace-abc"
         return httpx.Response(
             201,
@@ -315,6 +316,89 @@ def test_verifiers_run_forwards_provenance_flags(
         ],
     )
     assert result.exit_code == 0, result.output
+    assert "--workflow-id/--workflow-version/--workflow-ref are deprecated" in result.stderr
+
+
+@respx.mock
+def test_verifiers_run_forwards_provenance_via_canonical_skill_flags(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """`--skill-id`/`--skill-version`/`--skill-ref` are the canonical provenance flags."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    resolved_uuid = "22222222-2222-2222-2222-222222222222"
+
+    respx.get(f"{SERVER}/v1/verifiers/ver_1").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "verifier_id": resolved_uuid,
+                "name": "ver_1",
+                "description": "x",
+                "version": 1,
+                "criterion": "c",
+                "input_contract": "text",
+                "input_fields": ["message"],
+                "few_shot_examples": [],
+                "judge_model_config": {},
+                "reasoning_field_description": "r",
+                "config_hash": "h",
+                "status": "active",
+            },
+        )
+    )
+
+    def check_request(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode())
+        assert body["skill_id"] == "skl_123"
+        assert body["skill_version"] == 4
+        assert body["skill_ref"] == "lesson-quality"
+        return httpx.Response(
+            201,
+            json={
+                "verifier_run_id": "run_3",
+                "verifier_id": resolved_uuid,
+                "version": 1,
+                "status": "success",
+                "passed": True,
+                "reasoning": "ok",
+                "duration_ms": 1,
+                "created_at": "2026-05-04T00:00:00+00:00",
+            },
+        )
+
+    respx.post(f"{SERVER}/v1/verifiers/{resolved_uuid}/runs").mock(side_effect=check_request)
+    result = runner.invoke(
+        app,
+        [
+            "verifiers",
+            "run",
+            "ver_1",
+            "--inputs-json",
+            '{"message":"hi"}',
+            "--skill-id",
+            "skl_123",
+            "--skill-version",
+            "4",
+            "--skill-ref",
+            "lesson-quality",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+
+
+def test_verifiers_run_help_shows_skill_flags_hides_workflow_flags(
+    plain: Callable[[str], str],
+) -> None:
+    """`--skill-*` is canonical; `--workflow-*` still works but stays hidden from help."""
+    result = runner.invoke(app, ["verifiers", "run", "--help"])
+    assert result.exit_code == 0, result.output
+    help_text = plain(result.output)
+    assert "--skill-id" in help_text
+    assert "--skill-version" in help_text
+    assert "--skill-ref" in help_text
+    assert "--workflow-id" not in help_text
+    assert "--workflow-version" not in help_text
+    assert "--workflow-ref" not in help_text
 
 
 @respx.mock

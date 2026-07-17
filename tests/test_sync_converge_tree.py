@@ -66,7 +66,7 @@ def _save_response(
     return httpx.Response(
         200,
         json={
-            "workflow_id": workflow_id,
+            "skill_id": workflow_id,
             "version": version,
             "name": name,
             "version_token": token,
@@ -152,7 +152,7 @@ def _entry(
     files: list[FileState],
 ) -> SyncEntry:
     return SyncEntry(
-        workflow_id=id_,
+        skill_id=id_,
         slug=slug,
         target_path=normalize_target_path(str(target_dir)),
         synced_version=1,
@@ -214,7 +214,7 @@ def test_push_sibling_change_defers_other_copy_then_pull_heals(
         ]
     )
 
-    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+    save_route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=_save_response(workflow_id="skl_a", name=slug)
     )
 
@@ -237,12 +237,12 @@ def test_push_sibling_change_defers_other_copy_then_pull_heals(
     assert [(f.path, f.sha256) for f in b_entry.files] == [("helper.sh", _sha256_text(sib_v1))]
 
     # The next ordinary (non-forced) pull heals B through the existing pull path.
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [_summary_dict(id_="skl_a", name=slug, token="tok-2", version=2)]
         )
     )
-    respx.get(f"{SERVER}/v1/workflows/skl_a").mock(
+    respx.get(f"{SERVER}/v1/skills/skl_a").mock(
         return_value=_detail_response(
             id_="skl_a",
             name=slug,
@@ -252,7 +252,7 @@ def test_push_sibling_change_defers_other_copy_then_pull_heals(
             files=[_manifest_row("helper.sh", sib_v2)],
         )
     )
-    respx.get(f"{SERVER}/v1/workflows/skl_a/files").mock(
+    respx.get(f"{SERVER}/v1/skills/skl_a/files").mock(
         return_value=httpx.Response(200, json={"files": [_file_envelope("helper.sh", sib_v2)]})
     )
 
@@ -337,7 +337,7 @@ def test_push_does_not_clobber_other_copys_unpushed_sibling_edit(
         ]
     )
 
-    respx.post(f"{SERVER}/v1/workflows").mock(
+    respx.post(f"{SERVER}/v1/skills").mock(
         return_value=_save_response(workflow_id="skl_b", name=slug)
     )
 
@@ -356,12 +356,12 @@ def test_push_does_not_clobber_other_copys_unpushed_sibling_edit(
     assert persisted[normalize_target_path(str(second))].version_token == "tok-1"
 
     # The deferred pull refuses to overwrite B's diverged tree, preserving the edit.
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [_summary_dict(id_="skl_b", name=slug, token="tok-2", version=2)]
         )
     )
-    detail_route = respx.get(f"{SERVER}/v1/workflows/skl_b").mock(
+    detail_route = respx.get(f"{SERVER}/v1/skills/skl_b").mock(
         return_value=_detail_response(
             id_="skl_b",
             name=slug,
@@ -442,7 +442,7 @@ def test_push_body_only_edit_converges_other_copy_immediately(
         ]
     )
 
-    respx.post(f"{SERVER}/v1/workflows").mock(
+    respx.post(f"{SERVER}/v1/skills").mock(
         return_value=_save_response(workflow_id="skl_g", name=slug)
     )
 

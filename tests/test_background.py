@@ -159,7 +159,7 @@ def test_summary_surfaces_skipped_with_follow_up() -> None:
     summary = background_sync.format_auto_pull_summary(result)
     assert summary is not None
     assert "1 skipped (local edits)" in summary
-    assert "goodeye workflows sync status" in summary
+    assert "goodeye skills sync status" in summary
 
 
 def test_summary_reports_gone_alongside_skipped() -> None:
@@ -170,7 +170,7 @@ def test_summary_reports_gone_alongside_skipped() -> None:
     assert summary is not None
     assert "1 skipped (local edits)" in summary
     assert "1 gone from the registry" in summary
-    assert "goodeye workflows sync status" in summary
+    assert "goodeye skills sync status" in summary
 
 
 # ----- tail -----
@@ -196,12 +196,12 @@ def test_tail_claims_window_and_pulls(tmp_config_paths: ConfigPaths, tmp_path, c
     )
     sync.save_sync_config(config, tmp_config_paths)
 
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [{"id": "skl_a", "name": "alpha", "current_version": 1, "version_token": "t1"}]
         )
     )
-    respx.get(f"{SERVER}/v1/workflows/skl_a").mock(
+    respx.get(f"{SERVER}/v1/skills/skl_a").mock(
         return_value=httpx.Response(
             200,
             json={

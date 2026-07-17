@@ -152,11 +152,19 @@ _SLUG_MAP: dict[str, type[GoodeyeError]] = {
     "validation_error": ValidationFailed,
     "rate_limited": RateLimited,
     "conflict": Conflict,
-    # workflow namespace resolution: a name-only save that collides with a
-    # workflow shared at edit access. Treated as a rejected request so a sync
+    # skill namespace resolution: a name-only save that collides with a
+    # skill shared at edit access. Treated as a rejected request so a sync
     # push reports it as one skipped item (with the server's message) and the
     # rest of the pass still runs, instead of aborting on an unmapped error.
+    # Both slugs are mapped: the canonical /v1/skills routes raise
+    # ambiguous_skill_reference; the deprecated /v1/workflows routes keep
+    # raising ambiguous_workflow_reference until 2026-10-01.
+    "ambiguous_skill_reference": ValidationFailed,
     "ambiguous_workflow_reference": ValidationFailed,
+    # account-delete blocked by an owned skill; both slugs for the same
+    # reason as above (canonical vs. the deprecated alias until 2026-10-01).
+    "skill_ownership_must_transfer": Conflict,
+    "workflow_ownership_must_transfer": Conflict,
     # handle slugs
     "handle_invalid": ValidationFailed,
     "handle_reserved": Conflict,

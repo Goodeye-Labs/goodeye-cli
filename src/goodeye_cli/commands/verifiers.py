@@ -33,7 +33,7 @@ app = typer.Typer(
     help=(
         "Manage verifiers: owner-scoped, versioned LLM judges that score one "
         "criterion ('does this output satisfy this rule?') against caller "
-        "inputs. Workflows typically reference deployed verifiers by UUID "
+        "inputs. Skills typically reference deployed verifiers by UUID "
         "(or UUID@version). The **`run`** command (and REST/MCP equivalents) "
         "also accepts the caller-owned name or **`system:<name>`** for seeded "
         "platform judges (`show`/`revoke` accept UUID or name only)."
@@ -147,7 +147,7 @@ def deploy(
         ),
     ),
 ) -> None:
-    """Deploy a check that workflows call to grade agent output (new verifier or version).
+    """Deploy a check that skills call to grade agent output (new verifier or version).
 
     The config file is a single JSON object with these fields:
 
@@ -228,7 +228,7 @@ def list_cmd(
     table.add_column("Version", justify="right")
     table.add_column("Status")
     table.add_column("Role")
-    table.add_column("Source wf")
+    table.add_column("Source skill")
     table.add_column("Description")
     for item in items:
         role = item.role or "-"
@@ -284,23 +284,41 @@ def run(
     version: int | None = typer.Option(
         None, "--version", "-v", help="Pin to a specific version; defaults to current."
     ),
+    skill_id: str | None = typer.Option(
+        None,
+        "--skill-id",
+        help=(
+            "Optional skill UUID stamped onto the run for provenance. "
+            "Access-checked: a skill you cannot see returns 404."
+        ),
+    ),
+    skill_version: int | None = typer.Option(
+        None,
+        "--skill-version",
+        help="Skill version invoking this run; pair with --skill-id.",
+    ),
+    skill_ref: str | None = typer.Option(
+        None,
+        "--skill-ref",
+        help="Free-form skill label (slug or name) for human-readable provenance.",
+    ),
     workflow_id: str | None = typer.Option(
         None,
         "--workflow-id",
-        help=(
-            "Optional workflow UUID stamped onto the run for provenance. "
-            "Access-checked: a workflow you cannot see returns 404."
-        ),
+        hidden=True,
+        help="Deprecated alias for --skill-id.",
     ),
     workflow_version: int | None = typer.Option(
         None,
         "--workflow-version",
-        help="Workflow version invoking this run; pair with --workflow-id.",
+        hidden=True,
+        help="Deprecated alias for --skill-version.",
     ),
     workflow_ref: str | None = typer.Option(
         None,
         "--workflow-ref",
-        help="Free-form workflow label (slug or name) for human-readable provenance.",
+        hidden=True,
+        help="Deprecated alias for --skill-ref.",
     ),
     run_id: str | None = typer.Option(
         None,
@@ -339,6 +357,19 @@ def run(
                 "resolved without authentication."
             ),
         )
+    # --workflow-id/--workflow-version/--workflow-ref are deprecated hidden
+    # aliases for --skill-id/--skill-version/--skill-ref; the canonical flag
+    # wins when both are supplied. Announce the deprecation on stderr when a
+    # caller still uses one, matching the `goodeye workflows` group notice.
+    if workflow_id is not None or workflow_version is not None or workflow_ref is not None:
+        typer.echo(
+            "--workflow-id/--workflow-version/--workflow-ref are deprecated and "
+            "will be removed on 2026-10-01; use --skill-id/--skill-version/--skill-ref.",
+            err=True,
+        )
+    effective_skill_id = skill_id if skill_id is not None else workflow_id
+    effective_skill_version = skill_version if skill_version is not None else workflow_version
+    effective_skill_ref = skill_ref if skill_ref is not None else workflow_ref
     with _client_for_run(
         anonymous=anonymous, timeout_default=VERIFIER_REQUEST_TIMEOUT_SECONDS
     ) as client:
@@ -354,9 +385,9 @@ def run(
             inputs={key: str(value) for key, value in inputs.items()},
             media_url=media_url,
             version=version,
-            workflow_id=workflow_id,
-            workflow_version=workflow_version,
-            workflow_ref=workflow_ref,
+            workflow_id=effective_skill_id,
+            workflow_version=effective_skill_version,
+            workflow_ref=effective_skill_ref,
             run_id=run_id,
             anonymous=anonymous,
         )

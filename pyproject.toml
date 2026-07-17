@@ -1,6 +1,6 @@
 [project]
 name = "goodeye"
-version = "0.23.1"
+version = "0.24.0"
 description = "Goodeye CLI: make your agent meet the standard you set, even on work too subjective for a test, from the terminal."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -8,7 +8,7 @@ requires-python = ">=3.12"
 authors = [
   { name = "Goodeye Labs" },
 ]
-keywords = ["goodeye", "cli", "ai", "agents", "llm", "mcp", "workflows"]
+keywords = ["goodeye", "cli", "ai", "agents", "llm", "mcp", "skills"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",

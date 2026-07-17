@@ -20,7 +20,7 @@ def _is_tty() -> bool:
 
 
 def _print_post_login_banner(server: str, api_key: str, console: Console) -> None:
-    """Print a one-line nudge about shared workflows and pending invitations.
+    """Print a one-line nudge about shared skills and pending invitations.
 
     Silent and non-blocking: any error, non-TTY session, or offline state
     results in nothing printed. Login always succeeds regardless.
@@ -43,7 +43,7 @@ def _print_post_login_banner(server: str, api_key: str, console: Console) -> Non
         return
     wf_count = f"{n}+" if wf_more else str(n)
     inv_count = f"{m}+" if inv_more else str(m)
-    wf_noun = "workflow" if n == 1 and not wf_more else "workflows"
+    wf_noun = "skill" if n == 1 and not wf_more else "skills"
     inv_noun = "invitation" if m == 1 and not inv_more else "invitations"
     # Name only the nonzero categories so a user with shared workflows but no
     # invitations (or vice versa) never sees an awkward "0 ..." count.
@@ -51,7 +51,7 @@ def _print_post_login_banner(server: str, api_key: str, console: Console) -> Non
     commands: list[str] = []
     if n > 0:
         clauses.append(f"{wf_count} {wf_noun} shared with you")
-        commands.append("'goodeye workflows list --filter shared-with-me'")
+        commands.append("'goodeye skills list --filter shared-with-me'")
     if m > 0:
         clauses.append(f"{inv_count} pending {inv_noun}")
         commands.append("'goodeye invitations list'")

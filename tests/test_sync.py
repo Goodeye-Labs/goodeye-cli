@@ -289,7 +289,7 @@ def test_state_save_then_load_roundtrip(tmp_config_paths: ConfigPaths) -> None:
     state = SyncState(
         entries=[
             SyncEntry(
-                workflow_id="skl_01",
+                skill_id="skl_01",
                 slug="incident-postmortem",
                 target_path="~/.claude/skills",
                 synced_version=3,
@@ -339,7 +339,7 @@ def test_body_sha256_differs_on_change() -> None:
 
 def _entry(slug: str, target_path: str, *, token: str = "tok") -> SyncEntry:
     return SyncEntry(
-        workflow_id=f"skl_{slug}",
+        skill_id=f"skl_{slug}",
         slug=slug,
         target_path=target_path,
         synced_version=1,
@@ -353,7 +353,7 @@ def test_find_entry_matches_slug_and_normalized_path() -> None:
     absolute = str(Path.home() / "skills")
     found = find_entry(state, slug="alpha", target_path=absolute)
     assert found is not None
-    assert found.workflow_id == "skl_alpha"
+    assert found.skill_id == "skl_alpha"
 
 
 def test_find_entry_misses_other_slug_or_target() -> None:
@@ -442,7 +442,7 @@ def test_server_moved() -> None:
 
 def test_server_moved_true_when_token_missing() -> None:
     entry = SyncEntry(
-        workflow_id="x",
+        skill_id="x",
         slug="alpha",
         target_path="~/skills",
         synced_version=1,
@@ -502,7 +502,7 @@ def test_pull_materializes_skill_and_index(tmp_path: Path, tmp_config_paths: Con
     config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
     state = SyncState()
 
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [
                 {
@@ -515,7 +515,7 @@ def test_pull_materializes_skill_and_index(tmp_path: Path, tmp_config_paths: Con
             ]
         )
     )
-    respx.get(f"{SERVER}/v1/workflows/skl_01").mock(
+    respx.get(f"{SERVER}/v1/skills/skl_01").mock(
         return_value=_detail_response(
             id_="skl_01",
             name="incident-postmortem",
@@ -543,7 +543,7 @@ def test_pull_materializes_skill_and_index(tmp_path: Path, tmp_config_paths: Con
 
     reloaded = load_sync_state(tmp_config_paths)
     entry = reloaded.entries[0]
-    assert entry.workflow_id == "skl_01"
+    assert entry.skill_id == "skl_01"
     assert entry.slug == "incident-postmortem"
     assert entry.synced_version == 1
     assert entry.version_token == "tok-1"
@@ -559,7 +559,7 @@ def test_pull_view_role_is_read_only(tmp_path: Path, tmp_config_paths: ConfigPat
     _me_route()
     target_dir = tmp_path / "skills"
     config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="all")])
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [
                 {
@@ -572,7 +572,7 @@ def test_pull_view_role_is_read_only(tmp_path: Path, tmp_config_paths: ConfigPat
             ]
         )
     )
-    respx.get(f"{SERVER}/v1/workflows/skl_v").mock(
+    respx.get(f"{SERVER}/v1/skills/skl_v").mock(
         return_value=_detail_response(
             id_="skl_v", name="shared-doc", body="body", effective_role="view"
         )
@@ -608,7 +608,7 @@ def test_pull_skips_modified_without_force_and_overwrites_with_force(
     state = SyncState(
         entries=[
             SyncEntry(
-                workflow_id="skl_a",
+                skill_id="skl_a",
                 slug="alpha",
                 target_path=normalize_target_path(str(target_dir)),
                 synced_version=1,
@@ -618,12 +618,12 @@ def test_pull_skips_modified_without_force_and_overwrites_with_force(
         ]
     )
 
-    list_route = respx.get(f"{SERVER}/v1/workflows").mock(
+    list_route = respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [{"id": "skl_a", "name": "alpha", "current_version": 2, "version_token": "t2"}]
         )
     )
-    detail_route = respx.get(f"{SERVER}/v1/workflows/skl_a").mock(
+    detail_route = respx.get(f"{SERVER}/v1/skills/skl_a").mock(
         return_value=_detail_response(id_="skl_a", name="alpha", body="server v2", token="t2")
     )
 
@@ -673,7 +673,7 @@ def test_pull_skipped_modified_when_server_not_moved(
     state = SyncState(
         entries=[
             SyncEntry(
-                workflow_id="skl_a",
+                skill_id="skl_a",
                 slug="alpha",
                 target_path=normalize_target_path(str(target_dir)),
                 synced_version=1,
@@ -682,7 +682,7 @@ def test_pull_skipped_modified_when_server_not_moved(
             )
         ]
     )
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [{"id": "skl_a", "name": "alpha", "current_version": 1, "version_token": "t1"}]
         )
@@ -715,12 +715,12 @@ def test_pull_untracked_present_file_is_skipped_modified(
     skill.parent.mkdir(parents=True)
     skill.write_text("hand written", encoding="utf-8")
 
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [{"id": "skl_a", "name": "alpha", "current_version": 1, "version_token": "t"}]
         )
     )
-    detail_route = respx.get(f"{SERVER}/v1/workflows/skl_a").mock(
+    detail_route = respx.get(f"{SERVER}/v1/skills/skl_a").mock(
         return_value=_detail_response(id_="skl_a", name="alpha", body="server body")
     )
 
@@ -758,7 +758,7 @@ def test_pull_slug_filter_applies_to_every_target(
             SyncTarget(path=str(second), scope="all"),
         ]
     )
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [
                 {"id": "skl_a", "name": "alpha", "current_version": 1, "version_token": "t"},
@@ -766,7 +766,7 @@ def test_pull_slug_filter_applies_to_every_target(
             ]
         )
     )
-    respx.get(f"{SERVER}/v1/workflows/skl_b").mock(
+    respx.get(f"{SERVER}/v1/skills/skl_b").mock(
         return_value=_detail_response(id_="skl_b", name="beta", body="beta body")
     )
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
@@ -794,12 +794,12 @@ def test_pull_up_to_date_skips_second_fetch(tmp_path: Path, tmp_config_paths: Co
     config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
     state = SyncState()
 
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [{"id": "skl_01", "name": "alpha", "current_version": 1, "version_token": "tok-1"}]
         )
     )
-    detail_route = respx.get(f"{SERVER}/v1/workflows/skl_01").mock(
+    detail_route = respx.get(f"{SERVER}/v1/skills/skl_01").mock(
         return_value=_detail_response(id_="skl_01", name="alpha", body="run it", token="tok-1")
     )
 
@@ -843,7 +843,7 @@ def test_pull_persists_index_when_a_fetch_raises_midway(
     # rather than treating the written files as untracked.
     target_dir = tmp_path / "skills"
     config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [
                 {"id": "skl_a", "name": "alpha", "current_version": 1, "version_token": "t"},
@@ -851,11 +851,11 @@ def test_pull_persists_index_when_a_fetch_raises_midway(
             ]
         )
     )
-    respx.get(f"{SERVER}/v1/workflows/skl_a").mock(
+    respx.get(f"{SERVER}/v1/skills/skl_a").mock(
         return_value=_detail_response(id_="skl_a", name="alpha", body="alpha body")
     )
     # beta's body fetch fails: alpha was already written before the raise.
-    respx.get(f"{SERVER}/v1/workflows/skl_b").mock(return_value=httpx.Response(500))
+    respx.get(f"{SERVER}/v1/skills/skl_b").mock(return_value=httpx.Response(500))
 
     state = SyncState()
     with (
@@ -885,7 +885,7 @@ def test_pull_narrows_by_slug_args(tmp_path: Path, tmp_config_paths: ConfigPaths
     _me_route()
     target_dir = tmp_path / "skills"
     config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="all")])
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [
                 {"id": "skl_a", "name": "alpha", "current_version": 1, "version_token": "t"},
@@ -893,7 +893,7 @@ def test_pull_narrows_by_slug_args(tmp_path: Path, tmp_config_paths: ConfigPaths
             ]
         )
     )
-    respx.get(f"{SERVER}/v1/workflows/skl_b").mock(
+    respx.get(f"{SERVER}/v1/skills/skl_b").mock(
         return_value=_detail_response(id_="skl_b", name="beta", body="beta body")
     )
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
@@ -919,7 +919,7 @@ def test_pull_applies_selected_globs(tmp_path: Path, tmp_config_paths: ConfigPat
     config = SyncConfig(
         targets=[SyncTarget(path=str(target_dir), scope="selected", selected=["refunds-*"])]
     )
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [
                 {"id": "skl_r", "name": "refunds-flow", "current_version": 1, "version_token": "t"},
@@ -927,7 +927,7 @@ def test_pull_applies_selected_globs(tmp_path: Path, tmp_config_paths: ConfigPat
             ]
         )
     )
-    respx.get(f"{SERVER}/v1/workflows/skl_r").mock(
+    respx.get(f"{SERVER}/v1/skills/skl_r").mock(
         return_value=_detail_response(id_="skl_r", name="refunds-flow", body="refunds body")
     )
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
@@ -949,10 +949,10 @@ def test_pull_skips_unsafe_name(tmp_path: Path, tmp_config_paths: ConfigPaths) -
     _me_route()
     target_dir = tmp_path / "skills"
     config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="all")])
-    detail_route = respx.get(f"{SERVER}/v1/workflows/skl_bad").mock(
+    detail_route = respx.get(f"{SERVER}/v1/skills/skl_bad").mock(
         return_value=_detail_response(id_="skl_bad", name="../escape", body="x")
     )
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [{"id": "skl_bad", "name": "../escape", "current_version": 1, "version_token": "t"}]
         )
@@ -978,7 +978,7 @@ def test_pull_follows_all_list_pages(tmp_path: Path, tmp_config_paths: ConfigPat
     _me_route()
     target_dir = tmp_path / "skills"
     config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         side_effect=[
             _list_response(
                 [{"id": "skl_a", "name": "alpha", "current_version": 1, "version_token": "t"}],
@@ -990,10 +990,10 @@ def test_pull_follows_all_list_pages(tmp_path: Path, tmp_config_paths: ConfigPat
             ),
         ]
     )
-    respx.get(f"{SERVER}/v1/workflows/skl_a").mock(
+    respx.get(f"{SERVER}/v1/skills/skl_a").mock(
         return_value=_detail_response(id_="skl_a", name="alpha", body="a")
     )
-    respx.get(f"{SERVER}/v1/workflows/skl_b").mock(
+    respx.get(f"{SERVER}/v1/skills/skl_b").mock(
         return_value=_detail_response(id_="skl_b", name="beta", body="b")
     )
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
@@ -1045,12 +1045,12 @@ def test_pull_target_path_selects_single_target(
             SyncTarget(path=str(second), scope="owned"),
         ]
     )
-    list_route = respx.get(f"{SERVER}/v1/workflows").mock(
+    list_route = respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [{"id": "skl_a", "name": "alpha", "current_version": 1, "version_token": "t"}]
         )
     )
-    respx.get(f"{SERVER}/v1/workflows/skl_a").mock(
+    respx.get(f"{SERVER}/v1/skills/skl_a").mock(
         return_value=_detail_response(id_="skl_a", name="alpha", body="a")
     )
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
@@ -1114,7 +1114,7 @@ def _tracked_entry(
 ) -> SyncEntry:
     """Build an index entry whose recorded hash matches ``body``."""
     return SyncEntry(
-        workflow_id=id_,
+        skill_id=id_,
         slug=slug,
         target_path=normalize_target_path(str(target_dir)),
         synced_version=version,
@@ -1152,10 +1152,10 @@ def test_status_clean(tmp_path: Path, tmp_config_paths: ConfigPaths) -> None:
         entries=[_tracked_entry(target_dir, id_="skl_a", slug="alpha", body=body, token="t1")]
     )
 
-    list_route = respx.get(f"{SERVER}/v1/workflows").mock(
+    list_route = respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response([_summary_dict(id_="skl_a", name="alpha", token="t1")])
     )
-    detail_route = respx.get(f"{SERVER}/v1/workflows/skl_a").mock(
+    detail_route = respx.get(f"{SERVER}/v1/skills/skl_a").mock(
         return_value=_detail_response(id_="skl_a", name="alpha", body=body)
     )
 
@@ -1186,12 +1186,12 @@ def test_status_modified_local(tmp_path: Path, tmp_config_paths: ConfigPaths) ->
             _tracked_entry(target_dir, id_="skl_a", slug="alpha", body="server body", token="t1")
         ]
     )
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [_summary_dict(id_="skl_a", name="alpha", token="t1", version=4)]
         )
     )
-    detail_route = respx.get(f"{SERVER}/v1/workflows/skl_a").mock(
+    detail_route = respx.get(f"{SERVER}/v1/skills/skl_a").mock(
         return_value=_detail_response(id_="skl_a", name="alpha", body="x")
     )
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
@@ -1227,7 +1227,7 @@ def test_status_sibling_edit_reports_modified_local(
     state = SyncState(
         entries=[
             SyncEntry(
-                workflow_id="skl_a",
+                skill_id="skl_a",
                 slug="alpha",
                 target_path=normalize_target_path(str(target_dir)),
                 synced_version=1,
@@ -1243,10 +1243,10 @@ def test_status_sibling_edit_reports_modified_local(
             )
         ]
     )
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response([_summary_dict(id_="skl_a", name="alpha", token="t1")])
     )
-    detail_route = respx.get(f"{SERVER}/v1/workflows/skl_a").mock(
+    detail_route = respx.get(f"{SERVER}/v1/skills/skl_a").mock(
         return_value=_detail_response(id_="skl_a", name="alpha", body=body)
     )
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
@@ -1272,7 +1272,7 @@ def test_status_modified_local_read_only_has_no_action(
             )
         ]
     )
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [_summary_dict(id_="skl_s", name="shared", token="t1", role="view")]
         )
@@ -1297,7 +1297,7 @@ def test_status_behind_server(tmp_path: Path, tmp_config_paths: ConfigPaths) -> 
     state = SyncState(
         entries=[_tracked_entry(target_dir, id_="skl_a", slug="alpha", body=body, token="t1")]
     )
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [_summary_dict(id_="skl_a", name="alpha", token="t2", version=2)]
         )
@@ -1325,7 +1325,7 @@ def test_status_behind_server_when_local_file_missing(
             _tracked_entry(target_dir, id_="skl_a", slug="alpha", body="server body", token="t1")
         ]
     )
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [_summary_dict(id_="skl_a", name="alpha", token="t2", version=2)]
         )
@@ -1349,7 +1349,7 @@ def test_status_conflict(tmp_path: Path, tmp_config_paths: ConfigPaths) -> None:
             _tracked_entry(target_dir, id_="skl_a", slug="alpha", body="server body", token="t1")
         ]
     )
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [_summary_dict(id_="skl_a", name="alpha", token="t2", version=3)]
         )
@@ -1375,7 +1375,7 @@ def test_status_deleted_on_server_via_archived_at(
     state = SyncState(
         entries=[_tracked_entry(target_dir, id_="skl_a", slug="alpha", body=body, token="t1")]
     )
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [
                 _summary_dict(
@@ -1408,7 +1408,7 @@ def test_status_deleted_on_server_via_absent_summary(
     state = SyncState(
         entries=[_tracked_entry(target_dir, id_="skl_g", slug="gone", body=body, token="t1")]
     )
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response([_summary_dict(id_="skl_other", name="other", token="t1")])
     )
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
@@ -1427,7 +1427,7 @@ def test_status_untracked_local_dir(tmp_path: Path, tmp_config_paths: ConfigPath
     config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
     # A local dir with a SKILL.md and no index entry is untracked.
     _write_skill(target_dir, "draft", "local draft")
-    respx.get(f"{SERVER}/v1/workflows").mock(return_value=_list_response([]))
+    respx.get(f"{SERVER}/v1/skills").mock(return_value=_list_response([]))
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
         result = status(client, config, SyncState(), target_path=None)
     item = result.items[0]
@@ -1455,7 +1455,7 @@ def test_status_does_not_write_index_or_files(
     save_sync_state(state, tmp_config_paths)
     index_before = tmp_config_paths.sync_state_file.read_text(encoding="utf-8")
 
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [_summary_dict(id_="skl_a", name="alpha", token="t2", version=2)]
         )
@@ -1482,7 +1482,7 @@ def test_status_selected_scope_applies_globs(tmp_path: Path, tmp_config_paths: C
             _tracked_entry(target_dir, id_="skl_r", slug="refunds-flow", body=body, token="t1")
         ]
     )
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [
                 _summary_dict(id_="skl_r", name="refunds-flow", token="t1"),
@@ -1515,7 +1515,7 @@ def test_status_target_path_selects_single_target(
     state = SyncState(
         entries=[_tracked_entry(second, id_="skl_b", slug="beta", body=body, token="t1")]
     )
-    list_route = respx.get(f"{SERVER}/v1/workflows").mock(
+    list_route = respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response([_summary_dict(id_="skl_b", name="beta", token="t1")])
     )
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
@@ -1554,7 +1554,7 @@ def test_status_caches_listing_across_shared_scope(
             SyncTarget(path=str(second), scope="owned"),
         ]
     )
-    list_route = respx.get(f"{SERVER}/v1/workflows").mock(
+    list_route = respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response([_summary_dict(id_="skl_a", name="alpha", token="t1")])
     )
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
@@ -1602,7 +1602,7 @@ def test_status_selected_out_of_glob_tracked_entry_is_omitted(
             _tracked_entry(target_dir, id_="skl_o", slug="onboarding", body=body, token="t1"),
         ]
     )
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [
                 _summary_dict(id_="skl_r", name="refunds-flow", token="t1"),
@@ -1633,7 +1633,7 @@ def test_status_selected_out_of_glob_untracked_dir_is_omitted(
     )
     _write_skill(target_dir, "refunds-draft", "in-scope draft")
     _write_skill(target_dir, "onboarding", "out-of-scope draft")
-    respx.get(f"{SERVER}/v1/workflows").mock(return_value=_list_response([]))
+    respx.get(f"{SERVER}/v1/skills").mock(return_value=_list_response([]))
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
         result = status(client, config, SyncState(), target_path=None)
     # Only the in-glob local dir is reported untracked; the other is omitted.
@@ -1664,7 +1664,7 @@ def test_status_per_target_isolation_tracked_vs_untracked(
         # Tracked only under the first target.
         entries=[_tracked_entry(first, id_="skl_s", slug="shared", body=body, token="t1")]
     )
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response([_summary_dict(id_="skl_s", name="shared", token="t1")])
     )
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
@@ -1706,10 +1706,10 @@ def test_status_distinct_scopes_list_separately(
     )
 
     # scope "owned" -> filter "mine"; scope "all" -> filter "all".
-    mine_route = respx.get(f"{SERVER}/v1/workflows", params__contains={"filter": "mine"}).mock(
+    mine_route = respx.get(f"{SERVER}/v1/skills", params__contains={"filter": "mine"}).mock(
         return_value=_list_response([_summary_dict(id_="skl_m", name="mine-flow", token="t1")])
     )
-    all_route = respx.get(f"{SERVER}/v1/workflows", params__contains={"filter": "all"}).mock(
+    all_route = respx.get(f"{SERVER}/v1/skills", params__contains={"filter": "all"}).mock(
         return_value=_list_response([_summary_dict(id_="skl_x", name="shared-flow", token="t1")])
     )
 
@@ -1768,7 +1768,7 @@ def _save_response(
     return httpx.Response(
         200,
         json={
-            "workflow_id": workflow_id,
+            "skill_id": workflow_id,
             "version": version,
             "name": name,
             "version_token": token,
@@ -1792,7 +1792,7 @@ def _modified_entry(
     body written by a test reads as modified and becomes a push candidate.
     """
     return SyncEntry(
-        workflow_id=id_,
+        skill_id=id_,
         slug=slug,
         target_path=normalize_target_path(str(target_dir)),
         synced_version=1,
@@ -1825,10 +1825,10 @@ def test_push_uploads_modified_entry_and_updates_index(
         ]
     )
 
-    # Listing or fetching during a push is a bug: route only POST /v1/workflows.
-    list_route = respx.get(f"{SERVER}/v1/workflows")
-    detail_route = respx.get(f"{SERVER}/v1/workflows/skl_01")
-    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+    # Listing or fetching during a push is a bug: route only POST /v1/skills.
+    list_route = respx.get(f"{SERVER}/v1/skills")
+    detail_route = respx.get(f"{SERVER}/v1/skills/skl_01")
+    save_route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=_save_response(
             workflow_id="skl_01",
             name="incident-postmortem",
@@ -1895,7 +1895,7 @@ def test_push_omits_version_for_unpinned_binding(
             )
         ]
     )
-    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+    save_route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=_save_response(workflow_id="skl_a", name="alpha")
     )
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
@@ -1922,7 +1922,7 @@ def test_push_edited_metadata_reaches_request(
     )
     _write_skill(target_dir, "alpha", body)
     state = SyncState(entries=[_modified_entry(target_dir, id_="skl_a", slug="alpha")])
-    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+    save_route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=_save_response(workflow_id="skl_a", name="alpha")
     )
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
@@ -1960,14 +1960,14 @@ def test_push_addresses_workflow_by_id_not_name(
             )
         ]
     )
-    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+    save_route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=_save_response(workflow_id="skl_shared", name="shared-runbook", token="tok-2")
     )
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
         result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
 
     sent = json.loads(save_route.calls[0].request.content)
-    assert sent["workflow_id"] == "skl_shared"
+    assert sent["skill_id"] == "skl_shared"
     assert sent["name"] == "shared-runbook"
     assert [(i.slug, i.action) for i in result.items] == [("shared-runbook", "pushed")]
 
@@ -1984,7 +1984,7 @@ def test_push_conflict_leaves_entry_unchanged(
     state = SyncState(entries=[_modified_entry(target_dir, id_="skl_a", slug="alpha", token="t1")])
     recorded_hash = state.entries[0].body_sha256
 
-    respx.post(f"{SERVER}/v1/workflows").mock(
+    respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             409,
             json={"error": "conflict", "message": "version token mismatch"},
@@ -2016,7 +2016,7 @@ def test_push_unmodified_entry_emits_nothing(tmp_path: Path, tmp_config_paths: C
     state = SyncState(
         entries=[_tracked_entry(target_dir, id_="skl_a", slug="alpha", body=body, token="t1")]
     )
-    save_route = respx.post(f"{SERVER}/v1/workflows")
+    save_route = respx.post(f"{SERVER}/v1/skills")
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
         result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
     assert result.items == []
@@ -2032,7 +2032,7 @@ def test_push_missing_local_file_emits_nothing(
     target_dir = tmp_path / "skills"
     config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
     state = SyncState(entries=[_modified_entry(target_dir, id_="skl_a", slug="alpha")])
-    save_route = respx.post(f"{SERVER}/v1/workflows")
+    save_route = respx.post(f"{SERVER}/v1/skills")
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
         result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
     assert result.items == []
@@ -2051,12 +2051,12 @@ def test_push_read_only_entry_is_skipped_with_no_save(
     state = SyncState(
         entries=[_modified_entry(target_dir, id_="skl_v", slug="shared-doc", role="view")]
     )
-    save_route = respx.post(f"{SERVER}/v1/workflows")
+    save_route = respx.post(f"{SERVER}/v1/skills")
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
         result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
     item = result.items[0]
     assert item.action == "skipped-read-only"
-    assert item.detail is not None and "view grant" in item.detail
+    assert item.detail is not None and "view grant on this skill" in item.detail
     # A view-role entry never reaches the registry.
     assert save_route.call_count == 0
 
@@ -2072,12 +2072,13 @@ def test_push_rename_in_front_matter_is_skipped_invalid(
     body = _push_body(slug="alpha", name="beta")
     _write_skill(target_dir, "alpha", body)
     state = SyncState(entries=[_modified_entry(target_dir, id_="skl_a", slug="alpha")])
-    save_route = respx.post(f"{SERVER}/v1/workflows")
+    save_route = respx.post(f"{SERVER}/v1/skills")
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
         result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
     item = result.items[0]
     assert item.action == "skipped-invalid"
     assert item.detail is not None and "Renaming is not supported" in item.detail
+    assert "skill identity" in item.detail
     assert save_route.call_count == 0
 
 
@@ -2094,20 +2095,21 @@ def test_push_slug_rename_in_front_matter_is_skipped_invalid(
     body = _push_body(slug="alpha", name="beta", identity_key="slug")
     _write_skill(target_dir, "alpha", body)
     state = SyncState(entries=[_modified_entry(target_dir, id_="skl_a", slug="alpha")])
-    save_route = respx.post(f"{SERVER}/v1/workflows")
+    save_route = respx.post(f"{SERVER}/v1/skills")
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
         result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
     item = result.items[0]
     assert item.action == "skipped-invalid"
     assert item.detail is not None and "Renaming is not supported" in item.detail
+    assert "skill identity" in item.detail
     assert "`slug`" in item.detail  # the message names the offending key
     assert save_route.call_count == 0
 
 
 @respx.mock
-def test_push_missing_required_outcome_is_skipped_invalid(
-    tmp_path: Path, tmp_config_paths: ConfigPaths
-) -> None:
+def test_push_succeeds_without_outcome(tmp_path: Path, tmp_config_paths: ConfigPaths) -> None:
+    """Outcome is optional metadata: a push with none in the front-matter
+    reaches the registry and is not held back for it."""
     _me_route()
     target_dir = tmp_path / "skills"
     config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
@@ -2115,13 +2117,16 @@ def test_push_missing_required_outcome_is_skipped_invalid(
     body = _push_body(slug="alpha", outcome="")
     _write_skill(target_dir, "alpha", body)
     state = SyncState(entries=[_modified_entry(target_dir, id_="skl_a", slug="alpha")])
-    save_route = respx.post(f"{SERVER}/v1/workflows")
+    save_route = respx.post(f"{SERVER}/v1/skills").mock(
+        return_value=_save_response(workflow_id="skl_a", name="alpha", token="tok-2")
+    )
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
         result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
     item = result.items[0]
-    assert item.action == "skipped-invalid"
-    assert item.detail is not None and "outcome" in item.detail
-    assert save_route.call_count == 0
+    assert item.action == "pushed"
+    assert save_route.call_count == 1
+    sent = json.loads(save_route.calls[0].request.content)
+    assert "outcome" not in sent
 
 
 @respx.mock
@@ -2135,7 +2140,7 @@ def test_push_forbidden_is_reported_read_only(
     body = _push_body(slug="alpha")
     _write_skill(target_dir, "alpha", body)
     state = SyncState(entries=[_modified_entry(target_dir, id_="skl_a", slug="alpha")])
-    respx.post(f"{SERVER}/v1/workflows").mock(
+    respx.post(f"{SERVER}/v1/skills").mock(
         return_value=httpx.Response(
             403,
             json={"error": "forbidden", "message": "insufficient role to write"},
@@ -2178,7 +2183,7 @@ def test_push_validation_error_is_reported_skipped_invalid_not_aborting(
             )
         return _save_response(workflow_id="skl_b", name="beta")
 
-    respx.post(f"{SERVER}/v1/workflows").mock(side_effect=_save)
+    respx.post(f"{SERVER}/v1/skills").mock(side_effect=_save)
 
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
         result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
@@ -2200,7 +2205,7 @@ def test_push_untracked_local_dir_is_flagged_with_no_save(
     # A local directory the index does not track.
     _write_skill(target_dir, "brand-new", _push_body(slug="brand-new"))
     state = SyncState()
-    save_route = respx.post(f"{SERVER}/v1/workflows")
+    save_route = respx.post(f"{SERVER}/v1/skills")
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
         result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
     item = result.items[0]
@@ -2230,7 +2235,7 @@ def test_push_target_option_scopes_to_one(tmp_path: Path, tmp_config_paths: Conf
             _modified_entry(second, id_="skl_b", slug="beta"),
         ]
     )
-    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+    save_route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=_save_response(workflow_id="skl_b", name="beta")
     )
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
@@ -2257,7 +2262,7 @@ def test_push_positional_slug_narrowing(tmp_path: Path, tmp_config_paths: Config
             _modified_entry(target_dir, id_="skl_b", slug="beta"),
         ]
     )
-    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+    save_route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=_save_response(workflow_id="skl_a", name="alpha")
     )
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
@@ -2285,7 +2290,7 @@ def test_push_selected_target_applies_globs(tmp_path: Path, tmp_config_paths: Co
             _modified_entry(target_dir, id_="skl_u", slug="unrelated"),
         ]
     )
-    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+    save_route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=_save_response(workflow_id="skl_r", name="refunds-flow")
     )
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
@@ -2319,7 +2324,7 @@ def test_push_persists_index_when_a_save_raises_midway(
             return _save_response(workflow_id="skl_a", name="alpha", token="tok-a2")
         return httpx.Response(500, json={"error": "internal_error", "message": "boom"})
 
-    respx.post(f"{SERVER}/v1/workflows").mock(side_effect=_save)
+    respx.post(f"{SERVER}/v1/skills").mock(side_effect=_save)
 
     with (
         GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client,
@@ -2387,7 +2392,7 @@ def test_pull_stamps_identity_on_first_run(tmp_path: Path, tmp_config_paths: Con
     _me_route("owner@example.com")
     target_dir = tmp_path / "skills"
     config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
-    respx.get(f"{SERVER}/v1/workflows").mock(return_value=_list_response([]))
+    respx.get(f"{SERVER}/v1/skills").mock(return_value=_list_response([]))
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
         pull(
             client,
@@ -2410,7 +2415,7 @@ def test_pull_mismatch_aborts_before_any_work(
     _me_route("intruder@example.com")
     target_dir = tmp_path / "skills"
     config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
-    list_route = respx.get(f"{SERVER}/v1/workflows").mock(return_value=_list_response([]))
+    list_route = respx.get(f"{SERVER}/v1/skills").mock(return_value=_list_response([]))
     state = SyncState(identity="owner@example.com")
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client, pytest.raises(Conflict):
         pull(
@@ -2435,7 +2440,7 @@ def test_status_does_not_stamp_when_identity_unset(
     _me_route("owner@example.com")
     target_dir = tmp_path / "skills"
     config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
-    respx.get(f"{SERVER}/v1/workflows").mock(return_value=_list_response([]))
+    respx.get(f"{SERVER}/v1/skills").mock(return_value=_list_response([]))
     state = SyncState()
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
         status(client, config, state, target_path=None)
@@ -2449,7 +2454,7 @@ def test_status_mismatch_raises(tmp_path: Path, tmp_config_paths: ConfigPaths) -
     _me_route("intruder@example.com")
     target_dir = tmp_path / "skills"
     config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
-    list_route = respx.get(f"{SERVER}/v1/workflows").mock(return_value=_list_response([]))
+    list_route = respx.get(f"{SERVER}/v1/skills").mock(return_value=_list_response([]))
     state = SyncState(identity="owner@example.com")
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client, pytest.raises(Conflict):
         status(client, config, state, target_path=None)
@@ -2464,7 +2469,7 @@ def test_push_mismatch_aborts_before_any_save(
     target_dir = tmp_path / "skills"
     config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
     _write_skill(target_dir, "alpha", _push_body(slug="alpha"))
-    save_route = respx.post(f"{SERVER}/v1/workflows")
+    save_route = respx.post(f"{SERVER}/v1/skills")
     state = SyncState(
         identity="owner@example.com",
         entries=[_modified_entry(target_dir, id_="skl_a", slug="alpha")],
@@ -2490,13 +2495,13 @@ def test_pull_removes_local_copy_of_deleted_workflow_when_confirmed(
     state = SyncState(entries=[_tracked_entry(target_dir, id_="skl_gone", slug="gone", body=body)])
 
     # The workflow lists as soft-deleted (archived_at set), so it is not live.
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [_summary_dict(id_="skl_gone", name="gone", archived_at="2026-01-01T00:00:00Z")]
         )
     )
     # Registered to prove no server-side delete is ever issued.
-    delete_route = respx.delete(f"{SERVER}/v1/workflows/skl_gone")
+    delete_route = respx.delete(f"{SERVER}/v1/skills/skl_gone")
 
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
         result = pull(
@@ -2529,7 +2534,7 @@ def test_pull_keeps_local_copy_of_deleted_workflow_when_declined(
     body = "registry body"
     _write_skill(target_dir, "gone", body)
     state = SyncState(entries=[_tracked_entry(target_dir, id_="skl_gone", slug="gone", body=body)])
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [_summary_dict(id_="skl_gone", name="gone", archived_at="2026-01-01T00:00:00Z")]
         )
@@ -2577,7 +2582,7 @@ def test_pull_keeps_edited_local_copy_of_deleted_workflow_without_force(
     state = SyncState(
         entries=[_tracked_entry(target_dir, id_="skl_gone", slug="gone", body="server body")]
     )
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [_summary_dict(id_="skl_gone", name="gone", archived_at="2026-01-01T00:00:00Z")]
         )
@@ -2616,7 +2621,7 @@ def test_pull_force_removes_edited_local_copy_of_deleted_workflow(
     state = SyncState(
         entries=[_tracked_entry(target_dir, id_="skl_gone", slug="gone", body="server body")]
     )
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [_summary_dict(id_="skl_gone", name="gone", archived_at="2026-01-01T00:00:00Z")]
         )
@@ -2652,7 +2657,7 @@ def test_pull_treats_entirely_absent_entry_as_gone(
         entries=[_tracked_entry(target_dir, id_="skl_rev", slug="revoked", body="shared body")]
     )
     # The workflow is not in the listing at all (e.g. a revoked share).
-    respx.get(f"{SERVER}/v1/workflows").mock(return_value=_list_response([]))
+    respx.get(f"{SERVER}/v1/skills").mock(return_value=_list_response([]))
 
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
         result = pull(
@@ -2678,13 +2683,13 @@ def test_pull_does_not_materialize_deleted_workflow(
     _me_route()
     target_dir = tmp_path / "skills"
     config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [_summary_dict(id_="skl_d", name="ghost", archived_at="2026-01-01T00:00:00Z")]
         )
     )
     # A fetch of the deleted workflow body would be a bug: it is never materialized.
-    detail_route = respx.get(f"{SERVER}/v1/workflows/skl_d")
+    detail_route = respx.get(f"{SERVER}/v1/skills/skl_d")
 
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
         result = pull(
@@ -2728,7 +2733,7 @@ def test_pull_reused_slug_does_not_mask_deletion(
         ]
     )
     # The slug is live again, but under a brand-new id.
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response([_summary_dict(id_="skl_new", name="gone", token="t2")])
     )
 
@@ -2754,7 +2759,7 @@ def test_pull_reused_slug_does_not_mask_deletion(
     # deleted old id, not the reused live id.
     persisted = load_sync_state(tmp_config_paths)
     gone_entries = [e for e in persisted.entries if e.slug == "gone"]
-    assert [e.workflow_id for e in gone_entries] == ["skl_old"]
+    assert [e.skill_id for e in gone_entries] == ["skl_old"]
 
 
 @respx.mock
@@ -2772,7 +2777,7 @@ def test_pull_out_of_glob_entry_is_not_pruned(
     )
     # The listing has nothing in glob scope, so onboarding is absent from the
     # narrowed live set, but it is out-of-scope, not deleted.
-    respx.get(f"{SERVER}/v1/workflows").mock(return_value=_list_response([]))
+    respx.get(f"{SERVER}/v1/skills").mock(return_value=_list_response([]))
 
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
         result = pull(
@@ -2822,7 +2827,7 @@ def test_push_converges_sibling_after_single_edit(
             _modified_entry(first, id_="skl_a", slug="alpha", token="tok-1"),
             # B's entry matches the on-disk base, so B is not itself a candidate.
             SyncEntry(
-                workflow_id="skl_a",
+                skill_id="skl_a",
                 slug="alpha",
                 target_path=normalize_target_path(str(second)),
                 synced_version=1,
@@ -2831,7 +2836,7 @@ def test_push_converges_sibling_after_single_edit(
             ),
         ]
     )
-    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+    save_route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=_save_response(workflow_id="skl_a", name="alpha", version=2, token="tok-2")
     )
 
@@ -2878,7 +2883,7 @@ def test_push_identical_edits_upload_once_both_clean(
             _modified_entry(second, id_="skl_a", slug="alpha", token="tok-1"),
         ]
     )
-    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+    save_route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=_save_response(workflow_id="skl_a", name="alpha", version=2, token="tok-2")
     )
 
@@ -2910,7 +2915,7 @@ def test_push_diverged_edits_are_refused_without_upload(
             _modified_entry(second, id_="skl_a", slug="alpha", token="tok-1"),
         ]
     )
-    save_route = respx.post(f"{SERVER}/v1/workflows")
+    save_route = respx.post(f"{SERVER}/v1/skills")
 
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
         result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
@@ -2918,6 +2923,10 @@ def test_push_diverged_edits_are_refused_without_upload(
     # No upload happened, and both copies are reported diverged.
     assert save_route.call_count == 0
     assert sorted(i.action for i in result.items) == ["diverged", "diverged"]
+    assert all(
+        i.detail is not None and "skill's local file was edited differently" in i.detail
+        for i in result.items
+    )
     # Neither index entry advanced.
     for entry in load_sync_state(tmp_config_paths).entries:
         assert entry.version_token == "tok-1"
@@ -2941,7 +2950,7 @@ def test_push_target_pushes_picked_copy_and_converges_clean_other(
         entries=[
             _modified_entry(first, id_="skl_a", slug="alpha", token="tok-1"),
             SyncEntry(
-                workflow_id="skl_a",
+                skill_id="skl_a",
                 slug="alpha",
                 target_path=normalize_target_path(str(second)),
                 synced_version=1,
@@ -2950,7 +2959,7 @@ def test_push_target_pushes_picked_copy_and_converges_clean_other(
             ),
         ]
     )
-    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+    save_route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=_save_response(workflow_id="skl_a", name="alpha", version=2, token="tok-2")
     )
 
@@ -3001,7 +3010,7 @@ def test_push_target_preserves_sibling_unpushed_edit(
     # Snapshot B's recorded state to prove it is untouched afterward.
     b_recorded_hash = b_entry.body_sha256
     b_recorded_token = b_entry.version_token
-    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+    save_route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=_save_response(workflow_id="skl_a", name="alpha", version=2, token="tok-2")
     )
 
@@ -3067,7 +3076,7 @@ def test_push_unscoped_preserves_out_of_glob_sibling_edit(
             _modified_entry(second, id_="skl_a", slug="alpha", token="tok-1"),
         ]
     )
-    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+    save_route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=_save_response(workflow_id="skl_a", name="alpha", version=2, token="tok-2")
     )
 
@@ -3103,7 +3112,7 @@ def test_push_convergence_does_not_recreate_deleted_sibling(
         entries=[
             _modified_entry(first, id_="skl_a", slug="alpha", token="tok-1"),
             SyncEntry(
-                workflow_id="skl_a",
+                skill_id="skl_a",
                 slug="alpha",
                 target_path=normalize_target_path(str(second)),
                 synced_version=1,
@@ -3112,7 +3121,7 @@ def test_push_convergence_does_not_recreate_deleted_sibling(
             ),
         ]
     )
-    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+    save_route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=_save_response(workflow_id="skl_a", name="alpha", version=2, token="tok-2")
     )
 
@@ -3147,14 +3156,14 @@ def test_push_read_only_mirrored_in_two_targets_is_skipped_not_diverged(
             _modified_entry(second, id_="skl_v", slug="shared-doc", role="view"),
         ]
     )
-    save_route = respx.post(f"{SERVER}/v1/workflows")
+    save_route = respx.post(f"{SERVER}/v1/skills")
 
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
         result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
 
     # Both copies are reported read-only, neither diverged, and nothing uploaded.
     assert sorted(i.action for i in result.items) == ["skipped-read-only", "skipped-read-only"]
-    assert all("view grant" in (i.detail or "") for i in result.items)
+    assert all("view grant on this skill" in (i.detail or "") for i in result.items)
     assert save_route.call_count == 0
 
 
@@ -3415,12 +3424,12 @@ def test_pull_auto_writes_safe_set(tmp_path: Path, tmp_config_paths: ConfigPaths
     _me_route()
     target_dir = tmp_path / "skills"
     config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [{"id": "skl_new", "name": "fresh", "current_version": 1, "version_token": "t1"}]
         )
     )
-    respx.get(f"{SERVER}/v1/workflows/skl_new").mock(
+    respx.get(f"{SERVER}/v1/skills/skl_new").mock(
         return_value=_detail_response(id_="skl_new", name="fresh", body="body", token="t1")
     )
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
@@ -3454,12 +3463,12 @@ def test_pull_auto_skips_modified_local(tmp_path: Path, tmp_config_paths: Config
             )
         ]
     )
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [{"id": "skl_a", "name": "alpha", "current_version": 1, "version_token": "t1"}]
         )
     )
-    detail_route = respx.get(f"{SERVER}/v1/workflows/skl_a")
+    detail_route = respx.get(f"{SERVER}/v1/skills/skl_a")
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
         result = pull(
             client,
@@ -3491,7 +3500,7 @@ def test_pull_auto_skips_conflict(tmp_path: Path, tmp_config_paths: ConfigPaths)
         ]
     )
     # Both sides moved: local edited AND server token advanced -> conflict.
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [{"id": "skl_a", "name": "alpha", "current_version": 2, "version_token": "t2"}]
         )
@@ -3526,7 +3535,7 @@ def test_pull_auto_reports_deleted_on_server_but_never_removes(
     body = "registry body"
     _write_skill(target_dir, "gone", body)
     state = SyncState(entries=[_tracked_entry(target_dir, id_="skl_gone", slug="gone", body=body)])
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response(
             [_summary_dict(id_="skl_gone", name="gone", archived_at="2026-01-01T00:00:00Z")]
         )
@@ -3564,7 +3573,7 @@ def test_pull_auto_identity_mismatch_raises_and_is_catchable(
     _me_route("intruder@example.com")
     target_dir = tmp_path / "skills"
     config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="owned")])
-    list_route = respx.get(f"{SERVER}/v1/workflows").mock(return_value=_list_response([]))
+    list_route = respx.get(f"{SERVER}/v1/skills").mock(return_value=_list_response([]))
     state = SyncState(identity="owner@example.com")
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client, pytest.raises(Conflict):
         pull(
@@ -3607,7 +3616,7 @@ def test_status_new_sibling_file_reports_modified_local(
     state = SyncState(
         entries=[
             SyncEntry(
-                workflow_id="skl_a",
+                skill_id="skl_a",
                 slug="alpha",
                 target_path=normalize_target_path(str(target_dir)),
                 synced_version=1,
@@ -3621,7 +3630,7 @@ def test_status_new_sibling_file_reports_modified_local(
             )
         ]
     )
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response([_summary_dict(id_="skl_a", name="alpha", token="t1")])
     )
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
@@ -3651,7 +3660,7 @@ def test_status_deleted_sibling_reports_modified_local(
     state = SyncState(
         entries=[
             SyncEntry(
-                workflow_id="skl_a",
+                skill_id="skl_a",
                 slug="alpha",
                 target_path=normalize_target_path(str(target_dir)),
                 synced_version=1,
@@ -3666,7 +3675,7 @@ def test_status_deleted_sibling_reports_modified_local(
             )
         ]
     )
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response([_summary_dict(id_="skl_a", name="alpha", token="t1")])
     )
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
@@ -3696,7 +3705,7 @@ def test_tree_push_drifted_sibling_deleted_mid_walk_is_drift(
     helper_content = "helper original"
     (slug_dir / "helper.sh").write_text(helper_content, encoding="utf-8")
     entry = SyncEntry(
-        workflow_id="skl_a",
+        skill_id="skl_a",
         slug="alpha",
         target_path=normalize_target_path(str(target_dir)),
         synced_version=1,
@@ -3734,7 +3743,7 @@ def test_status_honors_server_ignore_default(tmp_path: Path, tmp_config_paths: C
     state = SyncState(
         entries=[
             SyncEntry(
-                workflow_id="skl_a",
+                skill_id="skl_a",
                 slug="alpha",
                 target_path=normalize_target_path(str(target_dir)),
                 synced_version=1,
@@ -3755,7 +3764,7 @@ def test_status_honors_server_ignore_default(tmp_path: Path, tmp_config_paths: C
             },
         )
     )
-    respx.get(f"{SERVER}/v1/workflows").mock(
+    respx.get(f"{SERVER}/v1/skills").mock(
         return_value=_list_response([_summary_dict(id_="skl_a", name="alpha", token="t1")])
     )
     with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:

@@ -56,7 +56,7 @@ def _save_response(
     return httpx.Response(
         200,
         json={
-            "workflow_id": workflow_id,
+            "skill_id": workflow_id,
             "version": version,
             "name": name,
             "version_token": token,
@@ -98,7 +98,7 @@ def _modified_entry(
 ) -> SyncEntry:
     """Entry with a recorded hash that won't match any real on-disk body."""
     return SyncEntry(
-        workflow_id=id_,
+        skill_id=id_,
         slug=slug,
         target_path=normalize_target_path(str(target_dir)),
         synced_version=1,
@@ -148,7 +148,7 @@ def test_push_sends_changed_file_inline_others_by_ref(
         ]
     )
 
-    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+    save_route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=_save_response(workflow_id="skl_01", name=slug)
     )
 
@@ -195,7 +195,7 @@ def test_push_applies_ignore_before_upload(tmp_path: Path, tmp_config_paths: Con
     # Entry recorded with no files so everything is treated as changed (inline).
     state = SyncState(entries=[_modified_entry(target_dir, id_="skl_02", slug=slug, files=[])])
 
-    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+    save_route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=_save_response(workflow_id="skl_02", name=slug)
     )
 
@@ -452,7 +452,7 @@ def _clean_entry(
     candidate. This is what isolates whole-tree drift detection from body drift.
     """
     return SyncEntry(
-        workflow_id=id_,
+        skill_id=id_,
         slug=slug,
         target_path=normalize_target_path(str(target_dir)),
         synced_version=1,
@@ -502,7 +502,7 @@ def test_push_uploads_brand_new_file_with_no_other_change(
             )
         ]
     )
-    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+    save_route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=_save_response(workflow_id="skl_new", name=slug)
     )
 
@@ -559,7 +559,7 @@ def test_push_propagates_deleted_sibling(tmp_path: Path, tmp_config_paths: Confi
             )
         ]
     )
-    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+    save_route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=_save_response(workflow_id="skl_del", name=slug)
     )
 
@@ -659,7 +659,7 @@ def test_push_uploads_visible_new_file_skips_ignored_new_file(
             )
         ]
     )
-    save_route = respx.post(f"{SERVER}/v1/workflows").mock(
+    save_route = respx.post(f"{SERVER}/v1/skills").mock(
         return_value=_save_response(workflow_id="skl_mix", name=slug)
     )
 

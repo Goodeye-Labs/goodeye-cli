@@ -1,4 +1,4 @@
-"""`goodeye workflows ...` subcommand group."""
+"""`goodeye skills ...` subcommand group."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ _log = logging.getLogger(__name__)
 _WORKFLOW_VERIFIER_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,127}$")
 
 app = typer.Typer(
-    help="Browse and manage the caller's private workflows.",
+    help="Browse and manage the caller's private skills.",
     no_args_is_help=True,
 )
 app.add_typer(workflows_sync.app, name="sync")
@@ -64,7 +64,7 @@ def list_cmd(
         "-f",
         help=(
             "Scope filter: all (mine + shared, the default), mine "
-            "(workflows you own), or shared-with-me (workflows shared "
+            "(skills you own), or shared-with-me (skills shared "
             "with you via grants)."
         ),
         case_sensitive=False,
@@ -79,10 +79,10 @@ def list_cmd(
     include_archived: bool = typer.Option(
         False,
         "--include-archived",
-        help="Also list your own archived workflows (restore with `workflows unarchive`).",
+        help="Also list your own archived skills (restore with `skills unarchive`).",
     ),
 ) -> None:
-    """List workflows you own plus those shared with you."""
+    """List skills you own plus those shared with you."""
     console = Console()
     mode = resolve_output_mode(json_output=json_output, table_output=table_output)
     with _client(require_auth=True) as client:
@@ -103,14 +103,14 @@ def list_cmd(
         echo_json(items_envelope(items, next_cursor=final_cursor))
         return
 
-    table = Table(title=f"Workflows ({filter_})")
+    table = Table(title=f"Skills ({filter_})")
     table.add_column("ID", no_wrap=True)
     table.add_column("Name")
     table.add_column("Version", justify="right")
     table.add_column("Fork of", no_wrap=True)
     table.add_column("Description")
     # The archived-at column is only meaningful (and only carries values)
-    # when the caller asked to include their archived workflows.
+    # when the caller asked to include their archived skills.
     if include_archived:
         table.add_column("Archived at", no_wrap=True)
     for item in items:
@@ -126,12 +126,12 @@ def list_cmd(
             )
         table.add_row(*cells)
     if not items:
-        console.print("[dim]No workflows matched.[/dim]")
+        console.print("[dim]No skills matched.[/dim]")
     else:
         console.print(table)
     if final_cursor:
         hint = next_page_hint(
-            ("goodeye", "workflows", "list"),
+            ("goodeye", "skills", "list"),
             next_cursor=final_cursor,
             limit=limit,
             options=(
@@ -159,7 +159,7 @@ def search_cmd(
     json_output: bool = typer.Option(False, "--json", help="Print JSON."),
     table_output: bool = typer.Option(False, "--table", help="Print results as a table."),
 ) -> None:
-    """Find a workflow by describing what it does, even if you don't know its name."""
+    """Find a skill by describing what it does, even if you don't know its name."""
     console = Console()
     mode = resolve_output_mode(json_output=json_output, table_output=table_output)
     with _client(require_auth=True) as client:
@@ -173,7 +173,7 @@ def search_cmd(
         echo_json(result)
         return
 
-    table = Table(title="Workflow search")
+    table = Table(title="Skill search")
     table.add_column("Rank", justify="right")
     table.add_column("Slug")
     table.add_column("Match reason")
@@ -188,23 +188,23 @@ def search_cmd(
 
 @app.command("get")
 def get_cmd(
-    id_or_name: str = typer.Argument(..., help="Workflow UUID or name."),
+    id_or_name: str = typer.Argument(..., help="Skill UUID or name."),
     version: int | None = typer.Option(None, "--version", "-v", help="Pinned version."),
     output: Path | None = typer.Option(
         None,
         "--output",
         "-o",
-        help="Write the workflow body to this path instead of printing the runbook to stdout.",
+        help="Write the skill body to this path instead of printing the runbook to stdout.",
     ),
     json_output: bool = typer.Option(
-        False, "--json", help="Print the full workflow record as JSON instead of markdown."
+        False, "--json", help="Print the full skill record as JSON instead of markdown."
     ),
 ) -> None:
-    """Fetch a workflow for the calling AI agent to execute.
+    """Fetch a skill for the calling AI agent to execute.
 
-    The body is the user's workflow: a markdown runbook the agent should
+    The body is the user's skill: a markdown runbook the agent should
     follow on the user's behalf, not just display. Prints the markdown to
-    stdout by default. With --output, writes the canonical workflow body
+    stdout by default. With --output, writes the canonical skill body
     (front-matter first, without the run-guidance framing printed to stdout)
     so the saved file stays editable and can be re-published.
     """
@@ -364,7 +364,7 @@ def publish(
     file: str = typer.Argument(
         ...,
         help=(
-            "Markdown workflow file, a directory containing SKILL.md (uploads the full "
+            "Markdown skill file, a directory containing SKILL.md (uploads the full "
             "directory tree), or '-' to read markdown from stdin "
             "(preferred for generated agent output)."
         ),
@@ -378,21 +378,19 @@ def publish(
     outcome_override: str | None = typer.Option(
         None,
         "--outcome",
-        help="Override the `outcome` from front-matter. Required for workflow discovery.",
+        help="Override the `outcome` from front-matter. Optional discovery metadata.",
     ),
     tag: Annotated[
         list[str] | None,
         typer.Option(
             "--tag",
-            help=(
-                "Workflow discovery tag. Repeat to set multiple tags; overrides front-matter tags."
-            ),
+            help=("Skill discovery tag. Repeat to set multiple tags; overrides front-matter tags."),
         ),
     ] = None,
     expected_version_token: str | None = typer.Option(
         None,
         "--expected-version-token",
-        help="Required token when updating an existing workflow. Omit only for creates.",
+        help="Required token when updating an existing skill. Omit only for creates.",
     ),
     source: str | None = typer.Option(
         None,
@@ -409,7 +407,7 @@ def publish(
             help=(
                 "Verifier binding: name=verifier_id (repeatable). Append "
                 "@version (name=verifier_id@version) to pin a specific version; "
-                "unpinned uses the verifier's current version when the workflow "
+                "unpinned uses the verifier's current version when the skill "
                 "is published as a template."
             ),
         ),
@@ -438,13 +436,13 @@ def publish(
     clear_files: bool = typer.Option(
         False,
         "--clear-files",
-        help="Send an empty file tree, removing all sibling files from the workflow.",
+        help="Send an empty file tree, removing all sibling files from the skill.",
     ),
 ) -> None:
-    """Save a new workflow (or a new version) to your private registry.
+    """Save a new skill (or a new version) to your private registry.
 
     When FILE is a directory containing SKILL.md, the full directory tree is
-    uploaded: SKILL.md becomes the workflow body and all other non-ignored files
+    uploaded: SKILL.md becomes the skill body and all other non-ignored files
     are uploaded as sibling files.  When FILE is a single file or stdin, no
     file tree is sent (the server carries the existing tree forward).
 
@@ -452,13 +450,13 @@ def publish(
     When both are present, command-line flags win:
 
     \b
-    goodeye workflows publish - \\
+    goodeye skills publish - \\
       --name incident-postmortem \\
       --description "Draft a postmortem from an incident transcript." \\
       --outcome "Reduce mean-time-to-postmortem from days to hours." \\
       --tag sre --tag postmortem
 
-    Front-matter follows the Goodeye workflow body convention:
+    Front-matter follows the Goodeye skill body convention:
 
     \b
     ---
@@ -469,11 +467,11 @@ def publish(
     # tags: [sre, postmortem]
     ---
 
-    ``name``, ``description``, and ``outcome`` are required, either as
-    flags or front-matter. Tags are optional.
+    ``name`` and ``description`` are required, either as flags or
+    front-matter. ``outcome`` and tags are optional.
 
-    Workflows are always private to the caller. To share a workflow as a
-    public template, run ``goodeye templates publish <workflow-uuid-or-name>`` as a
+    Skills are always private to the caller. To share a skill as a
+    public template, run ``goodeye templates publish <skill-uuid-or-name>`` as a
     separate, explicit step.
 
     Inline deterministic checks may live in the body as fenced code blocks.
@@ -501,8 +499,8 @@ def publish(
         markdown = _read_markdown_input(file)
 
     front_matter, _stripped_body = _parse_front_matter(markdown)
-    # Server stores the full markdown (including front-matter) so workflow
-    # bodies round-trip through `goodeye workflows get`.
+    # Server stores the full markdown (including front-matter) so skill
+    # bodies round-trip through `goodeye skills get`.
     body = markdown
 
     effective_name = _coerce_required_text(
@@ -526,11 +524,6 @@ def publish(
     outcome, tags = _extract_discovery_facets(front_matter)
     if outcome_override is not None:
         outcome = _coerce_outcome(outcome_override)
-    if outcome is None:
-        raise ValidationFailed(
-            slug="validation_error",
-            message="Missing `outcome`. Add `outcome:` to the front-matter or pass --outcome.",
-        )
     if tag:
         tags = list(tag)
     if clear_verifiers and verifier:
@@ -593,7 +586,7 @@ def publish(
 
     console.print(
         f"[green]Saved[/green] {result.name} v{result.version} "
-        f"(workflow_id={result.workflow_id}, version_token={result.version_token})"
+        f"(skill_id={result.workflow_id}, version_token={result.version_token})"
     )
     extra_notes = [result.next_step] if result.next_step else []
     _print_authoring_notes([*result.authoring_notes, *extra_notes])
@@ -601,19 +594,19 @@ def publish(
 
 @app.command("lineage")
 def lineage(
-    workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
+    skill_id: str = typer.Argument(..., help="Skill UUID or name."),
     json_output: bool = typer.Option(False, "--json", help="Print lineage as JSON."),
 ) -> None:
-    """Show a workflow's fork lineage."""
+    """Show a skill's fork lineage."""
     console = Console()
     with _client(require_auth=True) as client:
-        result = client.lookup_workflow_lineage(workflow_id)
+        result = client.lookup_workflow_lineage(skill_id)
     if json_output:
         typer.echo(result.model_dump_json(indent=2))
         return
     # A permanently-deleted parent severs the FK, so the response carries
     # parent_template_id=None while still pinning the version the fork was
-    # taken from. A workflow that was never a fork has neither. Only the
+    # taken from. A skill that was never a fork has neither. Only the
     # latter is "not a fork"; gating on parent_template_id alone would
     # mislabel a deleted-parent fork and try to print "template None".
     if result.parent_template_id is None and result.parent_template_version is None:
@@ -654,52 +647,52 @@ def lineage(
 
 @app.command("archive")
 def archive(
-    workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
+    skill_id: str = typer.Argument(..., help="Skill UUID or name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
-    """Hide a workflow from your list without deleting it (reversible).
+    """Hide a skill from your list without deleting it (reversible).
 
-    Archiving hides the workflow from list results and grants but keeps all
-    versions and content intact. Use `workflows unarchive` to restore.
-    Use `workflows delete` only when you want permanent, irreversible removal.
+    Archiving hides the skill from list results and grants but keeps all
+    versions and content intact. Use `skills unarchive` to restore.
+    Use `skills delete` only when you want permanent, irreversible removal.
     """
     console = Console()
-    if not confirm_destructive(f"Archive workflow {workflow_id}?", yes=yes):
+    if not confirm_destructive(f"Archive skill {skill_id}?", yes=yes):
         console.print("Cancelled.")
         raise typer.Exit(code=0)
     with _client(require_auth=True) as client:
-        result = client.archive_workflow(workflow_id)
-    console.print(f"[green]Archived[/green] {result.name} (workflow_id={result.workflow_id})")
+        result = client.archive_workflow(skill_id)
+    console.print(f"[green]Archived[/green] {result.name} (skill_id={result.workflow_id})")
 
 
 @app.command("unarchive")
 def unarchive(
-    workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
+    skill_id: str = typer.Argument(..., help="Skill UUID or name."),
 ) -> None:
-    """Restore an archived workflow you own.
+    """Restore an archived skill you own.
 
-    The inverse of `workflows archive`. The workflow becomes visible again in
+    The inverse of `skills archive`. The skill becomes visible again in
     list results and grants.
     """
     console = Console()
     with _client(require_auth=True) as client:
-        result = client.unarchive_workflow(workflow_id)
-    console.print(f"[green]Unarchived[/green] workflow {result.workflow_id}")
+        result = client.unarchive_workflow(skill_id)
+    console.print(f"[green]Unarchived[/green] skill {result.workflow_id}")
 
 
 @app.command("delete")
 def delete(
-    workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
+    skill_id: str = typer.Argument(..., help="Skill UUID or name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
-    """Permanently and immediately delete a workflow you own.
+    """Permanently and immediately delete a skill you own.
 
-    WARNING: This is permanent. The workflow, all its versions, all attached
+    WARNING: This is permanent. The skill, all its versions, all attached
     files, and all access grants are removed from the live system at once.
     There is NO recovery path.
 
-    Use `workflows archive` if you want a reversible alternative. Archived
-    workflows can be restored at any time with `workflows unarchive`.
+    Use `skills archive` if you want a reversible alternative. Archived
+    skills can be restored at any time with `skills unarchive`.
 
     Encrypted backups age out within the platform's standard retention window
     (up to three months), so the content is not instantly erased from all
@@ -708,13 +701,13 @@ def delete(
     """
     console = Console()
     if not confirm_destructive(
-        f"Permanently delete workflow {workflow_id}? This cannot be undone.",
+        f"Permanently delete skill {skill_id}? This cannot be undone.",
         yes=yes,
     ):
         console.print("Cancelled.")
         raise typer.Exit(code=0)
     with _client(require_auth=True) as client:
-        result = client.delete_workflow(workflow_id)
+        result = client.delete_workflow(skill_id)
     if result.deleted:
         console.print(f"[green]Permanently deleted[/green] {result.name}")
     else:
@@ -723,19 +716,19 @@ def delete(
 
 @app.command("delete-version")
 def delete_version(
-    workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
+    skill_id: str = typer.Argument(..., help="Skill UUID or name."),
     version: int = typer.Argument(..., help="Version number to permanently delete."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
-    """Permanently and immediately delete a single non-current workflow version.
+    """Permanently and immediately delete a single non-current skill version.
 
     WARNING: This is permanent. The version row and all its attached files are
     removed from the live system at once. There is NO recovery path. The current
-    (live) version cannot be deleted with this command; use `workflows delete`
-    to remove the entire workflow including its current version.
+    (live) version cannot be deleted with this command; use `skills delete`
+    to remove the entire skill including its current version.
 
-    Use `workflows archive` if you want a reversible alternative for the whole
-    workflow.
+    Use `skills archive` if you want a reversible alternative for the whole
+    skill.
 
     Encrypted backups age out within the platform's standard retention window
     (up to three months), so the content is not instantly erased from all
@@ -747,42 +740,40 @@ def delete_version(
     """
     console = Console()
     if not confirm_destructive(
-        f"Permanently delete workflow {workflow_id} version {version}? This cannot be undone.",
+        f"Permanently delete skill {skill_id} version {version}? This cannot be undone.",
         yes=yes,
     ):
         console.print("Cancelled.")
         raise typer.Exit(code=0)
     with _client(require_auth=True) as client:
-        result = client.delete_workflow_version(workflow_id, version)
+        result = client.delete_workflow_version(skill_id, version)
     if result.deleted:
         console.print(
-            f"[green]Permanently deleted[/green] workflow {result.workflow_id} v{result.version}"
+            f"[green]Permanently deleted[/green] skill {result.workflow_id} v{result.version}"
         )
     else:
-        console.print(
-            f"[yellow]Not deleted[/yellow] workflow {result.workflow_id} v{result.version}"
-        )
+        console.print(f"[yellow]Not deleted[/yellow] skill {result.workflow_id} v{result.version}")
 
 
 @app.command("grant")
 def grant(
-    workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
+    skill_id: str = typer.Argument(..., help="Skill UUID or name."),
     grantee: str = typer.Argument(..., help="User or team UUID, email, or handle."),
     role: str = typer.Argument(..., help="Role to grant: view, edit, or admin."),
     include_history: bool = typer.Option(
         False,
         "--include-history",
         help=(
-            "Share the workflow's full version history"
+            "Share the skill's full version history"
             " (default: only the version current at share time and later)."
         ),
     ),
 ) -> None:
-    """Grant workflow access to a named user or team."""
+    """Grant skill access to a named user or team."""
     console = Console()
     with _client(require_auth=True) as client:
         result = client.grant_workflow(
-            workflow_id, grantee, role.lower(), include_history=include_history
+            skill_id, grantee, role.lower(), include_history=include_history
         )
     history_note = " (full history)" if include_history else ""
     console.print(
@@ -792,13 +783,13 @@ def grant(
 
 @app.command("revoke-grant")
 def revoke_grant(
-    workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
+    skill_id: str = typer.Argument(..., help="Skill UUID or name."),
     grantee: str = typer.Argument(..., help="User or team UUID, email, or handle."),
 ) -> None:
-    """Revoke a direct workflow grant."""
+    """Revoke a direct skill grant."""
     console = Console()
     with _client(require_auth=True) as client:
-        result = client.revoke_workflow_grant(workflow_id, grantee)
+        result = client.revoke_workflow_grant(skill_id, grantee)
     if result.revoked:
         console.print(f"[green]Revoked[/green] grant for {grantee}")
     else:
@@ -807,19 +798,19 @@ def revoke_grant(
 
 @app.command("grants")
 def grants(
-    workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
+    skill_id: str = typer.Argument(..., help="Skill UUID or name."),
     json_output: bool = typer.Option(False, "--json", help="Print grants as JSON."),
     table_output: bool = typer.Option(False, "--table", help="Print grants as a table."),
 ) -> None:
-    """List workflow grants."""
+    """List skill grants."""
     console = Console()
     mode = resolve_output_mode(json_output=json_output, table_output=table_output)
     with _client(require_auth=True) as client:
-        result = client.list_workflow_grants(workflow_id)
+        result = client.list_workflow_grants(skill_id)
     if mode == "json":
         echo_json(result)
         return
-    table = Table(title=f"Workflow grants ({workflow_id})")
+    table = Table(title=f"Skill grants ({skill_id})")
     table.add_column("Grantee")
     table.add_column("Type")
     table.add_column("Role")
@@ -851,16 +842,16 @@ def grants(
 
 @app.command("leave")
 def leave(
-    workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
+    skill_id: str = typer.Argument(..., help="Skill UUID or name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
-    """Remove your personal access to a workflow someone shared with you (team access stays)."""
+    """Remove your personal access to a skill someone shared with you (team access stays)."""
     console = Console()
-    if not confirm_destructive(f"Leave shared workflow {workflow_id}?", yes=yes):
+    if not confirm_destructive(f"Leave shared skill {skill_id}?", yes=yes):
         console.print("Cancelled.")
         raise typer.Exit(code=0)
     with _client(require_auth=True) as client:
-        result = client.leave_shared_workflow(workflow_id)
+        result = client.leave_shared_workflow(skill_id)
     console.print(
         f"[green]Left[/green] {result.workflow_id}; "
         f"removed {result.removed_direct_grants} direct grant(s)."
@@ -889,7 +880,7 @@ def _split_version_suffix(value: str) -> tuple[str, int | None]:
             slug="validation_error",
             message=(
                 f"Version suffix '{tail}' is not a valid version number. "
-                "Use @N or @vN (e.g. my-workflow@3 or my-workflow@v3)."
+                "Use @N or @vN (e.g. my-skill@3 or my-skill@v3)."
             ),
         )
     parsed = int(candidate)
@@ -898,7 +889,7 @@ def _split_version_suffix(value: str) -> tuple[str, int | None]:
             slug="validation_error",
             message=(
                 f"Version suffix '{tail}' is not a valid version number. "
-                "Use @N or @vN (e.g. my-workflow@3 or my-workflow@v3)."
+                "Use @N or @vN (e.g. my-skill@3 or my-skill@v3)."
             ),
         )
     return head, parsed
@@ -944,31 +935,31 @@ def _render_safety_check(result: SafetyCheckResult, console: Console) -> None:
 
 @app.command("check-safety")
 def check_safety(
-    workflow_id: str = typer.Argument(
+    skill_id: str = typer.Argument(
         ...,
         help=(
-            "Workflow UUID or slug, optionally pinned with ``@N`` or ``@vN`` "
-            "(e.g. my-workflow@3). The ``--version`` flag overrides any suffix."
+            "Skill UUID or slug, optionally pinned with ``@N`` or ``@vN`` "
+            "(e.g. my-skill@3). The ``--version`` flag overrides any suffix."
         ),
     ),
     version: int | None = typer.Option(
         None,
         "--version",
         "-v",
-        help="Pin to a specific workflow version; overrides any ``@N`` suffix.",
+        help="Pin to a specific skill version; overrides any ``@N`` suffix.",
     ),
     json_output: bool = typer.Option(False, "--json", help="Print JSON."),
 ) -> None:
-    """Run the safety verifiers on a workflow you can see.
+    """Run the safety verifiers on a skill you can see.
 
     Auth required. Each call costs two metered verifier runs (one block,
-    one advisory). The verdicts are not persisted onto the workflow row;
+    one advisory). The verdicts are not persisted onto the skill row;
     re-run to re-check. Returns ``status=clean`` when both verifiers pass,
     ``flagged`` when only the advisory fails, ``blocked`` when the block
     verifier fails, and ``error`` when the block verifier errors.
     """
     console = Console()
-    parsed_id, parsed_version = _split_version_suffix(workflow_id)
+    parsed_id, parsed_version = _split_version_suffix(skill_id)
     effective_version = version if version is not None else parsed_version
     with _client(require_auth=True) as client:
         result = client.check_workflow_safety(parsed_id, version=effective_version)
@@ -980,14 +971,14 @@ def check_safety(
 
 @app.command("transfer-ownership")
 def transfer_ownership(
-    workflow_id: str = typer.Argument(..., help="Workflow UUID or name."),
+    skill_id: str = typer.Argument(..., help="Skill UUID or name."),
     new_owner: str = typer.Argument(..., help="New owner UUID, email, or handle."),
     json_output: bool = typer.Option(False, "--json", help="Print the raw response as JSON."),
 ) -> None:
-    """Transfer a workflow to another user. Returns an invitation the recipient must accept."""
+    """Transfer a skill to another user. Returns an invitation the recipient must accept."""
     console = Console()
     with _client(require_auth=True) as client:
-        body = client.transfer_workflow_ownership(workflow_id, new_owner)
+        body = client.transfer_workflow_ownership(skill_id, new_owner)
     if json_output:
         echo_json(body)
         return
@@ -1003,20 +994,20 @@ def transfer_ownership(
 
 @app.command("teach")
 def teach(
-    workflow_id: str = typer.Argument(..., help="Workflow UUID or name to teach"),
+    skill_id: str = typer.Argument(..., help="Skill UUID or name to teach"),
 ) -> None:
-    """Improve an existing workflow by hand: teach it from examples and corrections you provide.
+    """Improve an existing skill by hand: teach it from examples and corrections you provide.
 
     The command returns the pack content; the agent (or you, working from
     a script) follows the pack to run the teach session and persist the
-    result via `goodeye workflows publish - --name <name>
+    result via `goodeye skills publish - --name <name>
     --description <description> --outcome <outcome> --source teach
     --expected-version-token <captured at stage 2>`.
     """
     stderr = Console(stderr=True)
     with _client(require_auth=True) as client:
-        result = client.teach_workflow(workflow_id)
-    stderr.print(f"[bold]workflow_id:[/bold] {result.workflow_id}")
+        result = client.teach_workflow(skill_id)
+    stderr.print(f"[bold]skill_id:[/bold] {result.workflow_id}")
     # Write skill_md raw to stdout so markdown link syntax (`[text](url)`) is not
     # parsed as Rich markup, line wrapping is left to the caller, and piping into
     # an agent or file produces a clean SKILL.md.
@@ -1027,7 +1018,7 @@ def teach(
 
 @app.command("optimize")
 def optimize(
-    workflow_id: str = typer.Argument(..., help="Workflow UUID or name to optimize"),
+    skill_id: str = typer.Argument(..., help="Skill UUID or name to optimize"),
     max_iterations: int | None = typer.Option(
         None,
         "--max-iterations",
@@ -1040,7 +1031,7 @@ def optimize(
         max=1000,
     ),
 ) -> None:
-    """Automatically improve an existing workflow: runs an optimization loop to lift it
+    """Automatically improve an existing skill: runs an optimization loop to lift it
     against its outcome.
 
     The command returns the pack content; the agent (or you, working from
@@ -1048,7 +1039,7 @@ def optimize(
     the final version via:
 
     \b
-        goodeye workflows publish - --name <name> --description <description>
+        goodeye skills publish - --name <name> --description <description>
             --outcome <outcome> --source optimization
             --expected-version-token <captured at stage 1>
 
@@ -1056,8 +1047,8 @@ def optimize(
     """
     stderr = Console(stderr=True)
     with _client(require_auth=True) as client:
-        result = client.optimize_workflow(workflow_id, max_iterations=max_iterations)
-    stderr.print(f"[bold]workflow_id:[/bold] {result.workflow_id}")
+        result = client.optimize_workflow(skill_id, max_iterations=max_iterations)
+    stderr.print(f"[bold]skill_id:[/bold] {result.workflow_id}")
     stderr.print(f"[bold]max_iterations:[/bold] {result.max_iterations}")
     # Stream skill_md raw to stdout so markdown link syntax (`[text](url)`) is
     # not parsed as Rich markup. Reference files are appended as labeled
@@ -1073,9 +1064,7 @@ def optimize(
 
 @app.command("optimize-description")
 def optimize_description(
-    workflow_id: str = typer.Argument(
-        ..., help="Workflow UUID or name whose description to optimize"
-    ),
+    skill_id: str = typer.Argument(..., help="Skill UUID or name whose description to optimize"),
     max_iterations: int | None = typer.Option(
         None,
         "--max-iterations",
@@ -1088,16 +1077,16 @@ def optimize_description(
         max=1000,
     ),
 ) -> None:
-    """Tune an existing workflow's trigger: sharpen its description so it fires at the right times.
+    """Tune an existing skill's trigger: sharpen its description so it fires at the right times.
 
     The pack guides an agent (or you, working from a script) through tuning
-    the workflow's description, the text that decides when the workflow
+    the skill's description, the text that decides when the skill
     fires, for trigger accuracy. Only the description changes; the body,
     outcome, tags, and sibling files carry forward. After explicit user
     approval the final version is persisted via:
 
     \b
-        goodeye workflows publish - --name <name> --description <description>
+        goodeye skills publish - --name <name> --description <description>
             --outcome <outcome> --source description_optimization
             --expected-version-token <captured at stage 1>
 
@@ -1105,13 +1094,13 @@ def optimize_description(
     """
     stderr = Console(stderr=True)
     with _client(require_auth=True) as client:
-        result = client.optimize_description(workflow_id, max_iterations=max_iterations)
-    stderr.print(f"[bold]workflow_id:[/bold] {result.workflow_id}")
+        result = client.optimize_description(skill_id, max_iterations=max_iterations)
+    stderr.print(f"[bold]skill_id:[/bold] {result.workflow_id}")
     stderr.print(f"[bold]max_iterations:[/bold] {result.max_iterations}")
     # Stream skill_md raw to stdout so markdown link syntax (`[text](url)`) is
     # not parsed as Rich markup. Reference files are appended as labeled
     # sub-sections so a piped agent sees the full pack in order, matching the
-    # rendering used by `goodeye workflows optimize`.
+    # rendering used by `goodeye skills optimize`.
     sys.stdout.write(result.skill_md.rstrip() + "\n")
     if result.references:
         sys.stdout.write("\n---\n\n# Reference files\n")
@@ -1122,37 +1111,37 @@ def optimize_description(
 
 @app.command("audit")
 def audit(
-    workflow_id: str | None = typer.Argument(
+    skill_id: str | None = typer.Argument(
         None,
         help=(
-            "Workflow UUID, slug, or name to audit. Omit to audit a local "
-            "skill that is not on Goodeye yet."
+            "Skill UUID, slug, or name to audit. Omit to audit a local "
+            "skill file that is not yet saved to Goodeye."
         ),
     ),
 ) -> None:
-    """Review an existing workflow against best practices (or a local skill not yet on
-    Goodeye) and fix what it flags.
+    """Review an existing hosted skill against best practices (or a local skill file not
+    yet on Goodeye) and fix what it flags.
 
     The command returns the pack content; the agent (or you, working from a
     script) follows the pack to run the audit, then applies the fixes you
     approve and syncs the result via:
 
     \b
-        goodeye workflows publish - --name <name> --description <description>
+        goodeye skills publish - --name <name> --description <description>
             --outcome <outcome> --source audit
             --expected-version-token <captured during the audit>
 
-    Without a workflow id, the pack audits a local skill and recommends saving
-    it to Goodeye.
+    Without a skill id, the pack audits a local skill file and recommends
+    saving it to Goodeye.
     """
     stderr = Console(stderr=True)
     with _client(require_auth=True) as client:
-        result = client.audit_workflow(workflow_id)
+        result = client.audit_workflow(skill_id)
     if result.workflow_id:
-        stderr.print(f"[bold]workflow_id:[/bold] {result.workflow_id}")
+        stderr.print(f"[bold]skill_id:[/bold] {result.workflow_id}")
     # Stream skill_md raw to stdout so markdown link syntax is not parsed as
     # Rich markup. Reference files are appended as labeled sub-sections so a
-    # piped agent sees the full pack in order, matching goodeye workflows optimize.
+    # piped agent sees the full pack in order, matching goodeye skills optimize.
     sys.stdout.write(result.skill_md.rstrip() + "\n")
     if result.references:
         sys.stdout.write("\n---\n\n# Reference files\n")
