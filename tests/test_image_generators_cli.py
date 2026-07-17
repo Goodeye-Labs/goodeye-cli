@@ -556,6 +556,51 @@ def test_image_generators_generate_forwards_provenance_flags(
 
 
 @respx.mock
+def test_image_generators_generate_forwards_provenance_via_canonical_skill_flags(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """`--skill-id`/`--skill-version`/`--skill-ref` are the canonical provenance flags."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+
+    def check(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode())
+        assert body["workflow_id"] == "skl_123"
+        assert body["workflow_version"] == 5
+        assert body["workflow_ref"] == "my-skill"
+        return httpx.Response(201, json=_run_response())
+
+    respx.post(f"{SERVER}/v1/image-generators/system:image-standard/runs").mock(side_effect=check)
+    result = runner.invoke(
+        app,
+        [
+            "image-generators",
+            "generate",
+            "--prompt",
+            "a cat",
+            "--skill-id",
+            "skl_123",
+            "--skill-version",
+            "5",
+            "--skill-ref",
+            "my-skill",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+
+
+def test_image_generators_generate_help_shows_skill_flags_hides_workflow_flags() -> None:
+    """`--skill-*` is canonical; `--workflow-*` still works but stays hidden from help."""
+    result = runner.invoke(app, ["image-generators", "generate", "--help"])
+    assert result.exit_code == 0, result.output
+    assert "--skill-id" in result.output
+    assert "--skill-version" in result.output
+    assert "--skill-ref" in result.output
+    assert "--workflow-id" not in result.output
+    assert "--workflow-version" not in result.output
+    assert "--workflow-ref" not in result.output
+
+
+@respx.mock
 def test_image_generators_generate_forwards_optional_flags(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:

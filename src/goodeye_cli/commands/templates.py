@@ -1,9 +1,9 @@
 """`goodeye templates ...` subcommand group.
 
 Templates are the public-sharing surface. A template is a snapshot of a
-private workflow, addressable as ``@<handle>/<slug>`` or
+private skill, addressable as ``@<handle>/<slug>`` or
 ``@<handle>/<slug>@v<N>``. Forks copy a template into the caller's
-private workflow namespace.
+private skill namespace.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from rich.table import Table
 
 from goodeye_cli.client import GoodeyeClient
 from goodeye_cli.commands.prompts import confirm_destructive
-from goodeye_cli.commands.workflows import (
+from goodeye_cli.commands.skills import (
     _print_authoring_notes,
     _render_safety_check,
     _split_version_suffix,
@@ -243,7 +243,7 @@ def get_cmd(
 ) -> None:
     """Fetch a public template for the calling AI agent to execute.
 
-    The body is a workflow: a markdown runbook the agent should follow on
+    The body is a skill: a markdown runbook the agent should follow on
     the user's behalf, not just display. Non-owner reads include an
     unverified-template safety banner. Prints the markdown to stdout
     by default. With --output, writes the template body (safety banner
@@ -330,17 +330,17 @@ def get_file_cmd(
 
 @app.command("publish")
 def publish(
-    workflow_ref: str = typer.Argument(
+    skill_ref: str = typer.Argument(
         ...,
-        help="Workflow UUID or slug (same as the workflow ``name`` / front-matter ``name``).",
+        help="Skill UUID or slug (same as the skill ``name`` / front-matter ``name``).",
     ),
     release_notes: str | None = typer.Option(
         None, "--release-notes", "-n", help="Release notes for this version."
     ),
 ) -> None:
-    """Publish a workflow as a new public template version.
+    """Publish a skill as a new public template version.
 
-    First publish creates the template (slug reused from the workflow);
+    First publish creates the template (slug reused from the skill);
     subsequent publishes append a monotonic version. Requires a claimed
     handle (run ``goodeye me claim-handle`` first).
     """
@@ -348,7 +348,7 @@ def publish(
     stderr = Console(stderr=True)
     try:
         with _client(require_auth=True) as client:
-            result = client.publish_template_version(workflow_ref, release_notes=release_notes)
+            result = client.publish_template_version(skill_ref, release_notes=release_notes)
     except SafetyVerificationFailed as exc:
         stderr.print(f"[bold red]safety_verification_failed[/bold red]: {exc.message}")
         raise typer.Exit(code=2) from exc
@@ -370,7 +370,7 @@ def publish(
     _render_design_checks(console, result.design_checks)
     failed = [c for c in result.design_checks.criteria if not c.passed]
     if failed:
-        guidance = result.design_checks.guidance or "Run `goodeye workflows audit` to improve."
+        guidance = result.design_checks.guidance or "Run `goodeye skills audit` to improve."
         console.print(f"[dim]{guidance}[/dim]")
     if result.verifier_exposure_notice:
         console.print(f"[yellow]Note:[/yellow] {result.verifier_exposure_notice}")
@@ -406,11 +406,11 @@ def fork(
         None, "--name", help="Override the fork's slug (default is the template slug)."
     ),
 ) -> None:
-    """Copy a public template into your own private workflow to customize it.
+    """Copy a public template into your own private skill to customize it.
 
-    Authentication is required. Returns the new workflow's id and lineage
+    Authentication is required. Returns the new skill's id and lineage
     metadata; fetching the body and acting on it (if at all) is a
-    separate ``workflows get`` call.
+    separate ``skills get`` call.
     """
     console = Console()
     stderr_console = Console(stderr=True)
@@ -418,12 +418,12 @@ def fork(
         result = client.fork_template(identifier, version=version, name=name)
     if result.redirected:
         requested = result.redirected_from_handle or identifier
-        resolved = result.redirected_to_handle or "(see workflow_id)"
+        resolved = result.redirected_to_handle or "(see skill_id)"
         stderr_console.print(f"note: {requested} redirected to {resolved}")
     if result.deprecation_warning:
         stderr_console.print(f"warning: {result.deprecation_warning}")
     console.print(
-        f"[green]Forked[/green] workflow {result.workflow_id} "
+        f"[green]Forked[/green] skill {result.workflow_id} "
         f"slug={result.slug} from {identifier} "
         f"at v{result.parent_template_version}"
     )
@@ -435,7 +435,7 @@ def fork(
             src = ref.source_workflow_id or "-"
             console.print(
                 f"  * [cyan]{ref.name}[/cyan] -> {ref.verifier_id}  "
-                f"[dim](role={role}, source_workflow_id={src})[/dim]"
+                f"[dim](role={role}, source_skill_id={src})[/dim]"
             )
     if result.next_step:
         _print_authoring_notes([result.next_step])
@@ -513,7 +513,7 @@ def delete_cmd(
     surface after this call.
 
     Fork lineage: forks keep their own content; their parent pointer is
-    severed. `workflows lineage` will report the source as permanently deleted.
+    severed. `skills lineage` will report the source as permanently deleted.
     """
     console = Console()
     if not confirm_destructive(
@@ -609,28 +609,28 @@ def deprecate_version_cmd(
 
 @app.command("lineage")
 def lineage_cmd(
-    workflow_ref: str = typer.Argument(
+    skill_ref: str = typer.Argument(
         ...,
-        help="Forked workflow's UUID or name. This is a workflow identifier, not a template one.",
+        help="Forked skill's UUID or name. This is a skill identifier, not a template one.",
     ),
     json_output: bool = typer.Option(False, "--json", help="Print lineage as JSON."),
 ) -> None:
-    """Show a forked workflow's lineage relative to the template it was forked from.
+    """Show a forked skill's lineage relative to the template it was forked from.
 
-    Pass the forked workflow's id or name (not a template id or @handle/slug). The
+    Pass the forked skill's id or name (not a template id or @handle/slug). The
     output reports the parent template, the pinned version, and whether that parent
     was later archived, permanently deleted, or had the pinned version deprecated.
-    This is the same view as `goodeye workflows lineage <workflow_ref>`.
+    This is the same view as `goodeye skills lineage <skill_ref>`.
     """
     console = Console()
     with _client(require_auth=True) as client:
-        result = client.lookup_workflow_lineage(workflow_ref)
+        result = client.lookup_workflow_lineage(skill_ref)
     if json_output:
         typer.echo(result.model_dump_json(indent=2))
         return
     # A permanently-deleted parent severs the FK, so the response carries
     # parent_template_id=None while still pinning the version the fork was
-    # taken from. A workflow that was never a fork has neither. Only the
+    # taken from. A skill that was never a fork has neither. Only the
     # latter is "not a fork"; gating on parent_template_id alone would
     # mislabel a deleted-parent fork and try to print "template None".
     if result.parent_template_id is None and result.parent_template_version is None:

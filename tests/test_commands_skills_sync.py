@@ -1,4 +1,4 @@
-"""Tests for the `goodeye workflows sync target` subcommands."""
+"""Tests for the `goodeye skills sync target` subcommands."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ def _seed_target(
 ) -> str:
     """Add a sync target via the CLI and return its stored path."""
     runner = CliRunner()
-    add = runner.invoke(app, ["workflows", "sync", "target", "add", path, "--scope", scope])
+    add = runner.invoke(app, ["skills", "sync", "target", "add", path, "--scope", scope])
     assert add.exit_code == 0, add.output
     return json.loads(add.output)["path"]
 
@@ -72,7 +72,7 @@ def test_target_add_by_path_defaults_to_compact_json(
 ) -> None:
     _redirect_config(monkeypatch, tmp_config_paths)
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "target", "add", "~/work/skills"])
+    result = runner.invoke(app, ["skills", "sync", "target", "add", "~/work/skills"])
     assert result.exit_code == 0, result.output
     # CliRunner stdout is not a TTY, so the default mode is compact JSON.
     assert result.output == (
@@ -87,7 +87,7 @@ def test_target_add_by_path_defaults_to_compact_json(
 def test_target_add_by_preset(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _redirect_config(monkeypatch, tmp_config_paths)
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "target", "add", "--preset", "claude"])
+    result = runner.invoke(app, ["skills", "sync", "target", "add", "--preset", "claude"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["path"] == "~/.claude/skills"
@@ -99,7 +99,7 @@ def test_target_add_selected_scope_with_only(tmp_config_paths: ConfigPaths, monk
     result = runner.invoke(
         app,
         [
-            "workflows",
+            "skills",
             "sync",
             "target",
             "add",
@@ -123,7 +123,7 @@ def test_target_add_table_mode_prints_confirmation(
 ) -> None:
     _redirect_config(monkeypatch, tmp_config_paths)
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "target", "add", "~/work/skills", "--table"])
+    result = runner.invoke(app, ["skills", "sync", "target", "add", "~/work/skills", "--table"])
     assert result.exit_code == 0, result.output
     assert "Added" in result.output
     assert "~/work/skills" in result.output
@@ -135,7 +135,7 @@ def test_target_add_rejects_both_path_and_preset(
     _redirect_config(monkeypatch, tmp_config_paths)
     runner = CliRunner()
     result = runner.invoke(
-        app, ["workflows", "sync", "target", "add", "~/skills", "--preset", "claude"]
+        app, ["skills", "sync", "target", "add", "~/skills", "--preset", "claude"]
     )
     assert result.exit_code != 0
     assert isinstance(result.exception, ValidationFailed)
@@ -147,7 +147,7 @@ def test_target_add_rejects_neither_path_nor_preset(
 ) -> None:
     _redirect_config(monkeypatch, tmp_config_paths)
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "target", "add"])
+    result = runner.invoke(app, ["skills", "sync", "target", "add"])
     assert result.exit_code != 0
     assert isinstance(result.exception, ValidationFailed)
     assert "exactly one" in str(result.exception)
@@ -156,9 +156,7 @@ def test_target_add_rejects_neither_path_nor_preset(
 def test_target_add_rejects_unknown_scope(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _redirect_config(monkeypatch, tmp_config_paths)
     runner = CliRunner()
-    result = runner.invoke(
-        app, ["workflows", "sync", "target", "add", "~/skills", "--scope", "weird"]
-    )
+    result = runner.invoke(app, ["skills", "sync", "target", "add", "~/skills", "--scope", "weird"])
     assert result.exit_code != 0
     assert isinstance(result.exception, ValidationFailed)
     assert "scope" in str(result.exception).lower()
@@ -168,9 +166,9 @@ def test_target_add_duplicate_raises_conflict(tmp_config_paths: ConfigPaths, mon
     # Without --only: recreating a whole target over an existing one is a conflict.
     _redirect_config(monkeypatch, tmp_config_paths)
     runner = CliRunner()
-    first = runner.invoke(app, ["workflows", "sync", "target", "add", "~/skills"])
+    first = runner.invoke(app, ["skills", "sync", "target", "add", "~/skills"])
     assert first.exit_code == 0, first.output
-    second = runner.invoke(app, ["workflows", "sync", "target", "add", "~/skills"])
+    second = runner.invoke(app, ["skills", "sync", "target", "add", "~/skills"])
     assert second.exit_code != 0
     assert isinstance(second.exception, Conflict)
 
@@ -178,7 +176,7 @@ def test_target_add_duplicate_raises_conflict(tmp_config_paths: ConfigPaths, mon
 def test_target_list_empty(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _redirect_config(monkeypatch, tmp_config_paths)
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "target", "list"])
+    result = runner.invoke(app, ["skills", "sync", "target", "list"])
     assert result.exit_code == 0, result.output
     assert result.output == '{"items":[]}\n'
 
@@ -186,7 +184,7 @@ def test_target_list_empty(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
 def test_target_list_table_empty_message(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _redirect_config(monkeypatch, tmp_config_paths)
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "target", "list", "--table"])
+    result = runner.invoke(app, ["skills", "sync", "target", "list", "--table"])
     assert result.exit_code == 0, result.output
     assert "No sync targets configured" in result.output
 
@@ -194,8 +192,8 @@ def test_target_list_table_empty_message(tmp_config_paths: ConfigPaths, monkeypa
 def test_target_list_after_add(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _redirect_config(monkeypatch, tmp_config_paths)
     runner = CliRunner()
-    runner.invoke(app, ["workflows", "sync", "target", "add", "~/skills"])
-    result = runner.invoke(app, ["workflows", "sync", "target", "list"])
+    runner.invoke(app, ["skills", "sync", "target", "add", "~/skills"])
+    result = runner.invoke(app, ["skills", "sync", "target", "list"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["items"][0]["path"] == "~/skills"
@@ -204,8 +202,8 @@ def test_target_list_after_add(tmp_config_paths: ConfigPaths, monkeypatch) -> No
 def test_target_list_table_renders_rows(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _redirect_config(monkeypatch, tmp_config_paths)
     runner = CliRunner()
-    runner.invoke(app, ["workflows", "sync", "target", "add", "--preset", "cursor"])
-    result = runner.invoke(app, ["workflows", "sync", "target", "list", "--table"])
+    runner.invoke(app, ["skills", "sync", "target", "add", "--preset", "cursor"])
+    result = runner.invoke(app, ["skills", "sync", "target", "list", "--table"])
     assert result.exit_code == 0, result.output
     assert "Sync targets" in result.output
     assert ".cursor/skills" in result.output
@@ -215,25 +213,25 @@ def test_target_remove_found(tmp_config_paths: ConfigPaths, monkeypatch) -> None
     _redirect_config(monkeypatch, tmp_config_paths)
     runner = CliRunner()
     # Add a target that stores as the canonical ``~/skills``.
-    add_result = runner.invoke(app, ["workflows", "sync", "target", "add", "~/skills"])
+    add_result = runner.invoke(app, ["skills", "sync", "target", "add", "~/skills"])
     assert json.loads(add_result.output)["path"] == "~/skills"
     # Remove a messy-but-equivalent input: it must normalize to the stored form
     # before matching, so the target is found and removed.
-    result = runner.invoke(app, ["workflows", "sync", "target", "remove", "~/foo/../skills"])
+    result = runner.invoke(app, ["skills", "sync", "target", "remove", "~/foo/../skills"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["removed"] is True
     # The echoed path uses the same ``~``-normalized store form as `add`.
     assert payload["path"] == "~/skills"
     # The config no longer carries the target.
-    list_result = runner.invoke(app, ["workflows", "sync", "target", "list"])
+    list_result = runner.invoke(app, ["skills", "sync", "target", "list"])
     assert list_result.output == '{"items":[]}\n'
 
 
 def test_target_remove_not_found(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _redirect_config(monkeypatch, tmp_config_paths)
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "target", "remove", "~/skills"])
+    result = runner.invoke(app, ["skills", "sync", "target", "remove", "~/skills"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["removed"] is False
@@ -242,8 +240,8 @@ def test_target_remove_not_found(tmp_config_paths: ConfigPaths, monkeypatch) -> 
 def test_target_remove_table_mode(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _redirect_config(monkeypatch, tmp_config_paths)
     runner = CliRunner()
-    runner.invoke(app, ["workflows", "sync", "target", "add", "~/skills"])
-    result = runner.invoke(app, ["workflows", "sync", "target", "remove", "~/skills", "--table"])
+    runner.invoke(app, ["skills", "sync", "target", "add", "~/skills"])
+    result = runner.invoke(app, ["skills", "sync", "target", "remove", "~/skills", "--table"])
     assert result.exit_code == 0, result.output
     assert "Removed" in result.output
 
@@ -256,7 +254,7 @@ def test_pull_requires_auth(tmp_config_paths: ConfigPaths, monkeypatch, tmp_path
     monkeypatch.delenv("GOODEYE_API_KEY", raising=False)
     _seed_target(monkeypatch, tmp_config_paths, str(tmp_path / "skills"))
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "pull"])
+    result = runner.invoke(app, ["skills", "sync", "pull"])
     assert result.exit_code != 0
     assert isinstance(result.exception, AuthRequired)
 
@@ -280,7 +278,7 @@ def test_pull_json_default_shape(
     )
 
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "pull"])
+    result = runner.invoke(app, ["skills", "sync", "pull"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["items"][0]["slug"] == "alpha"
@@ -306,9 +304,9 @@ def test_pull_table_mode(tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: P
         return_value=_detail_response(id_="skl_01", name="alpha", body="alpha body")
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "pull", "--table"])
+    result = runner.invoke(app, ["skills", "sync", "pull", "--table"])
     assert result.exit_code == 0, result.output
-    assert "Pulled workflows" in result.output
+    assert "Pulled skills" in result.output
     assert "alpha" in result.output
     assert "pulled" in result.output
 
@@ -333,7 +331,7 @@ def test_pull_table_hint_on_skipped(
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "pull", "--table"])
+    result = runner.invoke(app, ["skills", "sync", "pull", "--table"])
     assert result.exit_code == 0, result.output
     # An untracked file (no index entry) is reported as plain modified, never a
     # conflict: there is no recorded sync point for both sides to have moved past.
@@ -361,7 +359,7 @@ def test_pull_force_overwrites(tmp_config_paths: ConfigPaths, monkeypatch, tmp_p
         return_value=_detail_response(id_="skl_01", name="alpha", body="registry body")
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "pull", "--force"])
+    result = runner.invoke(app, ["skills", "sync", "pull", "--force"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["items"][0]["action"] == "pulled"
@@ -387,7 +385,7 @@ def test_pull_target_option_scopes_to_one(
         return_value=_detail_response(id_="skl_01", name="alpha", body="alpha body")
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "pull", "--target", str(second)])
+    result = runner.invoke(app, ["skills", "sync", "pull", "--target", str(second)])
     assert result.exit_code == 0, result.output
     assert list_route.call_count == 1  # only one target listed
     assert (second / "alpha" / "SKILL.md").exists()
@@ -399,9 +397,9 @@ def test_pull_no_targets_renders_empty(tmp_config_paths: ConfigPaths, monkeypatc
     _setup_auth(monkeypatch, tmp_config_paths)
     _me_route()
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "pull", "--table"])
+    result = runner.invoke(app, ["skills", "sync", "pull", "--table"])
     assert result.exit_code == 0, result.output
-    assert "No workflows in scope" in result.output
+    assert "No skills in scope" in result.output
 
 
 # ----- status -----
@@ -443,7 +441,7 @@ def test_status_requires_auth(tmp_config_paths: ConfigPaths, monkeypatch, tmp_pa
     monkeypatch.delenv("GOODEYE_API_KEY", raising=False)
     _seed_target(monkeypatch, tmp_config_paths, str(tmp_path / "skills"))
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "status"])
+    result = runner.invoke(app, ["skills", "sync", "status"])
     assert result.exit_code != 0
     assert isinstance(result.exception, AuthRequired)
 
@@ -486,7 +484,7 @@ def test_status_json_default_shape(
     )
 
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "status"])
+    result = runner.invoke(app, ["skills", "sync", "status"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     item = payload["items"][0]
@@ -523,14 +521,14 @@ def test_status_table_mode(tmp_config_paths: ConfigPaths, monkeypatch, tmp_path:
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "status", "--table"])
+    result = runner.invoke(app, ["skills", "sync", "status", "--table"])
     assert result.exit_code == 0, result.output
     assert "Sync status" in result.output
     assert "alpha" in result.output
     assert "behind-server" in result.output
     # The next-step hint names only a command that exists now.
     assert "Next:" in result.output
-    assert "goodeye workflows sync pull" in result.output
+    assert "goodeye skills sync pull" in result.output
 
 
 @respx.mock
@@ -560,12 +558,12 @@ def test_status_table_modified_local_hint_points_at_push(
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "status", "--table"])
+    result = runner.invoke(app, ["skills", "sync", "status", "--table"])
     assert result.exit_code == 0, result.output
     assert "modified-local" in result.output
     # The hint names the push command that ships in this feature.
     assert "Next:" in result.output
-    assert "goodeye workflows sync push" in result.output
+    assert "goodeye skills sync push" in result.output
 
 
 @respx.mock
@@ -595,12 +593,12 @@ def test_status_table_conflict_hint_points_at_pull_not_push(
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "status", "--table"])
+    result = runner.invoke(app, ["skills", "sync", "status", "--table"])
     assert result.exit_code == 0, result.output
     assert "conflict" in result.output
     # A conflict reconciles via pull/resolve, not a straight push.
     assert "Next:" in result.output
-    assert "goodeye workflows sync pull" in result.output
+    assert "goodeye skills sync pull" in result.output
     assert "goodeye workflows sync push" not in result.output
 
 
@@ -609,9 +607,9 @@ def test_status_no_targets_renders_empty(tmp_config_paths: ConfigPaths, monkeypa
     _setup_auth(monkeypatch, tmp_config_paths)
     _me_route()
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "status", "--table"])
+    result = runner.invoke(app, ["skills", "sync", "status", "--table"])
     assert result.exit_code == 0, result.output
-    assert "No workflows in scope" in result.output
+    assert "No skills in scope" in result.output
 
 
 # ----- push -----
@@ -684,7 +682,7 @@ def test_push_requires_auth(tmp_config_paths: ConfigPaths, monkeypatch, tmp_path
     monkeypatch.delenv("GOODEYE_API_KEY", raising=False)
     _seed_target(monkeypatch, tmp_config_paths, str(tmp_path / "skills"))
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "push"])
+    result = runner.invoke(app, ["skills", "sync", "push"])
     assert result.exit_code != 0
     assert isinstance(result.exception, AuthRequired)
 
@@ -708,7 +706,7 @@ def test_push_json_default_shape(
         return_value=_save_response(workflow_id="skl_01", name="alpha")
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "push"])
+    result = runner.invoke(app, ["skills", "sync", "push"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     item = payload["items"][0]
@@ -736,9 +734,9 @@ def test_push_table_mode(tmp_config_paths: ConfigPaths, monkeypatch, tmp_path: P
         return_value=_save_response(workflow_id="skl_01", name="alpha")
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "push", "--table"])
+    result = runner.invoke(app, ["skills", "sync", "push", "--table"])
     assert result.exit_code == 0, result.output
-    assert "Pushed workflows" in result.output
+    assert "Pushed skills" in result.output
     assert "alpha" in result.output
     assert "pushed" in result.output
 
@@ -765,13 +763,13 @@ def test_push_table_conflict_hint(
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "push", "--table"])
+    result = runner.invoke(app, ["skills", "sync", "push", "--table"])
     assert result.exit_code == 0, result.output
     assert "conflict" in result.output
     assert "Next:" in result.output
     # The hint references only commands that exist now.
-    assert "goodeye workflows sync pull" in result.output
-    assert "goodeye workflows sync status" in result.output
+    assert "goodeye skills sync pull" in result.output
+    assert "goodeye skills sync status" in result.output
 
 
 @respx.mock
@@ -801,7 +799,7 @@ def test_push_ambiguous_reference_skips_item_and_continues(
         )
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "push"])
+    result = runner.invoke(app, ["skills", "sync", "push"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     item = payload["items"][0]
@@ -837,7 +835,7 @@ def test_push_target_option_scopes_to_one(
         return_value=_save_response(workflow_id="skl_b", name="beta")
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "push", "--target", str(second)])
+    result = runner.invoke(app, ["skills", "sync", "push", "--target", str(second)])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert [i["slug"] for i in payload["items"]] == ["beta"]
@@ -849,9 +847,9 @@ def test_push_no_targets_renders_empty(tmp_config_paths: ConfigPaths, monkeypatc
     _setup_auth(monkeypatch, tmp_config_paths)
     _me_route()
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "push", "--table"])
+    result = runner.invoke(app, ["skills", "sync", "push", "--table"])
     assert result.exit_code == 0, result.output
-    assert "No locally edited workflows to push" in result.output
+    assert "No locally edited skills to push" in result.output
 
 
 # ----- bare `sync` umbrella -----
@@ -864,7 +862,7 @@ def test_sync_umbrella_requires_auth(
     monkeypatch.delenv("GOODEYE_API_KEY", raising=False)
     _seed_target(monkeypatch, tmp_config_paths, str(tmp_path / "skills"))
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync"])
+    result = runner.invoke(app, ["skills", "sync"])
     assert result.exit_code != 0
     assert isinstance(result.exception, AuthRequired)
 
@@ -889,7 +887,7 @@ def test_sync_umbrella_pulls_then_shows_status(
     )
 
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync"])
+    result = runner.invoke(app, ["skills", "sync"])
     assert result.exit_code == 0, result.output
 
     # The pull materialized the workflow on disk and the index.
@@ -922,7 +920,7 @@ def test_sync_umbrella_table_mode_renders_status(
         return_value=_detail_response(id_="skl_01", name="alpha", body="alpha body")
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "--table"])
+    result = runner.invoke(app, ["skills", "sync", "--table"])
     assert result.exit_code == 0, result.output
     assert "Sync status" in result.output
     assert "alpha" in result.output
@@ -952,7 +950,7 @@ def test_sync_umbrella_identity_mismatch_surfaces_conflict(
     detail_route = respx.get(f"{SERVER}/v1/workflows/skl_01")
 
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync"])
+    result = runner.invoke(app, ["skills", "sync"])
 
     assert result.exit_code != 0
     assert isinstance(result.exception, Conflict)
@@ -969,7 +967,7 @@ def test_sync_subcommand_target_list_still_works(
     # local read with no auth) is unaffected by the umbrella.
     _redirect_config(monkeypatch, tmp_config_paths)
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "target", "list"])
+    result = runner.invoke(app, ["skills", "sync", "target", "list"])
     assert result.exit_code == 0, result.output
     assert result.output == '{"items":[]}\n'
 
@@ -992,7 +990,7 @@ def test_sync_pull_subcommand_still_works(
         return_value=_detail_response(id_="skl_01", name="alpha", body="alpha body")
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "pull"])
+    result = runner.invoke(app, ["skills", "sync", "pull"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     # The pull renderer reports per-item actions, not status states.
@@ -1034,7 +1032,7 @@ def test_pull_yes_removes_deleted_local_copy(
     delete_route = respx.delete(f"{SERVER}/v1/workflows/skl_gone")
 
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "pull", "--yes"])
+    result = runner.invoke(app, ["skills", "sync", "pull", "--yes"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["items"][0]["action"] == "deleted-local"
@@ -1078,13 +1076,13 @@ def test_pull_table_hint_on_deleted_on_server(
     monkeypatch.setattr("goodeye_cli.sync.confirm_destructive", lambda *a, **k: False)
 
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "pull", "--table"])
+    result = runner.invoke(app, ["skills", "sync", "pull", "--table"])
     assert result.exit_code == 0, result.output
     # The deletion was reported (the table cell may wrap the long action string,
     # so assert on the unwrapped next-step hint that names a real command).
     assert "Next:" in result.output
     assert "gone from the registry" in result.output
-    assert "goodeye workflows sync pull --yes" in result.output
+    assert "goodeye skills sync pull --yes" in result.output
     # The declined copy survives on disk.
     assert (target_dir / "gone" / "SKILL.md").exists()
 
@@ -1115,7 +1113,7 @@ def test_push_converges_sibling_target_once(
     )
 
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "push"])
+    result = runner.invoke(app, ["skills", "sync", "push"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     actions = sorted(i["action"] for i in payload["items"])
@@ -1150,12 +1148,12 @@ def test_push_diverged_hint(tmp_config_paths: ConfigPaths, monkeypatch, tmp_path
     save_route = respx.post(f"{SERVER}/v1/workflows")
 
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "push", "--table"])
+    result = runner.invoke(app, ["skills", "sync", "push", "--table"])
     assert result.exit_code == 0, result.output
     # No upload; the hint points at --target to pick the copy to keep.
     assert save_route.call_count == 0
     assert "Next:" in result.output
-    assert "goodeye workflows sync push --target" in result.output
+    assert "goodeye skills sync push --target" in result.output
 
 
 def test_push_pull_required_hint_points_at_pull() -> None:
@@ -1178,7 +1176,7 @@ def test_push_pull_required_hint_points_at_pull() -> None:
         ),
     ]
     hints = _push_hints(items)
-    assert any("goodeye workflows sync pull" in h and "sibling" in h for h in hints)
+    assert any("goodeye skills sync pull" in h and "sibling" in h for h in hints)
 
 
 # ----- target add --only: allowlist append -----
@@ -1192,7 +1190,7 @@ def test_target_add_only_appends_to_existing_selected_target_default_mode(
     # Create a selected target with one entry.
     create = runner.invoke(
         app,
-        ["workflows", "sync", "target", "add", "~/skills", "--scope", "selected", "--only", "a"],
+        ["skills", "sync", "target", "add", "~/skills", "--scope", "selected", "--only", "a"],
     )
     assert create.exit_code == 0, create.output
 
@@ -1200,7 +1198,7 @@ def test_target_add_only_appends_to_existing_selected_target_default_mode(
     result = runner.invoke(
         app,
         [
-            "workflows",
+            "skills",
             "sync",
             "target",
             "add",
@@ -1213,10 +1211,10 @@ def test_target_add_only_appends_to_existing_selected_target_default_mode(
         ],
     )
     assert result.exit_code == 0, result.output
-    assert "Added 1 workflow" in result.output
+    assert "Added 1 skill" in result.output
     assert "~/skills" in result.output
     # Pull hint must appear.
-    assert "goodeye workflows sync pull" in result.output
+    assert "goodeye skills sync pull" in result.output
 
 
 def test_target_add_only_appends_to_existing_selected_target_json_mode(
@@ -1227,12 +1225,12 @@ def test_target_add_only_appends_to_existing_selected_target_json_mode(
     # Create a selected target.
     runner.invoke(
         app,
-        ["workflows", "sync", "target", "add", "~/skills", "--scope", "selected", "--only", "x"],
+        ["skills", "sync", "target", "add", "~/skills", "--scope", "selected", "--only", "x"],
     )
     # Append via --only in JSON mode.
     result = runner.invoke(
         app,
-        ["workflows", "sync", "target", "add", "~/skills", "--only", "y", "--only", "x"],
+        ["skills", "sync", "target", "add", "~/skills", "--only", "y", "--only", "x"],
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
@@ -1249,11 +1247,11 @@ def test_target_add_only_all_already_present_prints_nothing_to_add(
     runner = CliRunner()
     runner.invoke(
         app,
-        ["workflows", "sync", "target", "add", "~/skills", "--scope", "selected", "--only", "a"],
+        ["skills", "sync", "target", "add", "~/skills", "--scope", "selected", "--only", "a"],
     )
     result = runner.invoke(
         app,
-        ["workflows", "sync", "target", "add", "~/skills", "--only", "a", "--table"],
+        ["skills", "sync", "target", "add", "~/skills", "--only", "a", "--table"],
     )
     assert result.exit_code == 0, result.output
     assert "already in the allowlist" in result.output
@@ -1267,11 +1265,11 @@ def test_target_add_only_against_non_selected_target_raises_validation_failed(
     runner = CliRunner()
     runner.invoke(
         app,
-        ["workflows", "sync", "target", "add", "~/skills", "--scope", "owned"],
+        ["skills", "sync", "target", "add", "~/skills", "--scope", "owned"],
     )
     result = runner.invoke(
         app,
-        ["workflows", "sync", "target", "add", "~/skills", "--only", "a"],
+        ["skills", "sync", "target", "add", "~/skills", "--only", "a"],
     )
     assert result.exit_code != 0
     assert isinstance(result.exception, ValidationFailed)
@@ -1284,11 +1282,11 @@ def test_target_add_only_with_conflicting_explicit_scope_raises_conflict(
     runner = CliRunner()
     runner.invoke(
         app,
-        ["workflows", "sync", "target", "add", "~/skills", "--scope", "selected", "--only", "a"],
+        ["skills", "sync", "target", "add", "~/skills", "--scope", "selected", "--only", "a"],
     )
     result = runner.invoke(
         app,
-        ["workflows", "sync", "target", "add", "~/skills", "--scope", "owned", "--only", "b"],
+        ["skills", "sync", "target", "add", "~/skills", "--scope", "owned", "--only", "b"],
     )
     assert result.exit_code != 0
     assert isinstance(result.exception, Conflict)
@@ -1305,7 +1303,7 @@ def test_target_remove_only_prunes_entries_table_mode(
     runner.invoke(
         app,
         [
-            "workflows",
+            "skills",
             "sync",
             "target",
             "add",
@@ -1323,7 +1321,7 @@ def test_target_remove_only_prunes_entries_table_mode(
     result = runner.invoke(
         app,
         [
-            "workflows",
+            "skills",
             "sync",
             "target",
             "remove",
@@ -1336,7 +1334,7 @@ def test_target_remove_only_prunes_entries_table_mode(
         ],
     )
     assert result.exit_code == 0, result.output
-    assert "Removed 2 workflow" in result.output
+    assert "Removed 2 skill" in result.output
     assert "~/skills" in result.output
 
 
@@ -1348,7 +1346,7 @@ def test_target_remove_only_prunes_entries_json_mode(
     runner.invoke(
         app,
         [
-            "workflows",
+            "skills",
             "sync",
             "target",
             "add",
@@ -1363,7 +1361,7 @@ def test_target_remove_only_prunes_entries_json_mode(
     )
     result = runner.invoke(
         app,
-        ["workflows", "sync", "target", "remove", "~/skills", "--only", "a", "--only", "x"],
+        ["skills", "sync", "target", "remove", "~/skills", "--only", "a", "--only", "x"],
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
@@ -1379,11 +1377,11 @@ def test_target_remove_only_none_matched_prints_not_in_allowlist(
     runner = CliRunner()
     runner.invoke(
         app,
-        ["workflows", "sync", "target", "add", "~/skills", "--scope", "selected", "--only", "a"],
+        ["skills", "sync", "target", "add", "~/skills", "--scope", "selected", "--only", "a"],
     )
     result = runner.invoke(
         app,
-        ["workflows", "sync", "target", "remove", "~/skills", "--only", "z", "--table"],
+        ["skills", "sync", "target", "remove", "~/skills", "--only", "z", "--table"],
     )
     assert result.exit_code == 0, result.output
     assert "not in the allowlist" in result.output
@@ -1395,14 +1393,14 @@ def test_target_remove_without_only_still_removes_whole_target(
     # Existing test for whole-target removal must still pass unchanged.
     _redirect_config(monkeypatch, tmp_config_paths)
     runner = CliRunner()
-    add_result = runner.invoke(app, ["workflows", "sync", "target", "add", "~/skills"])
+    add_result = runner.invoke(app, ["skills", "sync", "target", "add", "~/skills"])
     assert json.loads(add_result.output)["path"] == "~/skills"
-    result = runner.invoke(app, ["workflows", "sync", "target", "remove", "~/foo/../skills"])
+    result = runner.invoke(app, ["skills", "sync", "target", "remove", "~/foo/../skills"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["removed"] is True
     assert payload["path"] == "~/skills"
-    list_result = runner.invoke(app, ["workflows", "sync", "target", "list"])
+    list_result = runner.invoke(app, ["skills", "sync", "target", "list"])
     assert list_result.output == '{"items":[]}\n'
 
 
@@ -1413,11 +1411,11 @@ def test_target_remove_only_against_non_selected_target_raises_validation_failed
     runner = CliRunner()
     runner.invoke(
         app,
-        ["workflows", "sync", "target", "add", "~/skills", "--scope", "owned"],
+        ["skills", "sync", "target", "add", "~/skills", "--scope", "owned"],
     )
     result = runner.invoke(
         app,
-        ["workflows", "sync", "target", "remove", "~/skills", "--only", "a"],
+        ["skills", "sync", "target", "remove", "~/skills", "--only", "a"],
     )
     assert result.exit_code != 0
     assert isinstance(result.exception, ValidationFailed)
@@ -1432,7 +1430,7 @@ def test_target_remove_only_deduplicates_input_prints_correct_count(
     runner.invoke(
         app,
         [
-            "workflows",
+            "skills",
             "sync",
             "target",
             "add",
@@ -1448,7 +1446,7 @@ def test_target_remove_only_deduplicates_input_prints_correct_count(
     result = runner.invoke(
         app,
         [
-            "workflows",
+            "skills",
             "sync",
             "target",
             "remove",
@@ -1462,7 +1460,7 @@ def test_target_remove_only_deduplicates_input_prints_correct_count(
     )
     assert result.exit_code == 0, result.output
     # Duplicate input collapses to one removal, so count must be 1.
-    assert "Removed 1 workflow" in result.output
+    assert "Removed 1 skill" in result.output
     # 'a' must appear exactly once, not twice.
     assert result.output.count(": a") == 1 or "a, a" not in result.output
 
@@ -1478,15 +1476,15 @@ def test_target_add_only_appends_to_allowlist_readback(
     runner = CliRunner()
     runner.invoke(
         app,
-        ["workflows", "sync", "target", "add", "~/skills", "--scope", "selected", "--only", "x"],
+        ["skills", "sync", "target", "add", "~/skills", "--scope", "selected", "--only", "x"],
     )
     result = runner.invoke(
         app,
-        ["workflows", "sync", "target", "add", "~/skills", "--only", "y"],
+        ["skills", "sync", "target", "add", "~/skills", "--only", "y"],
     )
     assert result.exit_code == 0, result.output
 
-    list_result = runner.invoke(app, ["workflows", "sync", "target", "list"])
+    list_result = runner.invoke(app, ["skills", "sync", "target", "list"])
     assert list_result.exit_code == 0, list_result.output
     payload = json.loads(list_result.output)
     selected = payload["items"][0]["selected"]
@@ -1503,7 +1501,7 @@ def test_target_remove_only_prunes_from_allowlist_readback(
     runner.invoke(
         app,
         [
-            "workflows",
+            "skills",
             "sync",
             "target",
             "add",
@@ -1518,11 +1516,11 @@ def test_target_remove_only_prunes_from_allowlist_readback(
     )
     result = runner.invoke(
         app,
-        ["workflows", "sync", "target", "remove", "~/skills", "--only", "a"],
+        ["skills", "sync", "target", "remove", "~/skills", "--only", "a"],
     )
     assert result.exit_code == 0, result.output
 
-    list_result = runner.invoke(app, ["workflows", "sync", "target", "list"])
+    list_result = runner.invoke(app, ["skills", "sync", "target", "list"])
     assert list_result.exit_code == 0, list_result.output
     payload = json.loads(list_result.output)
     selected = payload["items"][0]["selected"]
@@ -1543,7 +1541,7 @@ def test_target_add_only_with_preset_appends_to_existing_preset_target(
     create = runner.invoke(
         app,
         [
-            "workflows",
+            "skills",
             "sync",
             "target",
             "add",
@@ -1560,7 +1558,7 @@ def test_target_add_only_with_preset_appends_to_existing_preset_target(
     append = runner.invoke(
         app,
         [
-            "workflows",
+            "skills",
             "sync",
             "target",
             "add",
@@ -1574,7 +1572,7 @@ def test_target_add_only_with_preset_appends_to_existing_preset_target(
     payload = json.loads(append.output)
     assert "new-wf" in payload["added"]
 
-    list_result = runner.invoke(app, ["workflows", "sync", "target", "list"])
+    list_result = runner.invoke(app, ["skills", "sync", "target", "list"])
     assert list_result.exit_code == 0, list_result.output
     items = json.loads(list_result.output)["items"]
     assert len(items) == 1
@@ -1597,7 +1595,7 @@ def test_auto_on_enables_and_defaults_to_compact_json(
 ) -> None:
     _redirect_config(monkeypatch, tmp_config_paths)
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "auto", "on"])
+    result = runner.invoke(app, ["skills", "sync", "auto", "on"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["enabled"] is True
@@ -1610,7 +1608,7 @@ def test_auto_on_enables_and_defaults_to_compact_json(
 def test_auto_on_with_interval_sets_interval(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _redirect_config(monkeypatch, tmp_config_paths)
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "auto", "on", "--interval", "120"])
+    result = runner.invoke(app, ["skills", "sync", "auto", "on", "--interval", "120"])
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["interval_seconds"] == 120
     assert _load_auto(tmp_config_paths).interval_seconds == 120
@@ -1619,7 +1617,7 @@ def test_auto_on_with_interval_sets_interval(tmp_config_paths: ConfigPaths, monk
 def test_auto_on_rejects_non_positive_interval(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _redirect_config(monkeypatch, tmp_config_paths)
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "auto", "on", "--interval", "0"])
+    result = runner.invoke(app, ["skills", "sync", "auto", "on", "--interval", "0"])
     assert result.exit_code != 0
     # The setting was not flipped on by a rejected request.
     assert _load_auto(tmp_config_paths).enabled is False
@@ -1628,8 +1626,8 @@ def test_auto_on_rejects_non_positive_interval(tmp_config_paths: ConfigPaths, mo
 def test_auto_off_disables_but_keeps_interval(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _redirect_config(monkeypatch, tmp_config_paths)
     runner = CliRunner()
-    runner.invoke(app, ["workflows", "sync", "auto", "on", "--interval", "900"])
-    result = runner.invoke(app, ["workflows", "sync", "auto", "off"])
+    runner.invoke(app, ["skills", "sync", "auto", "on", "--interval", "900"])
+    result = runner.invoke(app, ["skills", "sync", "auto", "off"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["enabled"] is False
@@ -1641,8 +1639,8 @@ def test_auto_off_disables_but_keeps_interval(tmp_config_paths: ConfigPaths, mon
 def test_auto_status_reports_current_setting(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _redirect_config(monkeypatch, tmp_config_paths)
     runner = CliRunner()
-    runner.invoke(app, ["workflows", "sync", "auto", "on", "--interval", "600"])
-    result = runner.invoke(app, ["workflows", "sync", "auto"])
+    runner.invoke(app, ["skills", "sync", "auto", "on", "--interval", "600"])
+    result = runner.invoke(app, ["skills", "sync", "auto"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload == {
@@ -1655,9 +1653,9 @@ def test_auto_status_reports_current_setting(tmp_config_paths: ConfigPaths, monk
 def test_auto_status_human_mode_on_tty(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _redirect_config(monkeypatch, tmp_config_paths)
     runner = CliRunner()
-    runner.invoke(app, ["workflows", "sync", "auto", "on"])
+    runner.invoke(app, ["skills", "sync", "auto", "on"])
     # --table forces the human-readable view regardless of TTY detection.
-    result = runner.invoke(app, ["workflows", "sync", "auto", "--table"])
+    result = runner.invoke(app, ["skills", "sync", "auto", "--table"])
     assert result.exit_code == 0, result.output
     assert "Automatic pull is" in result.output
     assert "on" in result.output
@@ -1676,7 +1674,7 @@ def test_auto_status_reports_last_pull_time(tmp_config_paths: ConfigPaths, monke
     sync.save_sync_state(state, tmp_config_paths)
 
     runner = CliRunner()
-    result = runner.invoke(app, ["workflows", "sync", "auto"])
+    result = runner.invoke(app, ["skills", "sync", "auto"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["last_auto_pull_at"] == "2026-06-14T17:02:11+00:00"

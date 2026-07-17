@@ -238,7 +238,7 @@ def add_target(
                 slug="conflict",
                 message=f"A sync target already points at {stored_path}.",
                 hint="Add workflows to it with --only, or remove it first with "
-                "`goodeye workflows sync target remove`.",
+                "`goodeye skills sync target remove`.",
             )
 
     target = SyncTarget(path=stored_path, scope=scope, selected=list(only))
@@ -305,7 +305,7 @@ def append_to_allowlist(
         raise NotFound(
             slug="not_found",
             message=f"No sync target configured for {stored_path}.",
-            hint="Add it first with `goodeye workflows sync target add`.",
+            hint="Add it first with `goodeye skills sync target add`.",
         )
 
     if explicit_scope is not None and explicit_scope != target.scope:
@@ -313,7 +313,7 @@ def append_to_allowlist(
             slug="conflict",
             message=f"A sync target at {stored_path} already has scope {target.scope}.",
             hint=(
-                f"Remove it first with `goodeye workflows sync target remove {stored_path}`, "
+                f"Remove it first with `goodeye skills sync target remove {stored_path}`, "
                 "then add it with the scope you want."
             ),
         )
@@ -369,7 +369,7 @@ def prune_from_allowlist(
         raise NotFound(
             slug="not_found",
             message=f"No sync target configured for {stored_path}.",
-            hint="List targets with `goodeye workflows sync target list`.",
+            hint="List targets with `goodeye skills sync target list`.",
         )
 
     if target.scope != "selected":
@@ -864,7 +864,7 @@ def _targets_to_process(config: SyncConfig, target_path: str | None) -> list[Syn
         raise NotFound(
             slug="not_found",
             message=f"No sync target configured for {normalize_target_path(target_path)}.",
-            hint="List targets with `goodeye workflows sync target list`.",
+            hint="List targets with `goodeye skills sync target list`.",
         )
     return matches
 
@@ -2265,7 +2265,7 @@ def _pull_required_item(entry: SyncEntry, stored_target: str, source_target: str
         action="pull-required",
         detail=(
             f"The copy pushed from {source_target} changed sibling files. Run "
-            "`goodeye workflows sync pull` to bring this copy up to date."
+            "`goodeye skills sync pull` to bring this copy up to date."
         ),
     )
 
@@ -2317,7 +2317,7 @@ def _untracked_push_items(
                     action="untracked",
                     detail=(
                         "This local directory is not tracked by the registry. Create it "
-                        "with `goodeye workflows publish` rather than sync push."
+                        "with `goodeye skills publish` rather than sync push."
                     ),
                 )
             )
@@ -2480,7 +2480,7 @@ def _push_candidate(
                 "action": "conflict",
                 "detail": (
                     "The registry moved since the last sync. Run "
-                    "`goodeye workflows sync pull` to merge (or `pull --force` to "
+                    "`goodeye skills sync pull` to merge (or `pull --force` to "
                     "discard local edits), then push again."
                 ),
             }

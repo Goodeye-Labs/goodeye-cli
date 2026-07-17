@@ -36,7 +36,7 @@ app = typer.Typer(
     help=(
         "Manage image generators: owner-scoped, versioned image-generation "
         "configurations backed by a supported provider. Generators can be "
-        "deployed once and referenced by UUID from workflows. The **`generate`** "
+        "deployed once and referenced by UUID from skills. The **`generate`** "
         "command also accepts platform-managed quality tiers "
         "(e.g. ``system:image-standard``) and direct model identifiers for "
         "authenticated one-off calls.\n\n"
@@ -149,7 +149,7 @@ def deploy(
         ),
     ),
 ) -> None:
-    """Deploy a reusable image generator your workflows can call (new or new version).
+    """Deploy a reusable image generator your skills can call (new or new version).
 
     On success prints the ``generator_id``, ``version``, and the new
     ``version_token``. Persist the token: it's required for the next re-deploy.
@@ -341,23 +341,41 @@ def generate(
             "generator UUID that appears in a published template."
         ),
     ),
+    skill_id: str | None = typer.Option(
+        None,
+        "--skill-id",
+        help=(
+            "Optional skill UUID stamped onto the run for provenance. "
+            "Access-checked: a skill you cannot see returns 404."
+        ),
+    ),
+    skill_version: int | None = typer.Option(
+        None,
+        "--skill-version",
+        help="Skill version invoking this run; pair with --skill-id.",
+    ),
+    skill_ref: str | None = typer.Option(
+        None,
+        "--skill-ref",
+        help="Free-form skill label (slug or name) for human-readable provenance.",
+    ),
     workflow_id: str | None = typer.Option(
         None,
         "--workflow-id",
-        help=(
-            "Optional workflow UUID stamped onto the run for provenance. "
-            "Access-checked: a workflow you cannot see returns 404."
-        ),
+        hidden=True,
+        help="Deprecated alias for --skill-id.",
     ),
     workflow_version: int | None = typer.Option(
         None,
         "--workflow-version",
-        help="Workflow version invoking this run; pair with --workflow-id.",
+        hidden=True,
+        help="Deprecated alias for --skill-version.",
     ),
     workflow_ref: str | None = typer.Option(
         None,
         "--workflow-ref",
-        help="Free-form workflow label (slug or name) for human-readable provenance.",
+        hidden=True,
+        help="Deprecated alias for --skill-ref.",
     ),
     run_id: str | None = typer.Option(
         None,
@@ -405,6 +423,13 @@ def generate(
         generator_path_id = _DEFAULT_TIER
         effective_model = model  # may be None (default tier path)
 
+    # --workflow-id/--workflow-version/--workflow-ref are deprecated hidden
+    # aliases for --skill-id/--skill-version/--skill-ref; the canonical flag
+    # wins when both are supplied.
+    effective_skill_id = skill_id if skill_id is not None else workflow_id
+    effective_skill_version = skill_version if skill_version is not None else workflow_version
+    effective_skill_ref = skill_ref if skill_ref is not None else workflow_ref
+
     console_err = Console(stderr=True)
     with _client_for_generate(
         anonymous=anonymous, timeout_default=VERIFIER_REQUEST_TIMEOUT_SECONDS
@@ -418,9 +443,9 @@ def generate(
             seed=seed,
             param_overrides=param_overrides,
             version=version,
-            workflow_id=workflow_id,
-            workflow_version=workflow_version,
-            workflow_ref=workflow_ref,
+            workflow_id=effective_skill_id,
+            workflow_version=effective_skill_version,
+            workflow_ref=effective_skill_ref,
             run_id=run_id,
             visibility=visibility,
             anonymous=anonymous,

@@ -26,22 +26,37 @@ from goodeye_cli.commands import logout as logout_cmd
 from goodeye_cli.commands import me as me_cmds
 from goodeye_cli.commands import referrals as referrals_cmds
 from goodeye_cli.commands import register as register_cmd
+from goodeye_cli.commands import skills as skills_cmds
 from goodeye_cli.commands import teams as teams_cmds
 from goodeye_cli.commands import templates as templates_cmds
 from goodeye_cli.commands import update as update_cmd
 from goodeye_cli.commands import usage as usage_cmd
 from goodeye_cli.commands import verifiers as verifiers_cmds
 from goodeye_cli.commands import whoami as whoami_cmd
-from goodeye_cli.commands import workflows as workflows_cmds
 from goodeye_cli.config import get_api_key, get_config_paths
 from goodeye_cli.errors import GoodeyeError
 
 app = typer.Typer(
     name="goodeye",
-    help="Goodeye CLI: design, run, and share AI workflows your agent executes reliably.",
+    help="Goodeye CLI: design, run, and share AI skills your agent executes reliably.",
     no_args_is_help=True,
     add_completion=False,
 )
+
+
+def _deprecated_workflows_notice(ctx: typer.Context) -> None:
+    """Warn that `goodeye workflows` is a deprecated alias for `goodeye skills`.
+
+    Registered as the callback for the hidden `workflows` alias typer app, so
+    it runs once per invocation before the forwarded subcommand executes.
+    """
+    _ = ctx
+    typer.echo(
+        "'goodeye workflows' is deprecated and will be removed on 2026-10-01; "
+        "use 'goodeye skills'.",
+        err=True,
+    )
+
 
 # Top-level commands.
 app.command("login")(login_cmd.login)
@@ -59,9 +74,19 @@ app.command("design")(design_cmd.design)
 app.add_typer(auth_cmds.app, name="auth", help="Manage API keys.")
 app.add_typer(me_cmds.app, name="me", help="View and update your profile.")
 app.add_typer(
-    workflows_cmds.app,
+    skills_cmds.app,
+    name="skills",
+    help="Find, run, save, and share your private skills.",
+)
+# Deprecated alias for the skills command group: kept working (and hidden
+# from top-level help) so scripts using `goodeye workflows ...` keep running
+# while a stderr notice points them at `goodeye skills` ahead of the removal
+# date. Remove once the cutoff passes.
+app.add_typer(
+    skills_cmds.app,
     name="workflows",
-    help="Find, run, save, and share your private workflows.",
+    hidden=True,
+    callback=_deprecated_workflows_notice,
 )
 app.add_typer(templates_cmds.app, name="templates", help="Browse, publish, and fork templates.")
 app.add_typer(teams_cmds.app, name="teams", help="Manage teams.")

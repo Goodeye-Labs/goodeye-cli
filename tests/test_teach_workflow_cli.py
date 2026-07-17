@@ -30,11 +30,11 @@ def test_workflows_teach_help_documents_required_publish_metadata() -> None:
     plain_output = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
     normalized = " ".join(plain_output.split())
     assert (
-        "goodeye workflows publish - --name <name> --description <description> "
+        "goodeye skills publish - --name <name> --description <description> "
         "--outcome <outcome> --source teach --expected-version-token "
         "<captured at stage 2>"
     ) in normalized
-    assert "goodeye workflows publish - --source teach --expected-version-token" not in normalized
+    assert "goodeye skills publish - --source teach --expected-version-token" not in normalized
 
 
 @respx.mock
