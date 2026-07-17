@@ -519,7 +519,7 @@ class SafetyCheckVerifierRun(_WireBase):
 
 
 class SafetyCheckResult(_WireBase):
-    """Response shape for `POST /v1/{workflows,templates}/{id}/safety-check`."""
+    """Response shape for `POST /v1/{skills,templates}/{id}/safety-check`."""
 
     resource_type: str
     resource_id: str

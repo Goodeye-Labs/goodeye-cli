@@ -236,7 +236,7 @@ def add_target(
             raise Conflict(
                 slug="conflict",
                 message=f"A sync target already points at {stored_path}.",
-                hint="Add workflows to it with --only, or remove it first with "
+                hint="Add skills to it with --only, or remove it first with "
                 "`goodeye skills sync target remove`.",
             )
 
@@ -573,7 +573,7 @@ def ensure_identity(client: GoodeyeClient, state: SyncState, *, allow_stamp: boo
             slug="conflict",
             message=(
                 f"This local sync was set up for {state.identity}, but you are signed "
-                f"in as {current}. Refusing to mix two accounts' workflows."
+                f"in as {current}. Refusing to mix two accounts' skills."
             ),
             hint=(
                 "Sign in as the original account, or reset the local sync (remove the "
@@ -1554,7 +1554,7 @@ def _pull_one(
     new_file_states, missing_siblings = _sync_sibling_files(client, detail, slug_dir, old_files)
     if missing_siblings:
         _log.warning(
-            "workflow %s (%s): %d sibling file(s) could not be retrieved and were left out "
+            "skill %s (%s): %d sibling file(s) could not be retrieved and were left out "
             "of the local directory: %s",
             slug,
             detail.id,
@@ -1836,7 +1836,7 @@ PushAction = Literal[
 # per-entry upload path and the up-front read-only split in a multi-target
 # group report the same message.
 _READ_ONLY_DETAIL = (
-    "You hold only a view grant on this workflow, so local edits cannot be pushed back."
+    "You hold only a view grant on this skill, so local edits cannot be pushed back."
 )
 
 
@@ -1894,15 +1894,15 @@ def _push_metadata(body: str, slug: str) -> tuple[str, str | None, list[str]] | 
         if isinstance(edited_identity, str) and edited_identity.strip() != slug:
             return (
                 "Renaming is not supported through sync push: the directory name "
-                f"({slug!r}) is the workflow identity. Revert the front-matter "
-                f"`{key}` or rename the directory and publish a new workflow."
+                f"({slug!r}) is the skill identity. Revert the front-matter "
+                f"`{key}` or rename the directory and publish a new skill."
             )
 
     try:
         description = coerce_required_text(
             front_matter.get("description"),
             field_name="description",
-            missing_message="Missing `description` in the workflow front-matter.",
+            missing_message="Missing `description` in the skill front-matter.",
         )
         outcome = front_matter.get("outcome")
         # Push cannot clear tags: an absent/empty `tags:` coerces to [], and
@@ -2128,9 +2128,9 @@ def _diverged_item(candidate: _PushCandidate) -> PushItem:
         target_path=normalize_target_path(candidate.target.path),
         action="diverged",
         detail=(
-            "This workflow was edited differently in more than one target. Pick the "
-            "copy to keep with `--target <dir>`, or reconcile the copies so they "
-            "match, then push again."
+            "This skill's local file was edited differently in more than one target. "
+            "Pick the copy to keep with `--target <dir>`, or reconcile the copies so "
+            "they match, then push again."
         ),
     )
 

@@ -2056,7 +2056,7 @@ def test_push_read_only_entry_is_skipped_with_no_save(
         result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
     item = result.items[0]
     assert item.action == "skipped-read-only"
-    assert item.detail is not None and "view grant" in item.detail
+    assert item.detail is not None and "view grant on this skill" in item.detail
     # A view-role entry never reaches the registry.
     assert save_route.call_count == 0
 
@@ -2078,6 +2078,7 @@ def test_push_rename_in_front_matter_is_skipped_invalid(
     item = result.items[0]
     assert item.action == "skipped-invalid"
     assert item.detail is not None and "Renaming is not supported" in item.detail
+    assert "skill identity" in item.detail
     assert save_route.call_count == 0
 
 
@@ -2100,6 +2101,7 @@ def test_push_slug_rename_in_front_matter_is_skipped_invalid(
     item = result.items[0]
     assert item.action == "skipped-invalid"
     assert item.detail is not None and "Renaming is not supported" in item.detail
+    assert "skill identity" in item.detail
     assert "`slug`" in item.detail  # the message names the offending key
     assert save_route.call_count == 0
 
@@ -2921,6 +2923,10 @@ def test_push_diverged_edits_are_refused_without_upload(
     # No upload happened, and both copies are reported diverged.
     assert save_route.call_count == 0
     assert sorted(i.action for i in result.items) == ["diverged", "diverged"]
+    assert all(
+        i.detail is not None and "skill's local file was edited differently" in i.detail
+        for i in result.items
+    )
     # Neither index entry advanced.
     for entry in load_sync_state(tmp_config_paths).entries:
         assert entry.version_token == "tok-1"
@@ -3157,7 +3163,7 @@ def test_push_read_only_mirrored_in_two_targets_is_skipped_not_diverged(
 
     # Both copies are reported read-only, neither diverged, and nothing uploaded.
     assert sorted(i.action for i in result.items) == ["skipped-read-only", "skipped-read-only"]
-    assert all("view grant" in (i.detail or "") for i in result.items)
+    assert all("view grant on this skill" in (i.detail or "") for i in result.items)
     assert save_route.call_count == 0
 
 

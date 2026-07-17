@@ -1,7 +1,7 @@
 """Tests for the post-login shared-with-you banner.
 
 After a successful interactive login the CLI prints a one-line nudge
-when workflows are shared with the user or invitations are pending.
+when skills are shared with the user or invitations are pending.
 The banner is silent on non-TTY sessions and on any list-endpoint error.
 """
 
@@ -31,6 +31,10 @@ _WORKFLOW_ITEMS = [
     {"id": "wf-02", "name": "beta", "current_version": 2},
 ]
 
+_WORKFLOW_ITEMS_SINGLE = [
+    {"id": "wf-01", "name": "alpha", "current_version": 1},
+]
+
 _INVITATION_ITEMS = [
     {
         "id": "inv-01",
@@ -52,7 +56,7 @@ def _env(monkeypatch, tmp_config_paths: ConfigPaths) -> None:
 
 
 def test_login_banner_interactive_shows_counts(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
-    """Interactive login prints shared-workflow and invitation counts when both are nonzero."""
+    """Interactive login prints shared-skill and invitation counts when both are nonzero."""
     _env(monkeypatch, tmp_config_paths)
 
     with (
@@ -80,19 +84,20 @@ def test_login_banner_interactive_shows_counts(tmp_config_paths: ConfigPaths, mo
     assert result.exit_code == 0, result.output
     # Normalize whitespace to handle Rich's line wrapping in the captured output.
     flat = " ".join(result.output.split())
-    assert "shared with you" in flat
+    # Pin the plural noun beside the count, not just the command literal.
+    assert "2 skills shared with you" in flat
     assert "pending invitation" in flat
     assert "goodeye skills list --filter shared-with-me" in flat
     assert "goodeye invitations list" in flat
     # Confirm the counts appear
-    assert "2" in flat  # 2 workflows
+    assert "2" in flat  # 2 skills
     assert "1" in flat  # 1 invitation
 
 
 def test_login_banner_only_workflows_omits_zero_invitations(
     tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
-    """With shared workflows but no pending invitations, the banner names only workflows."""
+    """With shared skills but no pending invitations, the banner names only skills."""
     _env(monkeypatch, tmp_config_paths)
 
     with (
@@ -119,11 +124,46 @@ def test_login_banner_only_workflows_omits_zero_invitations(
 
     assert result.exit_code == 0, result.output
     flat = " ".join(result.output.split())
-    assert "shared with you" in flat
+    assert "2 skills shared with you" in flat
     assert "goodeye skills list --filter shared-with-me" in flat
     # The zero category is omitted entirely: no "0 ..." count, no invitation copy.
     assert "pending invitation" not in flat
     assert "goodeye invitations list" not in flat
+
+
+def test_login_banner_singular_skill_noun(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    """With exactly one shared skill, the banner uses the singular noun."""
+    _env(monkeypatch, tmp_config_paths)
+
+    with (
+        respx.mock,
+        patch(
+            "goodeye_cli.commands.login.device_code_login",
+            return_value="good_live_EXAMPLE_banner6",
+        ),
+        patch("goodeye_cli.commands.login.save_client_config"),
+        patch("goodeye_cli.commands.login._is_tty", return_value=True),
+    ):
+        respx.get(f"{SERVER}/.well-known/goodeye-client-config").mock(
+            return_value=httpx.Response(200, json=_CLIENT_CONFIG_BODY)
+        )
+        respx.get(f"{SERVER}/v1/skills").mock(
+            return_value=httpx.Response(
+                200, json={"items": _WORKFLOW_ITEMS_SINGLE, "next_cursor": None}
+            )
+        )
+        respx.get(f"{SERVER}/v1/invitations").mock(
+            return_value=httpx.Response(200, json={"items": [], "next_cursor": None})
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["login"])
+
+    assert result.exit_code == 0, result.output
+    flat = " ".join(result.output.split())
+    # Pin the singular noun: not "1 skills shared with you".
+    assert "1 skill shared with you" in flat
+    assert "1 skills shared with you" not in flat
 
 
 def test_login_banner_only_invitations_omits_zero_workflows(

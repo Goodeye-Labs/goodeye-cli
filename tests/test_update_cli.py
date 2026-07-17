@@ -190,8 +190,16 @@ def test_should_not_suppress_background_notice_for_plain_text_commands(
         (["--help"], {}),
         (["whoami", "--json"], {}),
         (["logout"], {"CI": "1"}),
-        # Plus any explicit `workflows sync ...` command: never auto-pull while
+        # Plus any explicit `skills sync ...` command: never auto-pull while
         # the user is running sync by hand.
+        (["skills", "sync"], {}),
+        (["skills", "sync", "pull"], {}),
+        (["skills", "sync", "push"], {}),
+        (["skills", "sync", "status"], {}),
+        (["skills", "sync", "auto", "on"], {}),
+        (["skills", "sync", "target", "list"], {}),
+        # The deprecated `workflows` alias routes through the same code and
+        # must keep suppressing too.
         (["workflows", "sync"], {}),
         (["workflows", "sync", "pull"], {}),
         (["workflows", "sync", "push"], {}),
@@ -214,8 +222,10 @@ def test_should_suppress_auto_pull_for_meta_and_sync_commands(
     "args",
     [
         ["logout"],
+        ["skills", "list"],
+        # A non-sync skills subcommand is eligible for an automatic pull tail.
+        ["skills", "get", "some-slug"],
         ["workflows", "list"],
-        # A non-sync workflows subcommand is eligible for an automatic pull tail.
         ["workflows", "get", "some-slug"],
         ["templates", "list"],
     ],
