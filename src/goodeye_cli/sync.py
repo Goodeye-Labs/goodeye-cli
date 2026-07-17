@@ -851,6 +851,9 @@ class PullItem(_SyncBase):
     slug: str
     target_path: str
     action: PullAction
+    # Serialized as `workflow_id` (not `skill_id`) on purpose: it carries the
+    # skill id, but the field name is the shipped `sync --json` output contract
+    # and is renamed only through the deprecation path, never in place.
     workflow_id: str | None = None
 
 
@@ -1621,6 +1624,9 @@ class StatusItem(_SyncBase):
     """
 
     slug: str
+    # Serialized as `workflow_id` (not `skill_id`) on purpose: it carries the
+    # skill id, but the field name is the shipped `sync --json` output contract
+    # and is renamed only through the deprecation path, never in place.
     workflow_id: str | None = None
     target_path: str
     state: SyncStatusState
@@ -1849,6 +1855,9 @@ class PushItem(_SyncBase):
     """
 
     slug: str
+    # Serialized as `workflow_id` (not `skill_id`) on purpose: it carries the
+    # skill id, but the field name is the shipped `sync --json` output contract
+    # and is renamed only through the deprecation path, never in place.
     workflow_id: str | None = None
     target_path: str
     action: PushAction
