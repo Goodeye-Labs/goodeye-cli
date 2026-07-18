@@ -154,8 +154,8 @@ def target_add(
         "--preset",
         help=(
             "Named target directory instead of a path: claude "
-            "(~/.claude/skills), agents (~/.agents/skills, which is also where "
-            "Codex reads personal skills), or cursor (~/.cursor/skills)."
+            "(~/.claude/skills), agents or codex (both ~/.agents/skills, the "
+            "shared location Codex reads), or cursor (~/.cursor/skills)."
         ),
     ),
     scope: str | None = typer.Option(

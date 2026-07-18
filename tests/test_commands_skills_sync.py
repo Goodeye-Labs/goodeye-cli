@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import httpx
+import pytest
 import respx
 from typer.testing import CliRunner
 
@@ -1678,3 +1679,41 @@ def test_auto_status_reports_last_pull_time(tmp_config_paths: ConfigPaths, monke
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["last_auto_pull_at"] == "2026-06-14T17:02:11+00:00"
+
+
+def test_codex_preset_resolves_to_the_shared_agents_directory() -> None:
+    """Codex reads ~/.agents/skills, so the preset is an alias, not a new path."""
+    from goodeye_cli.sync import PRESETS, resolve_preset
+
+    assert resolve_preset("codex") == "~/.agents/skills"
+    assert resolve_preset("codex") == resolve_preset("agents")
+    # Guard the real hazard: ~/.codex is Codex's config location, not skills.
+    assert not any(value.startswith("~/.codex") for value in PRESETS.values())
+
+
+def test_conflict_explains_that_codex_and_agents_are_one_directory() -> None:
+    """Adding both aliases must not produce a baffling error.
+
+    Without the explanation the user sees a conflict naming ~/.agents/skills,
+    a path they never typed, after asking for a preset called codex.
+    """
+    from goodeye_cli.errors import Conflict
+    from goodeye_cli.sync import SyncConfig, add_target
+
+    config = SyncConfig(targets=[])
+    add_target(config, path=None, preset="agents", scope="owned", only=[])
+
+    with pytest.raises(Conflict) as exc_info:
+        add_target(config, path=None, preset="codex", scope="owned", only=[])
+
+    message = exc_info.value.message
+    assert "~/.agents/skills" in message
+    assert "agents and codex are the same directory" in message
+
+
+def test_alias_clause_is_omitted_for_a_uniquely_named_preset() -> None:
+    """A preset that owns its directory gets no alias clause."""
+    from goodeye_cli.sync import describe_preset_aliases
+
+    assert describe_preset_aliases("~/.claude/skills") == ""
+    assert describe_preset_aliases("~/.agents/skills") != ""

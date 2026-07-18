@@ -64,16 +64,38 @@ SYNC_SCOPES: frozenset[str] = frozenset(("owned", "all", "selected"))
 # path. The values match the ``~`` storage form so a preset target and an
 # equivalent hand-typed path dedupe cleanly.
 #
-# There is deliberately no ``codex`` preset. Codex reads personal skills from
-# ``~/.agents/skills``, the same directory ``agents`` already points at, so a
-# separate entry would only add a second name for one location. It would also
-# invite pointing at ``~/.codex``, which holds Codex's ``config.toml`` and is
-# not a skills directory: syncing there would write files nothing ever reads.
+# ``codex`` and ``agents`` intentionally share one directory. Codex reads
+# personal skills from ``~/.agents/skills``, the cross-tool location, so the
+# duplicate name exists for discoverability: someone running Codex reaches for
+# ``--preset codex``, and finding nothing would leave them assuming Codex is
+# unsupported. Because they resolve to the same path, adding both raises a
+# conflict; ``describe_preset_aliases`` gives that error the wording it needs to
+# make sense.
+#
+# Note ``~/.codex`` is Codex's ``config.toml`` location and is NOT a skills
+# directory. Do not point a preset there: sync would write files nothing reads.
 PRESETS: dict[str, str] = {
     "claude": "~/.claude/skills",
     "agents": "~/.agents/skills",
+    "codex": "~/.agents/skills",
     "cursor": "~/.cursor/skills",
 }
+
+
+def describe_preset_aliases(stored_path: str) -> str:
+    """Return a clause naming the presets that share ``stored_path``.
+
+    Empty string when fewer than two presets point at it. Used to explain a
+    conflict that is otherwise baffling: a user who adds ``--preset codex``
+    after ``--preset agents`` sees an error about a path they never typed.
+    """
+    names = sorted(name for name, value in PRESETS.items() if value == stored_path)
+    if len(names) < 2:
+        return ""
+    joined = (
+        " and ".join((", ".join(names[:-1]), names[-1])) if len(names) > 2 else " and ".join(names)
+    )
+    return f" Presets {joined} are the same directory."
 
 
 class _SyncBase(BaseModel):
@@ -241,7 +263,10 @@ def add_target(
         if expand_target_path(existing.path) == expanded:
             raise Conflict(
                 slug="conflict",
-                message=f"A sync target already points at {stored_path}.",
+                message=(
+                    f"A sync target already points at {stored_path}."
+                    f"{describe_preset_aliases(stored_path)}"
+                ),
                 hint="Add skills to it with --only, or remove it first with "
                 "`goodeye skills sync target remove`.",
             )
