@@ -2,15 +2,21 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/goodeye)](https://pypi.org/project/goodeye/) [![Python versions](https://img.shields.io/pypi/pyversions/goodeye)](https://pypi.org/project/goodeye/) [![License](https://img.shields.io/pypi/l/goodeye)](https://github.com/Goodeye-Labs/goodeye-cli/blob/main/LICENSE)
 
-Goodeye makes an AI agent meet your standard before you ever see the output, even on work too subjective for a test.
+Goodeye is a private home for the skills your AI follows and the verifiers its work must pass.
 
 `goodeye` is the command-line surface for Goodeye. The same capability reaches your agent over an MCP server and a REST API too, so it works wherever your agent runs. This CLI talks to the public `/v1` REST API.
 
 ## How it works
 
-You capture the work that moves an outcome as a markdown runbook, called a skill, and pair it with checks, called verifiers, that score an agent's output against the standard you set. The agent runs the skill, the verifiers judge the result, and the agent revises until the output clears your bar. Skills stay private to you until you choose to share one publicly as a template.
+A skill is a markdown runbook your agent follows. A verifier is a check its output has to clear. Goodeye keeps both in one account you own, and three things follow from that.
 
-A verifier can be deterministic (format, schema, tests, numeric bounds) or an LLM judge for the calls no test can make, like tone or image quality. The full picture is at https://goodeye.dev/docs/overview.
+**Private by default.** Nothing is public until you publish a template, which is a separate step you take on purpose. To share without going public, grant a named user or team access, and the verifiers the skill references go with it at the same version. Revoking works the same way.
+
+**Always in sync.** `goodeye skills sync` mirrors your hosted skills into the directories your tools already read, so Claude Code, Codex, Cursor, and anything else reading skill files from disk run the same current version. Edit a skill once and every machine picks it up on the next pull.
+
+**Verifiers, hosted.** A verifier can be deterministic (format, schema, tests, numeric bounds) or an LLM judge for the calls no test can make, like tone or image quality. Deploy a semantic verifier once, and every skill that references it runs that exact version, on your laptop, in CI, or on the machine of someone you granted it to.
+
+The full picture is at https://goodeye.dev/docs/overview.
 
 ## Your AI agent is the primary caller
 
@@ -30,6 +36,57 @@ The `goodeye` command is then on your `PATH`. Run `goodeye update` to upgrade to
 
 ## Quickstart
 
+### Bring a skill you already have
+
+A skill file on disk is a directory holding a `SKILL.md` plus optional siblings, which is exactly what `publish` expects. Importing one is a single command.
+
+```sh
+goodeye login                                     # or: goodeye register --email you@example.com
+goodeye skills publish ~/.claude/skills/my-skill  # also ~/.agents/skills, ~/.cursor/skills, or any path
+goodeye skills list
+```
+
+It lands as a private hosted skill. Nothing is public until you publish a template, which is a separate step.
+
+### Sync it to every machine and agent
+
+Point Goodeye at the directories your tools read, then pull:
+
+```sh
+goodeye skills sync target add --preset claude    # ~/.claude/skills
+goodeye skills sync target add --preset agents    # ~/.agents/skills
+goodeye skills sync target add --preset cursor    # ~/.cursor/skills
+goodeye skills sync
+```
+
+Run the same commands on your other machines and they all read the current version. `goodeye skills sync auto on` keeps that up to date on its own; it only pulls new and updated skills, never overwrites local edits, and reports a conflict rather than clobbering it.
+
+### Share it
+
+```sh
+goodeye skills grant my-skill @teammate view
+goodeye skills grants my-skill
+```
+
+Their agent now runs your skill, and any semantic verifiers it references travel with the grant at the same version. Improve the skill and they get the improvement on their next pull.
+
+### Author a skill from scratch
+
+```sh
+goodeye design                         # prints the designer prompt; pipe it to your agent to draft a skill and its verifiers
+
+# save the draft from your agent's output (stdin keeps a stray file out of the working directory):
+goodeye skills publish - \
+  --name my-skill \
+  --description "One sentence on what this does and when to use it." <<'EOF'
+# Body
+
+The skill body your agent will execute.
+EOF
+
+goodeye skills get my-skill            # fetch it back for an agent to run
+```
+
 ### Run a public template, no account needed
 
 Browsing, fetching, and running public templates need no sign-in.
@@ -47,27 +104,7 @@ goodeye verifiers run 89dcc843-d056-44d9-ae34-ebcff4903885 \
   --version 1 --media-url '<public-https-chart-url>' --anonymous
 ```
 
-### Author your own skill
-
-```sh
-goodeye login                          # or: goodeye register --email you@example.com
-goodeye me claim-handle your-handle    # one time, required before you publish a template
-
-goodeye design                         # prints the designer prompt; pipe it to your agent to draft a skill and its verifiers
-
-# save the draft from your agent's output (stdin keeps a stray file out of the working directory):
-goodeye skills publish - \
-  --name my-skill \
-  --description "One sentence on what this does and when to use it." \
-  --outcome "The result this skill moves" <<'EOF'
-# Body
-
-The skill body your agent will execute.
-EOF
-
-goodeye skills get my-skill            # fetch it back for an agent to run
-goodeye templates publish my-skill     # share it publicly as a template
-```
+Fork it into a skill of your own with `goodeye templates fork @randalolson/high-signal-chart-workflow`. To publish one of your own, claim a handle first with `goodeye me claim-handle your-handle`, then run `goodeye templates publish my-skill`.
 
 ## What the CLI can do
 

@@ -38,7 +38,11 @@ from goodeye_cli.errors import GoodeyeError
 
 app = typer.Typer(
     name="goodeye",
-    help="Goodeye CLI: design, run, and share AI skills your agent executes reliably.",
+    help=(
+        "Goodeye CLI: a private home for the skills your AI follows and the "
+        "verifiers its work must pass. Keep them in sync across every machine "
+        "and agent you run, and share them only with who you choose."
+    ),
     no_args_is_help=True,
     add_completion=False,
 )
@@ -76,7 +80,7 @@ app.add_typer(me_cmds.app, name="me", help="View and update your profile.")
 app.add_typer(
     skills_cmds.app,
     name="skills",
-    help="Find, run, save, and share your private skills.",
+    help="Find, run, save, share, and sync your private skills.",
 )
 # Deprecated alias for the skills command group: kept working (and hidden
 # from top-level help) so scripts using `goodeye workflows ...` keep running
@@ -90,7 +94,11 @@ app.add_typer(
 )
 app.add_typer(templates_cmds.app, name="templates", help="Browse, publish, and fork templates.")
 app.add_typer(teams_cmds.app, name="teams", help="Manage teams.")
-app.add_typer(verifiers_cmds.app, name="verifiers", help="Deploy and run verifiers.")
+app.add_typer(
+    verifiers_cmds.app,
+    name="verifiers",
+    help="Deploy and run verifiers: hosted, versioned checks everyone runs the same way.",
+)
 app.add_typer(
     image_generators_cmds.app,
     name="image-generators",

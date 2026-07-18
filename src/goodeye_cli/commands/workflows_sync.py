@@ -22,7 +22,10 @@ from goodeye_cli.errors import AuthRequired, ValidationFailed
 from goodeye_cli.output import echo_json, items_envelope, resolve_output_mode
 
 app = typer.Typer(
-    help="Sync hosted skills with local skill directories.",
+    help=(
+        "Mirror hosted skills into local skill directories, so every machine "
+        "and agent reads the current version."
+    ),
     invoke_without_command=True,
 )
 

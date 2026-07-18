@@ -1031,8 +1031,8 @@ def optimize(
         max=1000,
     ),
 ) -> None:
-    """Automatically improve an existing skill: runs an optimization loop to lift it
-    against its outcome.
+    """Automatically improve an existing skill: runs an optimization loop to tune it
+    against its own verifier results.
 
     The command returns the pack content; the agent (or you, working from
     a script) follows the pack to run the optimization loop, then persists
