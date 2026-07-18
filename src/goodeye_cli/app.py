@@ -75,13 +75,15 @@ app.command("usage")(usage_cmd.usage)
 app.command("design")(design_cmd.design)
 
 # Command groups.
-app.add_typer(auth_cmds.app, name="auth", help="Manage API keys.")
-app.add_typer(me_cmds.app, name="me", help="View and update your profile.")
-app.add_typer(
-    skills_cmds.app,
-    name="skills",
-    help="Find, run, save, share, and sync your private skills.",
-)
+#
+# Deliberately no `help=` here. Passing `help=` to `add_typer` overrides the
+# sub-app's own `Typer(help=...)` outright, which silently shadows the richer
+# text that lives next to the commands it describes. Each group owns its help
+# in its own module: `help` for the full text shown by `goodeye <group>
+# --help`, and `short_help` for the one-liner listed here. A test guards this.
+app.add_typer(auth_cmds.app, name="auth")
+app.add_typer(me_cmds.app, name="me")
+app.add_typer(skills_cmds.app, name="skills")
 # Deprecated alias for the skills command group: kept working (and hidden
 # from top-level help) so scripts using `goodeye workflows ...` keep running
 # while a stderr notice points them at `goodeye skills` ahead of the removal
@@ -92,26 +94,14 @@ app.add_typer(
     hidden=True,
     callback=_deprecated_workflows_notice,
 )
-app.add_typer(templates_cmds.app, name="templates", help="Browse, publish, and fork templates.")
-app.add_typer(teams_cmds.app, name="teams", help="Manage teams.")
-app.add_typer(
-    verifiers_cmds.app,
-    name="verifiers",
-    help="Deploy and run verifiers: hosted, versioned checks everyone runs the same way.",
-)
-app.add_typer(
-    image_generators_cmds.app,
-    name="image-generators",
-    help="Deploy and run image generators.",
-)
-app.add_typer(images_cmds.app, name="images", help="Upload and manage hosted images.")
-app.add_typer(invitations_cmds.app, name="invitations", help="Manage invitations.")
-app.add_typer(referrals_cmds.app, name="referrals", help="View and redeem referral codes.")
-app.add_typer(
-    billing_cmds.app,
-    name="billing",
-    help="Manage your Pro subscription and credits.",
-)
+app.add_typer(templates_cmds.app, name="templates")
+app.add_typer(teams_cmds.app, name="teams")
+app.add_typer(verifiers_cmds.app, name="verifiers")
+app.add_typer(image_generators_cmds.app, name="image-generators")
+app.add_typer(images_cmds.app, name="images")
+app.add_typer(invitations_cmds.app, name="invitations")
+app.add_typer(referrals_cmds.app, name="referrals")
+app.add_typer(billing_cmds.app, name="billing")
 # Deprecated alias for the reorganized subscription commands: kept working (and
 # hidden from top-level help) so scripts using the v0.22.0 `goodeye
 # subscription upgrade / cancel / portal` keep running while a stderr notice
@@ -120,7 +110,6 @@ app.add_typer(
     billing_cmds.subscription_app,
     name="subscription",
     hidden=True,
-    help="Deprecated: use `goodeye billing` instead.",
 )
 
 

@@ -39,7 +39,18 @@ _log = logging.getLogger(__name__)
 _WORKFLOW_VERIFIER_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,127}$")
 
 app = typer.Typer(
-    help="Browse and manage the caller's private skills.",
+    help=(
+        "Find, run, save, share, and sync your private skills. A skill is a "
+        "markdown runbook your agent executes on your behalf. Skills are "
+        "private to you: share one with a named user or team using `grant`, "
+        "and the verifiers it references travel with it at the same version. "
+        "Publishing a public template is a separate, explicit step "
+        "(`goodeye templates publish`)."
+        "\n\n"
+        "Use `sync` to mirror your hosted skills into the local directories "
+        "your agents read, so every machine runs the current version."
+    ),
+    short_help="Find, run, save, share, and sync your private skills.",
     no_args_is_help=True,
 )
 app.add_typer(workflows_sync.app, name="sync")

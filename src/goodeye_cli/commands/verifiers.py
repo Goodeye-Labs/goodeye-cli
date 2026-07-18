@@ -33,15 +33,19 @@ app = typer.Typer(
     help=(
         "Manage verifiers: owner-scoped, versioned LLM judges that score one "
         "criterion ('does this output satisfy this rule?') against caller "
-        "inputs. Skills typically reference deployed verifiers by UUID "
-        "(or UUID@version). The **`run`** command (and REST/MCP equivalents) "
-        "also accepts the caller-owned name or **`system:<name>`** for seeded "
-        "platform judges (`show`/`revoke` accept UUID or name only)."
+        "inputs. Deploy a verifier once and every skill that references it "
+        "runs that exact version, including on the machines of people you "
+        "granted the skill to. Skills typically reference deployed verifiers "
+        "by UUID (or UUID@version). The `run` command (and REST/MCP "
+        "equivalents) also accepts the caller-owned name or `system:<name>` "
+        "for seeded platform judges (`show`/`revoke` accept UUID or name "
+        "only)."
         "\n\n"
         "All commands require auth (`goodeye login` or GOODEYE_API_KEY).\n"
         "\n"
         "Lifecycle: deploy -> show/list -> run (many times) -> revoke."
     ),
+    short_help="Deploy and run verifiers: hosted, versioned checks everyone runs the same way.",
     no_args_is_help=True,
 )
 

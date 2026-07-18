@@ -33,6 +33,7 @@ app = typer.Typer(
         "`goodeye images update` or `goodeye images set-ttl`.\n\n"
         "All commands require auth (`goodeye login` or GOODEYE_API_KEY)."
     ),
+    short_help="Upload and manage hosted images.",
     no_args_is_help=True,
 )
 
