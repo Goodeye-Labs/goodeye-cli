@@ -25,7 +25,7 @@ app = typer.Typer(
     help=(
         "Mirror hosted skills into local skill directories, so every machine "
         "and agent reads the current version. Point a target at the directory "
-        "your tool loads skills from (`--preset claude`, `agents`, or "
+        "your tool loads skills from (`--preset claude`, `agents`, `codex`, or "
         "`cursor`, or any path), and one edit to a hosted skill reaches all of "
         "them on the next pull."
         "\n\n"
