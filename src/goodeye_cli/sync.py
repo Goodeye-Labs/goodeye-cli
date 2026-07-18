@@ -259,14 +259,17 @@ def add_target(
         )
     stored_path = normalize_target_path(raw_path)
 
+    # The alias clause only earns its place when the caller named a preset, since
+    # that is the case where the conflict reports a path the user never typed.
+    # Someone who typed the directory outright is already looking at their own
+    # words, and a clause about presets they never used just adds noise.
+    alias_note = describe_preset_aliases(stored_path) if preset is not None else ""
+
     for existing in config.targets:
         if expand_target_path(existing.path) == expanded:
             raise Conflict(
                 slug="conflict",
-                message=(
-                    f"A sync target already points at {stored_path}."
-                    f"{describe_preset_aliases(stored_path)}"
-                ),
+                message=f"A sync target already points at {stored_path}.{alias_note}",
                 hint="Add skills to it with --only, or remove it first with "
                 "`goodeye skills sync target remove`.",
             )

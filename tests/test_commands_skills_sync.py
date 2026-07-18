@@ -1717,3 +1717,24 @@ def test_alias_clause_is_omitted_for_a_uniquely_named_preset() -> None:
 
     assert describe_preset_aliases("~/.claude/skills") == ""
     assert describe_preset_aliases("~/.agents/skills") != ""
+
+
+def test_alias_clause_is_omitted_when_no_preset_was_used() -> None:
+    """Typing the shared directory by hand must not mention presets.
+
+    The clause exists to explain a path the user never typed. Someone who typed
+    ~/.agents/skills twice typed it both times, so naming presets they never
+    asked for describes a feature they are not using.
+    """
+    from goodeye_cli.errors import Conflict
+    from goodeye_cli.sync import SyncConfig, add_target
+
+    config = SyncConfig(targets=[])
+    add_target(config, path="~/.agents/skills", preset=None, scope="owned", only=[])
+
+    with pytest.raises(Conflict) as exc_info:
+        add_target(config, path="~/.agents/skills", preset=None, scope="owned", only=[])
+
+    message = exc_info.value.message
+    assert "~/.agents/skills" in message
+    assert "preset" not in message.lower()
