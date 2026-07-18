@@ -63,6 +63,12 @@ SYNC_SCOPES: frozenset[str] = frozenset(("owned", "all", "selected"))
 # Friendly named target directories mapped to their portable home-relative
 # path. The values match the ``~`` storage form so a preset target and an
 # equivalent hand-typed path dedupe cleanly.
+#
+# There is deliberately no ``codex`` preset. Codex reads personal skills from
+# ``~/.agents/skills``, the same directory ``agents`` already points at, so a
+# separate entry would only add a second name for one location. It would also
+# invite pointing at ``~/.codex``, which holds Codex's ``config.toml`` and is
+# not a skills directory: syncing there would write files nothing ever reads.
 PRESETS: dict[str, str] = {
     "claude": "~/.claude/skills",
     "agents": "~/.agents/skills",

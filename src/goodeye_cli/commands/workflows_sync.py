@@ -152,7 +152,11 @@ def target_add(
     preset: str | None = typer.Option(
         None,
         "--preset",
-        help="Named target directory (claude, agents, or cursor). Use instead of a path.",
+        help=(
+            "Named target directory instead of a path: claude "
+            "(~/.claude/skills), agents (~/.agents/skills, which is also where "
+            "Codex reads personal skills), or cursor (~/.cursor/skills)."
+        ),
     ),
     scope: str | None = typer.Option(
         None,

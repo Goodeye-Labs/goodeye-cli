@@ -267,3 +267,122 @@ def test_login_banner_api_error_prints_nothing_and_login_succeeds(
     assert result.exit_code == 0, result.output
     assert "shared with you" not in result.output
     assert "Signed in" in result.output
+
+
+def test_login_banner_empty_account_shows_first_run_hint(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """A brand-new account gets a pointer instead of a bare "Signed in."."""
+    _env(monkeypatch, tmp_config_paths)
+
+    with (
+        respx.mock,
+        patch(
+            "goodeye_cli.commands.login.device_code_login",
+            return_value="good_live_EXAMPLE_banner6",
+        ),
+        patch("goodeye_cli.commands.login.save_client_config"),
+        patch("goodeye_cli.commands.login._is_tty", return_value=True),
+    ):
+        respx.get(f"{SERVER}/.well-known/goodeye-client-config").mock(
+            return_value=httpx.Response(200, json=_CLIENT_CONFIG_BODY)
+        )
+        # Nothing shared, nothing owned: both /v1/skills filters come back empty.
+        respx.get(f"{SERVER}/v1/skills").mock(
+            return_value=httpx.Response(200, json={"items": [], "next_cursor": None})
+        )
+        respx.get(f"{SERVER}/v1/invitations").mock(
+            return_value=httpx.Response(200, json={"items": [], "next_cursor": None})
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["login"])
+
+    assert result.exit_code == 0, result.output
+    flat = " ".join(result.output.split())
+    assert "goodeye skills publish" in flat
+    assert "goodeye design" in flat
+    # The shared/invitation banner must not appear for an empty account.
+    assert "shared with you" not in flat
+    assert "pending invitation" not in flat
+
+
+def test_login_banner_returning_user_with_own_skills_stays_silent(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """Owning skills means this is not a first run, so no hint and no banner.
+
+    Without the owned-skills gate this user would see the getting-started
+    pointer on every single login.
+    """
+    _env(monkeypatch, tmp_config_paths)
+
+    with (
+        respx.mock,
+        patch(
+            "goodeye_cli.commands.login.device_code_login",
+            return_value="good_live_EXAMPLE_banner7",
+        ),
+        patch("goodeye_cli.commands.login.save_client_config"),
+        patch("goodeye_cli.commands.login._is_tty", return_value=True),
+    ):
+        respx.get(f"{SERVER}/.well-known/goodeye-client-config").mock(
+            return_value=httpx.Response(200, json=_CLIENT_CONFIG_BODY)
+        )
+        respx.get(f"{SERVER}/v1/skills", params={"filter": "shared-with-me"}).mock(
+            return_value=httpx.Response(200, json={"items": [], "next_cursor": None})
+        )
+        respx.get(f"{SERVER}/v1/skills", params={"filter": "mine"}).mock(
+            return_value=httpx.Response(200, json={"items": _WORKFLOW_ITEMS, "next_cursor": None})
+        )
+        respx.get(f"{SERVER}/v1/invitations").mock(
+            return_value=httpx.Response(200, json={"items": [], "next_cursor": None})
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["login"])
+
+    assert result.exit_code == 0, result.output
+    flat = " ".join(result.output.split())
+    assert "goodeye skills publish" not in flat
+    assert "goodeye design" not in flat
+    assert "shared with you" not in flat
+
+
+def test_login_banner_skips_owned_lookup_when_something_is_shared(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """The extra owned-skills call is only made when it can change the output."""
+    _env(monkeypatch, tmp_config_paths)
+
+    with (
+        respx.mock,
+        patch(
+            "goodeye_cli.commands.login.device_code_login",
+            return_value="good_live_EXAMPLE_banner8",
+        ),
+        patch("goodeye_cli.commands.login.save_client_config"),
+        patch("goodeye_cli.commands.login._is_tty", return_value=True),
+    ):
+        respx.get(f"{SERVER}/.well-known/goodeye-client-config").mock(
+            return_value=httpx.Response(200, json=_CLIENT_CONFIG_BODY)
+        )
+        shared = respx.get(f"{SERVER}/v1/skills", params={"filter": "shared-with-me"}).mock(
+            return_value=httpx.Response(
+                200, json={"items": _WORKFLOW_ITEMS_SINGLE, "next_cursor": None}
+            )
+        )
+        mine = respx.get(f"{SERVER}/v1/skills", params={"filter": "mine"}).mock(
+            return_value=httpx.Response(200, json={"items": [], "next_cursor": None})
+        )
+        respx.get(f"{SERVER}/v1/invitations").mock(
+            return_value=httpx.Response(200, json={"items": [], "next_cursor": None})
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["login"])
+
+    assert result.exit_code == 0, result.output
+    assert shared.called
+    assert not mine.called, "owned-skills lookup should be skipped when a share exists"
+    assert "1 skill shared with you" in " ".join(result.output.split())
