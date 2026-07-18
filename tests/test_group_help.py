@@ -20,6 +20,7 @@ and the render check compares against the module's declared text.
 from __future__ import annotations
 
 import pytest
+import typer
 from typer.models import DefaultPlaceholder, TyperInfo
 from typer.testing import CliRunner
 
@@ -35,7 +36,26 @@ runner = CliRunner()
 
 
 def _groups() -> dict[str, TyperInfo]:
-    return {str(info.name): info for info in app.registered_groups}
+    """Every mounted group, keyed by the command path a user would type.
+
+    Walking only ``app.registered_groups`` stops at the top level, which leaves
+    nested groups such as `skills sync` unguarded. A shadowing ``help=`` there
+    hides just as much text from the user as one at the top level, so the walk
+    recurses. Groups mounted under more than one path (the deprecated aliases
+    remount the same sub-app) are checked once per path, since each path is
+    separately reachable.
+    """
+    found: dict[str, TyperInfo] = {}
+
+    def walk(parent: typer.Typer, prefix: tuple[str, ...]) -> None:
+        for info in parent.registered_groups:
+            path = (*prefix, str(info.name))
+            found[" ".join(path)] = info
+            if info.typer_instance is not None:
+                walk(info.typer_instance, path)
+
+    walk(app, ())
+    return found
 
 
 def _declared_help(info: TyperInfo) -> str:
@@ -46,7 +66,12 @@ def _declared_help(info: TyperInfo) -> str:
 
 def test_groups_are_discovered() -> None:
     """Guard the guard: these tests are worthless against an empty set."""
-    assert len(_groups()) >= 10
+    groups = _groups()
+    assert len(groups) >= 10
+    # Pin the recursion specifically. A walk that stopped at the top level
+    # would still satisfy the count above while silently dropping every nested
+    # group, which is the hole this set previously had.
+    assert "skills sync" in groups, "nested groups are no longer being walked"
 
 
 @pytest.mark.parametrize("name", sorted(_groups()))
@@ -69,7 +94,7 @@ def test_every_group_declares_help(name: str) -> None:
 def test_group_help_renders_what_the_module_declares(name: str) -> None:
     """Invoking the real CLI proves the user sees the module's text."""
     info = _groups()[name]
-    result = runner.invoke(app, [name, "--help"])
+    result = runner.invoke(app, [*name.split(), "--help"])
     assert result.exit_code == 0
 
     # The renderer re-wraps to terminal width, so compare on the first
