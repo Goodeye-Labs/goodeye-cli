@@ -28,9 +28,10 @@ from goodeye_cli.app import app
 runner = CliRunner()
 
 # Groups mounted a second time under another name to keep an old spelling
-# working. The alias supplies its own help so the deprecation is visible, which
-# is the one legitimate reason to pass help= to add_typer.
-ALIAS_GROUPS = {"workflows", "subscription"}
+# working (`workflows`, `subscription`) are held to the same rule as the rest.
+# Neither needs an override to announce its deprecation: `workflows` prints a
+# stderr notice from its callback, and `subscription` declares the deprecation
+# in its own module-level help. So they are not carved out below.
 
 
 def _groups() -> dict[str, TyperInfo]:
@@ -52,8 +53,6 @@ def test_groups_are_discovered() -> None:
 def test_add_typer_does_not_shadow_module_help(name: str) -> None:
     """``app.py`` must not pass ``help=`` when the module declares its own."""
     info = _groups()[name]
-    if name in ALIAS_GROUPS:
-        pytest.skip("alias group: its own help marks the deprecation")
     assert isinstance(info.help, DefaultPlaceholder), (
         f"add_typer(name={name!r}) passes help=, which silently shadows the "
         f"module's own Typer(help=...). Delete it and let the module own the "
@@ -70,9 +69,6 @@ def test_every_group_declares_help(name: str) -> None:
 def test_group_help_renders_what_the_module_declares(name: str) -> None:
     """Invoking the real CLI proves the user sees the module's text."""
     info = _groups()[name]
-    if name in ALIAS_GROUPS:
-        pytest.skip("alias group: renders the alias help by design")
-
     result = runner.invoke(app, [name, "--help"])
     assert result.exit_code == 0
 
