@@ -57,8 +57,9 @@ def _print_post_login_banner(server: str, api_key: str, console: Console) -> Non
         if owned is not None and not owned.items:
             console.print(
                 "[yellow]Next:[/yellow] host a skill you already have with "
-                "`goodeye skills publish ~/.claude/skills/<name>`, or author "
-                "one with `goodeye design`."
+                "`goodeye skills publish <path>` (look in ~/.claude/skills, "
+                "~/.agents/skills, or ~/.cursor/skills), or author one with "
+                "`goodeye design`."
             )
         return
     wf_count = f"{n}+" if wf_more else str(n)

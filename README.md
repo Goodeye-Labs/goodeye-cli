@@ -61,6 +61,8 @@ goodeye skills sync
 
 Run the same commands on your other machines and they all read the current version. `goodeye skills sync auto on` keeps that up to date on its own; it only pulls new and updated skills, never overwrites local edits, and reports a conflict rather than clobbering it.
 
+The skill you just published came from a directory that is now a target, so a copy of it is already there. Goodeye did not write that copy, so the first pull reports it as modified and leaves it alone. The hosted version is what you published, so adopt it once with `goodeye skills sync pull --force <slug>`; from then on it is tracked like everything else.
+
 ### Share it
 
 ```sh
