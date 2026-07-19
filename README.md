@@ -41,7 +41,7 @@ The `goodeye` command is then on your `PATH`. Run `goodeye update` to upgrade to
 A skill file on disk is a directory holding a `SKILL.md` plus optional siblings, which is exactly what `publish` expects. Importing one is a single command.
 
 ```sh
-goodeye login                                     # or: goodeye register --email you@example.com
+goodeye login                                     # or: goodeye register (same browser sign-in)
 goodeye skills publish ~/.claude/skills/my-skill  # also ~/.agents/skills, ~/.cursor/skills, or any path
 goodeye skills list
 ```
@@ -106,7 +106,7 @@ goodeye verifiers run 89dcc843-d056-44d9-ae34-ebcff4903885 \
   --version 1 --media-url '<public-https-chart-url>' --anonymous
 ```
 
-Fork it into a skill of your own with `goodeye templates fork @randalolson/high-signal-chart-workflow`. To publish one of your own, claim a handle first with `goodeye me claim-handle your-handle`, then run `goodeye templates publish my-skill`.
+Fork it into a skill of your own with `goodeye templates fork @randalolson/high-signal-chart-workflow`. That is the one step here that needs an account, since the fork lands in your own registry. To publish one of your own, claim a handle first with `goodeye me claim-handle your-handle`, then run `goodeye templates publish my-skill`.
 
 ## What the CLI can do
 
