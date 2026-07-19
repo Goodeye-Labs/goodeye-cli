@@ -22,6 +22,9 @@ def _is_tty() -> bool:
 def _print_post_login_banner(server: str, api_key: str, console: Console) -> None:
     """Print a one-line nudge about shared skills and pending invitations.
 
+    Falls back to a first-run pointer when the account is empty, so a brand-new
+    user is not left at a bare "Signed in." with nothing to do next.
+
     Silent and non-blocking: any error, non-TTY session, or offline state
     results in nothing printed. Login always succeeds regardless.
     """
@@ -31,6 +34,14 @@ def _print_post_login_banner(server: str, api_key: str, console: Console) -> Non
         with GoodeyeClient(server, api_key=api_key, timeout=0.9) as client:
             workflows = client.list_workflows(filter_="shared-with-me")
             invitations = client.list_invitations(filter_="received", state="pending")
+            # Only needed to tell a brand-new account from a returning user who
+            # simply has nothing shared with them, so it is fetched last and
+            # skipped entirely once either count above is nonzero.
+            owned = (
+                None
+                if (workflows.items or invitations.items)
+                else client.list_workflows(filter_="mine")
+            )
         n = len(workflows.items)
         m = len(invitations.items)
         # A present next_cursor means the first page did not exhaust the
@@ -40,6 +51,16 @@ def _print_post_login_banner(server: str, api_key: str, console: Console) -> Non
     except Exception:
         return
     if n == 0 and m == 0:
+        # Nothing shared and nothing pending. Point a genuinely empty account at
+        # the two ways to get a first skill in; stay quiet for a returning user
+        # who already owns skills, so this never becomes login noise.
+        if owned is not None and not owned.items:
+            console.print(
+                "[yellow]Next:[/yellow] host a skill you already have with "
+                "`goodeye skills publish <path>` (look in ~/.claude/skills, "
+                "~/.agents/skills, or ~/.cursor/skills), or author one with "
+                "`goodeye design`."
+            )
         return
     wf_count = f"{n}+" if wf_more else str(n)
     inv_count = f"{m}+" if inv_more else str(m)

@@ -22,7 +22,25 @@ from goodeye_cli.errors import AuthRequired, ValidationFailed
 from goodeye_cli.output import echo_json, items_envelope, resolve_output_mode
 
 app = typer.Typer(
-    help="Sync hosted skills with local skill directories.",
+    help=(
+        "Mirror hosted skills into local skill directories, so every machine "
+        "and agent reads the current version. Point a target at the directory "
+        "your tool loads skills from (`--preset claude`, `agents`, `codex`, or "
+        "`cursor`, or any path), and one edit to a hosted skill reaches all of "
+        "them on the next pull."
+        "\n\n"
+        "Run with no subcommand, this brings the local mirror up to date (the "
+        "same work as `goodeye skills sync pull`) and then prints where each "
+        "skill stands afterward (the same view as `goodeye skills sync "
+        "status`). Pass a subcommand (`target`, `pull`, `status`, `push`, "
+        "`auto`) to run just that step. The `--force` and `--yes` options "
+        "apply to the pull the bare command runs; they are ignored when a "
+        "subcommand is invoked. Requires authentication."
+    ),
+    short_help=(
+        "Mirror hosted skills into local skill directories, so every machine "
+        "and agent reads the current version."
+    ),
     invoke_without_command=True,
 )
 
@@ -67,14 +85,11 @@ def _sync_root(
         False, "--table", help="Print the status summary as a table."
     ),
 ) -> None:
-    """Pull every configured target, then show the resulting status.
+    """Run the bare `sync` command: pull every target, then report status.
 
-    Run with no subcommand, this brings the local mirror up to date (the same
-    work as `goodeye skills sync pull`) and then prints where each skill
-    stands afterward (the same view as `goodeye skills sync status`). Pass a
-    subcommand (`target`, `pull`, `status`, `push`) to run just that step. The
-    `--force` and `--yes` options apply to the pull the bare command runs; they
-    are ignored when a subcommand is invoked. Requires authentication.
+    Internal note, not user-facing help: `Typer(help=...)` on the group above
+    takes precedence over this docstring, so the text users read lives there.
+    Keep this short and keep the user-facing wording in one place.
     """
     if ctx.invoked_subcommand is not None:
         return
@@ -137,7 +152,11 @@ def target_add(
     preset: str | None = typer.Option(
         None,
         "--preset",
-        help="Named target directory (claude, agents, or cursor). Use instead of a path.",
+        help=(
+            "Named target directory instead of a path: claude "
+            "(~/.claude/skills), agents or codex (both ~/.agents/skills, the "
+            "shared location Codex reads), or cursor (~/.cursor/skills)."
+        ),
     ),
     scope: str | None = typer.Option(
         None,

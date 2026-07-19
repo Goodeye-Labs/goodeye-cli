@@ -34,7 +34,15 @@ from goodeye_cli.output import (
 from goodeye_cli.wire import DesignChecks, TemplateDetail
 
 app = typer.Typer(
-    help="Browse the public template catalog; publish or fork templates.",
+    help=(
+        "Browse the public template catalog; publish or fork templates. A "
+        "template is the public, immutable, versioned form of a skill, "
+        "addressable as @handle/slug. Publishing one is an explicit step: your "
+        "skills stay private until you run `publish`. Browsing, fetching, and "
+        "running public templates need no account; `fork` copies one into a "
+        "private skill you own."
+    ),
+    short_help="Browse the public template catalog; publish or fork templates.",
     no_args_is_help=True,
 )
 

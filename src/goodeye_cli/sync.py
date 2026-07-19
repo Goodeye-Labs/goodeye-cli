@@ -63,11 +63,42 @@ SYNC_SCOPES: frozenset[str] = frozenset(("owned", "all", "selected"))
 # Friendly named target directories mapped to their portable home-relative
 # path. The values match the ``~`` storage form so a preset target and an
 # equivalent hand-typed path dedupe cleanly.
+#
+# ``codex`` and ``agents`` intentionally share one directory. Codex reads
+# personal skills from ``~/.agents/skills``, the cross-tool location, so the
+# duplicate name exists for discoverability: someone running Codex reaches for
+# ``--preset codex``, and finding nothing would leave them assuming Codex is
+# unsupported. Because they resolve to the same path, adding both raises a
+# conflict; ``describe_preset_aliases`` gives that error the wording it needs to
+# make sense.
+#
+# Note ``~/.codex`` itself is Codex's ``config.toml`` location, not a skills
+# directory. Codex does still resolve ``~/.codex/skills``, but only as a
+# deprecated backward-compatibility path; ``~/.agents/skills`` is the current
+# one. Do not point a preset at either ``~/.codex`` form: the first is read by
+# nothing, and the second is a path Codex has already moved off.
 PRESETS: dict[str, str] = {
     "claude": "~/.claude/skills",
     "agents": "~/.agents/skills",
+    "codex": "~/.agents/skills",
     "cursor": "~/.cursor/skills",
 }
+
+
+def describe_preset_aliases(stored_path: str) -> str:
+    """Return a clause naming the presets that share ``stored_path``.
+
+    Empty string when fewer than two presets point at it. Used to explain a
+    conflict that is otherwise baffling: a user who adds ``--preset codex``
+    after ``--preset agents`` sees an error about a path they never typed.
+    """
+    names = sorted(name for name, value in PRESETS.items() if value == stored_path)
+    if len(names) < 2:
+        return ""
+    joined = (
+        " and ".join((", ".join(names[:-1]), names[-1])) if len(names) > 2 else " and ".join(names)
+    )
+    return f" Presets {joined} are the same directory."
 
 
 class _SyncBase(BaseModel):
@@ -231,11 +262,17 @@ def add_target(
         )
     stored_path = normalize_target_path(raw_path)
 
+    # The alias clause only earns its place when the caller named a preset, since
+    # that is the case where the conflict reports a path the user never typed.
+    # Someone who typed the directory outright is already looking at their own
+    # words, and a clause about presets they never used just adds noise.
+    alias_note = describe_preset_aliases(stored_path) if preset is not None else ""
+
     for existing in config.targets:
         if expand_target_path(existing.path) == expanded:
             raise Conflict(
                 slug="conflict",
-                message=f"A sync target already points at {stored_path}.",
+                message=f"A sync target already points at {stored_path}.{alias_note}",
                 hint="Add skills to it with --only, or remove it first with "
                 "`goodeye skills sync target remove`.",
             )

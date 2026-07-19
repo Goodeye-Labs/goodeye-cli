@@ -36,14 +36,15 @@ app = typer.Typer(
     help=(
         "Manage image generators: owner-scoped, versioned image-generation "
         "configurations backed by a supported provider. Generators can be "
-        "deployed once and referenced by UUID from skills. The **`generate`** "
+        "deployed once and referenced by UUID from skills. The `generate` "
         "command also accepts platform-managed quality tiers "
-        "(e.g. ``system:image-standard``) and direct model identifiers for "
+        "(e.g. `system:image-standard`) and direct model identifiers for "
         "authenticated one-off calls.\n\n"
         "Most commands require auth (`goodeye login` or GOODEYE_API_KEY). "
         "`generate` supports an `--anonymous` flag for public preview runs.\n\n"
         "Lifecycle: deploy -> show/list -> generate (many times) -> revoke."
     ),
+    short_help="Deploy and run image generators.",
     no_args_is_help=True,
 )
 
