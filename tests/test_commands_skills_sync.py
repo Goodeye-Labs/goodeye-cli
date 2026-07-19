@@ -1687,7 +1687,8 @@ def test_codex_preset_resolves_to_the_shared_agents_directory() -> None:
 
     assert resolve_preset("codex") == "~/.agents/skills"
     assert resolve_preset("codex") == resolve_preset("agents")
-    # Guard the real hazard: ~/.codex is Codex's config location, not skills.
+    # Guard the real hazard: ~/.codex is Codex's config location, and the
+    # ~/.codex/skills it still reads is a deprecated compatibility path.
     assert not any(value.startswith("~/.codex") for value in PRESETS.values())
 
 

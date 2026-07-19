@@ -72,8 +72,11 @@ SYNC_SCOPES: frozenset[str] = frozenset(("owned", "all", "selected"))
 # conflict; ``describe_preset_aliases`` gives that error the wording it needs to
 # make sense.
 #
-# Note ``~/.codex`` is Codex's ``config.toml`` location and is NOT a skills
-# directory. Do not point a preset there: sync would write files nothing reads.
+# Note ``~/.codex`` itself is Codex's ``config.toml`` location, not a skills
+# directory. Codex does still resolve ``~/.codex/skills``, but only as a
+# deprecated backward-compatibility path; ``~/.agents/skills`` is the current
+# one. Do not point a preset at either ``~/.codex`` form: the first is read by
+# nothing, and the second is a path Codex has already moved off.
 PRESETS: dict[str, str] = {
     "claude": "~/.claude/skills",
     "agents": "~/.agents/skills",
