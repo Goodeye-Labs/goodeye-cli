@@ -216,12 +216,15 @@ def target_add(
 
         stored_path = sync.normalize_target_path(raw_path)  # type: ignore[arg-type]
         if mode == "json":
+            # Carry automatic_sync_enabled here too, so `target add --json`
+            # reports it whether it created a target or appended to one.
             echo_json(
                 {
                     "path": existing_target.path,
                     "scope": existing_target.scope,
                     "added": added,
                     "already_present": already_present,
+                    "automatic_sync_enabled": sync.automatic_sync_enabled(config),
                 }
             )
             return
@@ -257,11 +260,31 @@ def target_add(
     )
     sync.save_sync_config(config, paths)
 
+    # Having a target is what turns automatic sync on, so there is nothing to
+    # set here: the new target changes the answer on its own. This only reports
+    # it, because a user configuring their first target has no other way to know
+    # the mirror will now keep itself current.
+    automatic = sync.automatic_sync_enabled(config)
+
     if mode == "json":
-        echo_json(target)
+        # Additive: the target's own fields stay at the top level so existing
+        # readers of this payload keep working.
+        echo_json({**target.model_dump(), "automatic_sync_enabled": automatic})
         return
     console = Console()
     console.print(f"[green]Added[/green] sync target {target.path} (scope={target.scope})")
+    if automatic:
+        console.print(
+            f"Automatic sync is on (every {config.auto.interval_seconds} seconds). "
+            "Turn it off with `goodeye skills sync auto off`."
+        )
+    else:
+        # Reached only when the user turned it off themselves. Say so, so a
+        # target that never refreshes is not a mystery later.
+        console.print(
+            "[yellow]Automatic sync is off[/yellow], so this target updates only when "
+            "you run `goodeye skills sync`. Turn it on with `goodeye skills sync auto on`."
+        )
 
 
 @target_app.command("list")
@@ -361,17 +384,22 @@ def target_remove(
 
 
 auto_app = typer.Typer(
-    help="Turn automatic background pulls on or off, or show the current setting.",
+    help="Turn automatic sync on or off, or show the current setting.",
     invoke_without_command=True,
 )
 app.add_typer(auto_app, name="auto")
 
 
 def _auto_status_payload(config: sync.SyncConfig, state: sync.SyncState) -> dict[str, object]:
-    """Build the reportable view of the automatic-pull setting and last run."""
+    """Build the reportable view of the automatic-sync setting and last run.
+
+    ``enabled`` reports the resolved answer, not the stored preference, so the
+    payload keeps its existing always-boolean shape and says what will actually
+    happen.
+    """
     last = state.last_auto_pull_at
     return {
-        "enabled": config.auto.enabled,
+        "enabled": sync.automatic_sync_enabled(config),
         "interval_seconds": config.auto.interval_seconds,
         "last_auto_pull_at": last.isoformat() if last is not None else None,
     }
@@ -383,13 +411,14 @@ def _auto_root(
     json_output: bool = typer.Option(False, "--json", help="Print the setting as JSON."),
     table_output: bool = typer.Option(False, "--table", help="Print the setting as a table."),
 ) -> None:
-    """Show whether automatic background pulls are on, with the interval and last run.
+    """Show whether automatic sync is on, with the interval and last run.
 
-    Automatic pull is off by default. When on, the CLI refreshes the safe set of
-    your configured targets (new and behind-registry skills) in the
-    background after a command finishes, no more often than the interval. It
-    never overwrites local edits, never deletes a local copy, and never blocks
-    your command. Run with `on` or `off` to change the setting.
+    Automatic sync is on once you have a sync target, unless you set it yourself
+    with `on` or `off`, which always wins and is never overridden by adding more
+    targets. When on, the CLI refreshes the safe set of your configured targets
+    (new and behind-registry skills) in the background after a command finishes,
+    no more often than the interval. It never overwrites local edits, never
+    deletes a local copy, and never blocks your command.
     """
     if ctx.invoked_subcommand is not None:
         return
@@ -405,12 +434,13 @@ def _auto_root(
         return
 
     console = Console()
-    status_word = "on" if config.auto.enabled else "off"
-    color = "green" if config.auto.enabled else "yellow"
-    console.print(f"Automatic pull is [{color}]{status_word}[/{color}].")
+    automatic = sync.automatic_sync_enabled(config)
+    status_word = "on" if automatic else "off"
+    color = "green" if automatic else "yellow"
+    console.print(f"Automatic sync is [{color}]{status_word}[/{color}].")
     console.print(f"Interval: {config.auto.interval_seconds} seconds.")
     last = payload["last_auto_pull_at"]
-    console.print(f"Last automatic pull: {last if last is not None else 'never'}.")
+    console.print(f"Last automatic sync: {last if last is not None else 'never'}.")
 
 
 @auto_app.command("on")
@@ -418,16 +448,17 @@ def auto_on(
     interval: int | None = typer.Option(
         None,
         "--interval",
-        help="Minimum seconds between automatic pulls (defaults to the current setting).",
+        help="Minimum seconds between automatic syncs (defaults to the current setting).",
     ),
     json_output: bool = typer.Option(False, "--json", help="Print the setting as JSON."),
     table_output: bool = typer.Option(False, "--table", help="Print the setting as a table."),
 ) -> None:
-    """Turn automatic background pulls on, optionally setting the interval.
+    """Turn automatic sync on, optionally setting the interval.
 
-    Once on, the CLI keeps the safe set of your configured targets fresh in the
-    background. Local edits are always preserved and nothing is ever deleted
-    automatically. Requires at least one configured sync target to do anything.
+    Only needed to set an interval, or to turn it back on after `off`: it is
+    already on once you have a sync target. Local edits are always preserved and
+    nothing is ever deleted automatically. Requires at least one configured sync
+    target to do anything.
     """
     if interval is not None and interval <= 0:
         raise ValidationFailed(
@@ -438,6 +469,8 @@ def auto_on(
     paths = get_config_paths()
     config = sync.load_sync_config(paths)
     config.auto.enabled = True
+    # Stating a preference is what makes it stick across later target adds.
+    config.auto.explicitly_set = True
     if interval is not None:
         config.auto.interval_seconds = interval
     sync.save_sync_config(config, paths)
@@ -449,7 +482,7 @@ def auto_on(
 
     console = Console()
     console.print(
-        f"[green]Automatic pull is on[/green] (interval: {config.auto.interval_seconds} seconds)."
+        f"[green]Automatic sync is on[/green] (interval: {config.auto.interval_seconds} seconds)."
     )
     if not config.targets:
         console.print(
@@ -463,14 +496,18 @@ def auto_off(
     json_output: bool = typer.Option(False, "--json", help="Print the setting as JSON."),
     table_output: bool = typer.Option(False, "--table", help="Print the setting as a table."),
 ) -> None:
-    """Turn automatic background pulls off.
+    """Turn automatic sync off.
 
     The interval setting is kept so turning it back on resumes the same cadence.
+    This is remembered: adding sync targets later will not turn it back on.
     """
     mode = resolve_output_mode(json_output=json_output, table_output=table_output)
     paths = get_config_paths()
     config = sync.load_sync_config(paths)
     config.auto.enabled = False
+    # Stating a preference is what makes it stick: adding a target later will
+    # not turn automatic sync back on.
+    config.auto.explicitly_set = True
     sync.save_sync_config(config, paths)
     state = sync.load_sync_state(paths)
 
@@ -479,7 +516,7 @@ def auto_off(
         return
 
     console = Console()
-    console.print("[yellow]Automatic pull is off.[/yellow]")
+    console.print("[yellow]Automatic sync is off.[/yellow]")
 
 
 _SKIPPED_ACTIONS = frozenset({"skipped-modified", "skipped-conflict"})

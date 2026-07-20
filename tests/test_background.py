@@ -75,14 +75,30 @@ def test_gate_skips_when_unauthenticated() -> None:
 
 
 def test_gate_skips_when_auto_disabled() -> None:
+    """An explicit `auto off` stops the tail even with targets configured."""
     now = datetime(2026, 6, 14, 12, 0, tzinfo=UTC)
-    config = sync.SyncConfig(targets=[sync.SyncTarget(path="~/skills", scope="owned")])
-    assert config.auto.enabled is False
+    config = sync.SyncConfig(
+        targets=[sync.SyncTarget(path="~/skills", scope="owned")],
+        auto=sync.AutoConfig(enabled=False, explicitly_set=True),
+    )
     assert (
         background_sync.should_run_auto_pull(
             ["logout"], {}, config, sync.SyncState(), authenticated=True, now=now
         )
         is False
+    )
+
+
+def test_gate_runs_for_a_configured_target_with_no_stated_preference() -> None:
+    """Having a target is enough; the user never has to opt in separately."""
+    now = datetime(2026, 6, 14, 12, 0, tzinfo=UTC)
+    config = sync.SyncConfig(targets=[sync.SyncTarget(path="~/skills", scope="owned")])
+    assert config.auto.explicitly_set is False
+    assert (
+        background_sync.should_run_auto_pull(
+            ["logout"], {}, config, sync.SyncState(), authenticated=True, now=now
+        )
+        is True
     )
 
 
