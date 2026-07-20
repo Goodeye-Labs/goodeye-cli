@@ -75,9 +75,12 @@ def test_target_add_by_path_defaults_to_compact_json(
     runner = CliRunner()
     result = runner.invoke(app, ["skills", "sync", "target", "add", "~/work/skills"])
     assert result.exit_code == 0, result.output
-    # CliRunner stdout is not a TTY, so the default mode is compact JSON.
+    # CliRunner stdout is not a TTY, so the default mode is compact JSON. The
+    # target's own fields stay at the top level; automatic_sync_enabled is
+    # additive alongside them.
     assert result.output == (
-        '{"path":"~/work/skills","scope":"owned","selected":[],"link":false}\n'
+        '{"path":"~/work/skills","scope":"owned","selected":[],"link":false,'
+        '"automatic_sync_enabled":true}\n'
     )
     # The target landed in sync.json on disk.
     with tmp_config_paths.sync_file.open(encoding="utf-8") as fh:
@@ -1637,6 +1640,158 @@ def test_auto_off_disables_but_keeps_interval(tmp_config_paths: ConfigPaths, mon
     assert _load_auto(tmp_config_paths).interval_seconds == 900
 
 
+def test_target_add_turns_automatic_sync_on(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
+    """Configuring a target is the statement of intent to keep it current."""
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    result = runner.invoke(app, ["skills", "sync", "target", "add", "--preset", "claude"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["automatic_sync_enabled"] is True
+    # Reported, not stored: the target itself is what changed the answer, so no
+    # preference was written and there is nothing to overwrite later.
+    auto = _load_auto(tmp_config_paths)
+    assert auto.explicitly_set is False
+    assert auto.enabled is False
+
+
+def test_target_add_keeps_the_configured_interval(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """Enabling on add must not stomp an interval the user chose."""
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    runner.invoke(app, ["skills", "sync", "auto", "on", "--interval", "900"])
+    result = runner.invoke(app, ["skills", "sync", "target", "add", "~/work/skills"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["automatic_sync_enabled"] is True
+    assert _load_auto(tmp_config_paths).interval_seconds == 900
+
+
+def test_target_add_respects_an_explicit_auto_off(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """A deliberate `auto off` survives every later target add.
+
+    Having a target is a default, not an override: it turns automatic sync on
+    for someone who never expressed a preference, and leaves a stated one alone.
+    """
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    runner.invoke(app, ["skills", "sync", "target", "add", "~/first"])
+    runner.invoke(app, ["skills", "sync", "auto", "off"])
+
+    result = runner.invoke(app, ["skills", "sync", "target", "add", "~/second"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["automatic_sync_enabled"] is False
+
+    # Still off after a third add, so this is a durable preference and not a
+    # one-time reprieve.
+    runner.invoke(app, ["skills", "sync", "target", "add", "~/third"])
+    status = runner.invoke(app, ["skills", "sync", "auto"])
+    assert json.loads(status.output)["enabled"] is False
+
+
+def test_target_add_says_so_when_automatic_sync_is_off(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """A target that will not refresh on its own should not be a mystery."""
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    runner.invoke(app, ["skills", "sync", "auto", "off"])
+    result = runner.invoke(app, ["skills", "sync", "target", "add", "~/work/skills", "--table"])
+    assert result.exit_code == 0, result.output
+    # Rich wraps to the console width, so compare on normalized whitespace
+    # rather than letting the assertion depend on where the line breaks.
+    flattened = " ".join(result.output.split())
+    assert "Automatic sync is off" in flattened
+    assert "goodeye skills sync auto on" in flattened
+
+
+def test_target_add_announces_automatic_sync_when_it_enables_it(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    result = runner.invoke(app, ["skills", "sync", "target", "add", "~/work/skills", "--table"])
+    assert result.exit_code == 0, result.output
+    flattened = " ".join(result.output.split())
+    assert "Automatic sync is on" in flattened
+    assert "goodeye skills sync auto off" in flattened
+
+
+def test_auto_on_then_off_is_remembered_as_explicit(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """Both commands state a preference, so both must be recorded as one."""
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    assert _load_auto(tmp_config_paths).explicitly_set is False
+    runner.invoke(app, ["skills", "sync", "auto", "on"])
+    assert _load_auto(tmp_config_paths).explicitly_set is True
+    runner.invoke(app, ["skills", "sync", "auto", "off"])
+    assert _load_auto(tmp_config_paths).explicitly_set is True
+
+
+def test_automatic_sync_enabled_resolves_preference_against_default() -> None:
+    """The whole policy, read directly, without going through a command."""
+    from goodeye_cli import sync
+
+    target = [sync.SyncTarget(path="~/skills")]
+
+    # No preference: having a target is what decides.
+    assert sync.automatic_sync_enabled(sync.SyncConfig()) is False
+    assert sync.automatic_sync_enabled(sync.SyncConfig(targets=target)) is True
+
+    # A stated preference wins in both directions, targets or not.
+    off = sync.AutoConfig(enabled=False, explicitly_set=True)
+    on = sync.AutoConfig(enabled=True, explicitly_set=True)
+    assert sync.automatic_sync_enabled(sync.SyncConfig(targets=target, auto=off)) is False
+    assert sync.automatic_sync_enabled(sync.SyncConfig(auto=on)) is True
+
+
+def test_automatic_sync_enabled_treats_a_pre_upgrade_config_as_unset() -> None:
+    """A config written before the preference field existed carries no choice.
+
+    Automatic sync shipped opt-in, so `enabled: false` in such a config almost
+    always means untouched rather than declined. Those users get the default
+    instead of being stranded opted out.
+    """
+    from goodeye_cli import sync
+
+    legacy = sync.SyncConfig.model_validate(
+        {
+            "version": 1,
+            "targets": [{"path": "~/.claude/skills", "scope": "owned"}],
+            "auto": {"enabled": False, "interval_seconds": 3600},
+        }
+    )
+    assert legacy.auto.explicitly_set is False
+    assert sync.automatic_sync_enabled(legacy) is True
+
+
+def test_target_add_only_append_leaves_automatic_sync_alone(
+    tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """Appending to an existing target's allowlist is not adding a target.
+
+    The enable-on-add rule is scoped to the branch that creates a target, so the
+    append path leaves the setting exactly as the user left it.
+    """
+    _redirect_config(monkeypatch, tmp_config_paths)
+    runner = CliRunner()
+    runner.invoke(
+        app,
+        ["skills", "sync", "target", "add", "~/skills", "--scope", "selected", "--only", "alpha"],
+    )
+    runner.invoke(app, ["skills", "sync", "auto", "off"])
+    result = runner.invoke(
+        app,
+        ["skills", "sync", "target", "add", "~/skills", "--scope", "selected", "--only", "beta"],
+    )
+    assert result.exit_code == 0, result.output
+    assert _load_auto(tmp_config_paths).enabled is False
+
+
 def test_auto_status_reports_current_setting(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     _redirect_config(monkeypatch, tmp_config_paths)
     runner = CliRunner()
@@ -1658,7 +1813,7 @@ def test_auto_status_human_mode_on_tty(tmp_config_paths: ConfigPaths, monkeypatc
     # --table forces the human-readable view regardless of TTY detection.
     result = runner.invoke(app, ["skills", "sync", "auto", "--table"])
     assert result.exit_code == 0, result.output
-    assert "Automatic pull is" in result.output
+    assert "Automatic sync is" in result.output
     assert "on" in result.output
     assert "never" in result.output
 

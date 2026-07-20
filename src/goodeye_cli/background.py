@@ -53,14 +53,14 @@ def should_run_auto_pull(
       ``--version``, the bare/``help``/``update`` forms, or an explicit
       ``skills sync ...`` command),
     - credentials exist (the caller is authenticated),
-    - automatic pull is enabled and at least one target is configured,
+    - automatic sync resolves to on and at least one target is configured,
     - the throttle interval has elapsed since the last automatic pull.
     """
     if update_checks.should_suppress_auto_pull(args, env):
         return False
     if not authenticated:
         return False
-    if not config.auto.enabled:
+    if not sync.automatic_sync_enabled(config):
         return False
     if not config.targets:
         return False

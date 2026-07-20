@@ -124,16 +124,40 @@ class SyncTarget(_SyncBase):
 
 
 class AutoConfig(_SyncBase):
-    """Opt-in automatic-pull settings for the local mirror.
+    """Automatic-pull settings for the local mirror.
 
-    ``enabled`` is off by default, so a config written by an older CLI (which
-    has no ``auto`` block at all) loads with automatic pulls disabled and sees
-    no behavior change until the user opts in. ``interval_seconds`` is the
-    minimum gap between automatic pulls: a floor on how often the background
-    tail refreshes the mirror, not a freshness guarantee at any instant.
+    ``enabled`` is off in the field default, so a config written by an older CLI
+    (which has no ``auto`` block at all) loads with automatic pulls disabled.
+    Adding a sync target turns it on, so in practice a configured mirror is an
+    automatic one: the field default only governs a config with no targets to
+    refresh.
+
+    ``explicitly_set`` records that the user stated a preference by running
+    ``auto on`` or ``auto off``, and ``enabled`` is meaningful only then.
+    ``enabled`` alone cannot carry the distinction, because ``False`` is both
+    "never touched" and "deliberately turned off", and the default must respect
+    the second without being blocked by the first. It is deliberately not
+    inferred from the last-run stamp: the automatic tail is suppressed for
+    ``skills sync ...`` invocations, so an ``auto on`` immediately followed by
+    ``auto off`` never stamps and would be misread as untouched.
+
+    The pair is two plain bools rather than a nullable ``enabled`` tri-state on
+    purpose. ``load_sync_config`` validates straight into this model, so a
+    ``null`` written here would raise on any older CLI that still types the
+    field as ``bool``, breaking every command after a downgrade. An unknown
+    extra key is ignored instead (see ``_SyncBase``), so an older CLI reads a
+    config written by this one and simply falls back to ``enabled``.
+
+    Nothing writes these except ``auto on`` and ``auto off``. Read the resolved
+    answer through ``automatic_sync_enabled`` rather than either field.
+
+    ``interval_seconds`` is the minimum gap between automatic pulls: a floor on
+    how often the background tail refreshes the mirror, not a freshness
+    guarantee at any instant.
     """
 
     enabled: bool = False
+    explicitly_set: bool = False
     interval_seconds: int = 3600
 
 
@@ -511,6 +535,31 @@ class SyncState(_SyncBase):
     # the first automatic pull runs; absent in indexes written by an older CLI,
     # which load it as ``None``.
     last_auto_pull_at: datetime | None = None
+
+
+def automatic_sync_enabled(config: SyncConfig) -> bool:
+    """Return whether automatic sync is on, resolving preference against default.
+
+    The single answer to "is automatic sync on?", used by the background gate,
+    the ``sync auto`` display, and ``sync target add``. Keeping it in one place
+    is what stops those three from drifting apart and reporting different
+    answers for the same config.
+
+    A stated preference always wins. Absent one, having a sync target is taken
+    as wanting it kept current, so configuring a target is all it takes: the
+    user never has to find a second command. Nothing is written to reach that
+    conclusion, so adding a target cannot quietly overwrite a preference, and a
+    user who has said no stays at no however many targets they add later.
+
+    A config written before ``explicitly_set`` existed carries no preference and
+    so follows the default. That is deliberate: automatic sync shipped as
+    opt-in, meaning nearly every such config reads ``enabled: false`` only
+    because it was never touched, and those users should get the default rather
+    than be stranded opted out.
+    """
+    if config.auto.explicitly_set:
+        return config.auto.enabled
+    return bool(config.targets)
 
 
 def auto_is_due(state: SyncState, config: SyncConfig, now: datetime) -> bool:
