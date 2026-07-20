@@ -1,7 +1,9 @@
 """Best-effort automatic-pull tail for the local skill mirror.
 
-When the user opts in (`skills sync auto on`), the CLI keeps the safe set of
-its configured sync targets fresh in the background. The work runs as a tail
+Once the user has a sync target, the CLI keeps the safe set of its configured
+targets fresh in the background; `skills sync auto on` and `off` state a
+preference that always wins, and ``sync.automatic_sync_enabled`` resolves the
+two into the single answer this gate reads. The work runs as a tail
 after the user's command finishes (registered through ``atexit`` in ``app.py``),
 so it never delays or alters the exit status of the command the user actually
 ran. Everything here is best-effort: the gate is a handful of local file reads,
