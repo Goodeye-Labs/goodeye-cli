@@ -216,12 +216,15 @@ def target_add(
 
         stored_path = sync.normalize_target_path(raw_path)  # type: ignore[arg-type]
         if mode == "json":
+            # Carry automatic_sync_enabled here too, so `target add --json`
+            # reports it whether it created a target or appended to one.
             echo_json(
                 {
                     "path": existing_target.path,
                     "scope": existing_target.scope,
                     "added": added,
                     "already_present": already_present,
+                    "automatic_sync_enabled": sync.automatic_sync_enabled(config),
                 }
             )
             return
