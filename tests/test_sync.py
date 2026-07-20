@@ -1906,6 +1906,57 @@ def test_push_omits_version_for_unpinned_binding(
 
 
 @respx.mock
+def test_push_omits_verifiers_for_shared_skill(
+    tmp_path: Path, tmp_config_paths: ConfigPaths
+) -> None:
+    """A push of someone else's skill leaves the verifier refs out of the payload.
+
+    Rewiring the refs is reserved to the skill's owner, so an edit grantee has
+    nothing to say about them: the server carries the stored refs forward when
+    the field is absent. Sending them back would be asking to set a field this
+    caller may not set, which older servers refuse outright.
+    """
+    _me_route()
+    target_dir = tmp_path / "skills"
+    config = SyncConfig(targets=[SyncTarget(path=str(target_dir), scope="all")])
+    body = _push_body(slug="shared-runbook")
+    _write_skill(target_dir, "shared-runbook", body)
+    state = SyncState(
+        entries=[
+            _modified_entry(
+                target_dir,
+                id_="skl_shared",
+                slug="shared-runbook",
+                role="edit",
+                verifiers=[SyncVerifierBinding(name="tone", verifier_id="vrf_1", version=3)],
+            )
+        ]
+    )
+    save_route = respx.post(f"{SERVER}/v1/skills").mock(
+        return_value=_save_response(
+            workflow_id="skl_shared",
+            name="shared-runbook",
+            verifiers=[{"name": "tone", "verifier_id": "vrf_1", "version": 3}],
+        )
+    )
+
+    with GoodeyeClient(SERVER, api_key="good_live_EXAMPLE") as client:
+        result = push(client, config, state, slugs=[], target_path=None, paths=tmp_config_paths)
+
+    sent = json.loads(save_route.calls[0].request.content)
+    assert "verifiers" not in sent
+    assert sent["skill_id"] == "skl_shared"
+    assert [(i.slug, i.action) for i in result.items] == [("shared-runbook", "pushed")]
+
+    # The bindings the server reports back are still recorded locally, so the
+    # index keeps tracking refs the caller cannot edit.
+    reloaded = load_sync_state(tmp_config_paths)
+    assert reloaded.entries[0].verifier_bindings == [
+        SyncVerifierBinding(name="tone", verifier_id="vrf_1", version=3)
+    ]
+
+
+@respx.mock
 def test_push_edited_metadata_reaches_request(
     tmp_path: Path, tmp_config_paths: ConfigPaths
 ) -> None:

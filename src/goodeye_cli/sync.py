@@ -1907,13 +1907,21 @@ class PushResult(_SyncBase):
     items: list[PushItem] = Field(default_factory=list)
 
 
-def _verifier_payload(entry: SyncEntry) -> list[dict[str, Any]]:
+def _verifier_payload(entry: SyncEntry) -> list[dict[str, Any]] | None:
     """Build the save-payload verifier bindings from an index entry.
 
     Mirrors the publish path's binding shape (``name`` + ``verifier_id``) and
     additionally preserves a pinned ``version`` when the recorded binding has
     one, so a push never drops a version pin the workflow carried.
+
+    Returns ``None`` for a skill someone else owns, which leaves the field out
+    of the payload entirely. Only an owner may rewire the refs, and the
+    registry carries the stored ones forward when the field is absent, so a
+    grantee has nothing to gain by sending them and older servers reject the
+    attempt outright.
     """
+    if entry.effective_role != "owner":
+        return None
     payload: list[dict[str, Any]] = []
     for binding in entry.verifier_bindings:
         row: dict[str, Any] = {"name": binding.name, "verifier_id": binding.verifier_id}
