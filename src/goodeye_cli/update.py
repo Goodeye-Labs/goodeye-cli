@@ -365,6 +365,68 @@ def _default_run_cmd(argv: Sequence[str]) -> CompletedProcess[str]:
     )
 
 
+def _default_capture_cmd(argv: Sequence[str]) -> CompletedProcess[str]:
+    return subprocess.run(
+        list(argv),
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+
+def read_installed_version(
+    *,
+    python_executable: str | None = None,
+    run_cmd: Callable[[list[str]], CompletedProcess[str]] | None = None,
+) -> str | None:
+    """Return the goodeye version actually installed in the current environment.
+
+    Read in a fresh subprocess rather than from this process's own metadata:
+    the running interpreter loaded its package metadata at startup and will not
+    see a version that an in-flight upgrade just wrote to disk. Returns ``None``
+    when the version cannot be determined (probe failed or produced no output),
+    so callers never mistake an unverifiable outcome for success.
+    """
+    py = python_executable or sys.executable
+    runner = run_cmd or _default_capture_cmd
+    argv = [py, "-c", f"import importlib.metadata as m; print(m.version({_DIST_NAME!r}))"]
+    try:
+        proc = runner(argv)
+    except OSError:
+        return None
+    if proc.returncode != 0:
+        return None
+    installed = (proc.stdout or "").strip()
+    return installed or None
+
+
+def blocked_upgrade_hint(method: InstallMethod, *, python_executable: str | None = None) -> str:
+    """Remediation text for when an upgrade ran but the version did not change.
+
+    A newer release exists, yet the installed version is unchanged, so the
+    upgrade was refused. For ``uv_tool`` the cause is an exact version pin; the
+    other methods get a generic force-reinstall.
+    """
+    if method == "uv_tool":
+        return (
+            "This install is version-pinned, so uv left it unchanged.\n"
+            "To upgrade, reinstall at the latest version:\n"
+            "  uv tool install --force goodeye@latest"
+        )
+    if method == "pipx":
+        return (
+            "The installed version did not change.\n"
+            "To force the upgrade, reinstall:\n"
+            "  pipx install --force goodeye"
+        )
+    py = python_executable or sys.executable
+    return (
+        "The installed version did not change.\n"
+        "To force the upgrade, reinstall:\n"
+        f"  {py} -m pip install --upgrade --force-reinstall goodeye"
+    )
+
+
 def _invoke_update_runner(
     runner: Callable[[list[str]], CompletedProcess[str]],
     argv: list[str],
