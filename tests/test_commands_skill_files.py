@@ -4,9 +4,10 @@ These commands change named paths in a hosted skill and keep the rest, unlike
 `goodeye skills publish <dir>`, which replaces the whole tree. The suite covers
 the content sources, how text and binary pick their wire field, how the
 expected version token is resolved, how the server's errors surface, and the
-local sync-index refresh that keeps a later `sync push` from reporting drift
-that is not real. That refresh is version-aware: it moves the mirrors recorded
-at the version the change was written against onto the version it produced, and
+local mirror refresh that keeps a later `sync push` from reporting drift that is
+not real or sending the old copy back and reverting the change. That refresh is
+version-aware: it moves the mirrors recorded at the version the change was
+written against onto the version it produced, directory and index together, and
 leaves mirrors at any other version for a pull.
 """
 
@@ -15,6 +16,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json as _json
+import os
 from pathlib import Path
 
 import httpx
@@ -796,6 +798,155 @@ def test_put_file_from_a_mirrored_directory_leaves_no_push_drift(
     )
     assert result.exit_code == 0, result.output
 
+    assert not tree_push_drifted(load_sync_state(tmp_config_paths).entries[0], target, [])
+
+
+@respx.mock
+def test_put_file_from_outside_the_mirror_updates_the_local_copy(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """Content from anywhere else still lands in the mirrored directory.
+
+    The push builds its snapshot from that directory, so a copy left holding the
+    old bytes is sent straight back and reverts the change, and the pull that
+    would repair it sees a sync point already at the new version and refuses the
+    directory as locally modified instead.
+    """
+    _setup_creds(monkeypatch, tmp_config_paths)
+    target_dir = tmp_path / "skills"
+    slug_dir = target_dir / "my-skill"
+    slug_dir.mkdir(parents=True)
+    (slug_dir / "SKILL.md").write_text(_SKILL_MD, encoding="utf-8")
+    (slug_dir / "notes.md").write_bytes(b"stale\n")
+    _write_index(
+        tmp_config_paths,
+        slug="my-skill",
+        target_path=str(target_dir),
+        files=[
+            FileState(
+                path="notes.md", sha256=_sha(b"stale\n"), executable=True, purpose="reference"
+            )
+        ],
+    )
+    source = tmp_path / "elsewhere" / "notes.md"
+    source.parent.mkdir()
+    source.write_bytes(b"fresh notes\n")
+    _detail_route()
+    _patch_route()
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app, ["skills", "put-file", "my-skill", "notes.md", "--from-file", str(source)]
+    )
+    assert result.exit_code == 0, result.output
+
+    assert (slug_dir / "notes.md").read_bytes() == b"fresh notes\n"
+    # The mark the manifest already held is applied to the copy, so the file on
+    # disk carries what the registry holds rather than the source file's mode.
+    assert os.stat(slug_dir / "notes.md").st_mode & 0o100
+    target = SyncTarget(path=str(target_dir), scope="owned")
+    assert not tree_push_drifted(load_sync_state(tmp_config_paths).entries[0], target, [])
+
+
+@respx.mock
+def test_put_file_on_the_runbook_from_outside_the_mirror_rewrites_it(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """The runbook is the body, and its mirrored copy has to move with it too."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    target_dir = tmp_path / "skills"
+    slug_dir = target_dir / "my-skill"
+    slug_dir.mkdir(parents=True)
+    (slug_dir / "SKILL.md").write_text(_SKILL_MD, encoding="utf-8")
+    _write_index(tmp_config_paths, slug="my-skill", target_path=str(target_dir), files=[])
+    new_body = _SKILL_MD + "\nOne more step.\n"
+    source = tmp_path / "elsewhere" / "SKILL.md"
+    source.parent.mkdir()
+    source.write_text(new_body, encoding="utf-8")
+    _detail_route()
+    _patch_route(changed=["SKILL.md"])
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app, ["skills", "put-file", "my-skill", "SKILL.md", "--from-file", str(source)]
+    )
+    assert result.exit_code == 0, result.output
+
+    target = SyncTarget(path=str(target_dir), scope="owned")
+    assert read_local_body(target, "my-skill") == new_body
+    assert not tree_push_drifted(load_sync_state(tmp_config_paths).entries[0], target, [])
+
+
+@respx.mock
+def test_put_file_creates_no_local_copy_where_none_was_mirrored(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """A target whose directory was never materialized is left for a pull.
+
+    Writing a lone file into a directory that holds no skill would leave a
+    fragment with no runbook beside it, which the pull path already handles by
+    fetching the whole thing.
+    """
+    _setup_creds(monkeypatch, tmp_config_paths)
+    target_dir = tmp_path / "skills"
+    _write_index(
+        tmp_config_paths,
+        slug="my-skill",
+        target_path=str(target_dir),
+        files=[FileState(path="notes.md", sha256=_sha(b"stale\n"))],
+    )
+    source = tmp_path / "notes.md"
+    source.write_bytes(b"fresh notes\n")
+    _detail_route()
+    _patch_route()
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app, ["skills", "put-file", "my-skill", "notes.md", "--from-file", str(source)]
+    )
+    assert result.exit_code == 0, result.output
+
+    assert not target_dir.exists()
+    entry = load_sync_state(tmp_config_paths).entries[0]
+    assert entry.version_token == "tok-2"
+
+
+@respx.mock
+def test_rm_file_removes_the_local_copy(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """A removal has to reach the directory, or the next push puts the file back.
+
+    A file left on disk after it is gone from the registry is part of the
+    snapshot the push builds, so it is uploaded again and the removal is undone.
+    """
+    _setup_creds(monkeypatch, tmp_config_paths)
+    target_dir = tmp_path / "skills"
+    slug_dir = target_dir / "my-skill"
+    (slug_dir / "references").mkdir(parents=True)
+    (slug_dir / "SKILL.md").write_text(_SKILL_MD, encoding="utf-8")
+    (slug_dir / "references" / "rubric.md").write_bytes(b"rubric\n")
+    (slug_dir / "other.md").write_bytes(b"other\n")
+    _write_index(
+        tmp_config_paths,
+        slug="my-skill",
+        target_path=str(target_dir),
+        files=[
+            FileState(path="other.md", sha256=_sha(b"other\n")),
+            FileState(path="references/rubric.md", sha256=_sha(b"rubric\n")),
+        ],
+    )
+    _detail_route()
+    _patch_route(changed=[], deleted=["references/rubric.md"])
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["skills", "rm-file", "my-skill", "references/rubric.md"])
+    assert result.exit_code == 0, result.output
+
+    assert not (slug_dir / "references" / "rubric.md").exists()
+    # Only the named path goes: every other file in the directory stays.
+    assert (slug_dir / "other.md").read_bytes() == b"other\n"
+    target = SyncTarget(path=str(target_dir), scope="owned")
     assert not tree_push_drifted(load_sync_state(tmp_config_paths).entries[0], target, [])
 
 

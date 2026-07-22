@@ -664,23 +664,24 @@ def _refresh_sync_index(
     executable: bool | None = None,
     purpose: str | None = None,
 ) -> None:
-    """Bring the local sync index in line with the change that just landed.
+    """Bring the local mirror in line with the change that just landed.
 
-    A tracked mirror records a hash per file plus the version it is synced at.
-    Leaving either stale after a single-path change makes the next
-    `goodeye skills sync push` report a change that is not real, so the command
-    would introduce false drift on its own.
+    A tracked mirror is a directory on disk plus an index recording a hash per
+    file and the version it is synced at. Leaving any of that stale after a
+    single-path change makes the next `goodeye skills sync push` report a change
+    that is not real, or send the old copy back and revert the one just made, so
+    the command would work against itself.
 
     Only mirrors recorded at the version the change was written against are
-    updated, and each one is moved onto the new version along with the file it
-    records. A mirror sitting at any other version has a different base and is
-    left for a pull. When no mirror matches there is nothing to record and the
-    index is left untouched.
+    updated, and each one moves its directory, its recorded file state, and its
+    sync point together onto the new version. A mirror sitting at any other
+    version has a different base and is left for a pull. When no mirror matches
+    there is nothing to update and the index is left untouched.
 
     ``content`` is the bytes just written, or None for a removal.
 
-    Best-effort: the write already succeeded, so an unreadable or unwritable
-    index is reported and moves on rather than failing the command.
+    Best-effort: the write already succeeded, so an unreadable index or an
+    unwritable mirror is reported and moves on rather than failing the command.
     """
     from goodeye_cli import sync
 
@@ -709,7 +710,7 @@ def _refresh_sync_index(
     except Exception:
         _log.debug("could not refresh the local sync index", exc_info=True)
         Console(stderr=True).print(
-            "[yellow]Note[/yellow] the local sync index could not be updated; "
+            "[yellow]Note[/yellow] the local copy could not be updated; "
             "run `goodeye skills sync pull` to resync."
         )
 

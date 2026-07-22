@@ -737,6 +737,64 @@ def _recorded_body_sha256(raw: bytes) -> str:
     return body_sha256(text.replace("\r\n", "\n").replace("\r", "\n"))
 
 
+def _mirrored_path(entry: SyncEntry, path: str) -> Path | None:
+    """Return where ``entry`` keeps ``path`` on disk, or None when there is no copy.
+
+    None when the skill has no directory under the target (nothing was ever
+    mirrored, so there is nothing to keep in step and a pull will materialize
+    it) or when the path fails the containment check every other writer here
+    applies.
+    """
+    slug_dir = expand_target_path(entry.target_path) / entry.slug
+    if not slug_dir.is_dir() or not _is_safe_sibling_path(slug_dir, path):
+        return None
+    return slug_dir / path
+
+
+def _write_mirrored_file(
+    entry: SyncEntry, path: str, content: bytes, *, executable: bool | None
+) -> None:
+    """Put the bytes just written to the registry into this entry's local copy.
+
+    The recorded manifest and the directory it describes have to move together.
+    Advancing one without the other is what turns a change into its own undoing:
+    a push builds its snapshot from the directory, so a stale copy on disk is
+    sent straight back and reverts the change, while a pull sees a sync point
+    already at the new version and reports the mirror up to date or refuses it
+    as locally modified. Neither reconciles, and the file the caller just wrote
+    is lost.
+
+    Written as raw bytes so the local copy is what the registry was given.
+    ``executable`` is applied only when it is known, so a file whose mark was
+    neither passed nor recorded keeps whatever mode it already had.
+    """
+    local = _mirrored_path(entry, path)
+    if local is None:
+        return
+    local.parent.mkdir(parents=True, exist_ok=True)
+    local.write_bytes(content)
+    if executable is not None:
+        mode = os.stat(local).st_mode
+        os.chmod(local, (mode | 0o111) if executable else (mode & ~0o111))
+
+
+def _remove_mirrored_file(entry: SyncEntry, path: str) -> None:
+    """Take a removed path out of this entry's local copy.
+
+    The counterpart to ``_write_mirrored_file``: a file left on disk after it is
+    gone from the registry is re-sent by the next push, which restores it and
+    undoes the removal, while a pull reports the mirror up to date and leaves it
+    sitting there.
+    """
+    local = _mirrored_path(entry, path)
+    if local is None or not local.exists():
+        return
+    try:
+        local.unlink()
+    except OSError as exc:
+        _log.warning("could not remove %s from the local copy: %s", local, exc)
+
+
 def _move_to_new_version(entry: SyncEntry, result: WorkflowFilePatchResult) -> None:
     """Move an entry's recorded sync point onto the version the change created.
 
@@ -766,13 +824,17 @@ def record_file_written(
 ) -> bool:
     """Record a single-path write on every mirror that sat on the version it changed.
 
-    Called after the write lands on the registry so the index matches what the
-    server now holds. Without it the recorded manifest keeps the previous hash
-    and the next push reports drift for a file that is already current.
+    Called after the write lands on the registry so the local copy matches what
+    the server now holds. Without it the recorded manifest keeps the previous
+    hash and the next push reports drift for a file that is already current.
 
-    Each entry is updated whole or not at all: content and sync point move
-    together, so an entry never claims content from one version while claiming
-    to be synced at another.
+    Each entry is updated whole or not at all: the recorded manifest, the file
+    on disk, and the sync point all move together, so an entry never claims
+    content from one version while claiming to be synced at another, and never
+    describes content its directory does not hold. The bytes go to disk even
+    when they came from somewhere outside the mirror, which is the case where
+    leaving the directory behind would let the next push send the old copy back
+    and revert the write.
 
     ``SKILL.md`` is the body rather than a sibling, so it updates
     ``body_sha256`` and never enters ``files``; recording it as a file would
@@ -786,8 +848,8 @@ def record_file_written(
     ``False`` / ``None``. Inventing them would be worse than leaving the path
     unrecorded: a full push reads the recorded flags back and would send the
     invented ones, clearing an executable bit or a role label the server holds.
-    Left out, the path reads as ordinary drift and the next full push sends it
-    with the values observed on disk.
+    Left out but still written to disk, the path reads as ordinary drift and the
+    next full push sends it with the values observed there.
 
     Returns whether any entry changed, so the caller can skip persisting an
     index that no target tracks this skill in at this version.
@@ -801,10 +863,19 @@ def record_file_written(
         skill_id=result.workflow_id,
         version_token=expected_version_token,
     ):
+        mirror_executable: bool | None = None
         if is_body:
             entry.body_sha256 = new_hash
         else:
             recorded = next((f for f in entry.files if f.path == path), None)
+            # The mark to put on the local copy: what the caller passed, else
+            # what is already recorded for the path. A path the manifest never
+            # held has neither, so the copy keeps the mode it has.
+            mirror_executable = (
+                executable
+                if executable is not None
+                else (recorded.executable if recorded is not None else None)
+            )
             if recorded is not None:
                 entry.files[entry.files.index(recorded)] = FileState(
                     path=path,
@@ -812,6 +883,7 @@ def record_file_written(
                     executable=executable if executable is not None else recorded.executable,
                     purpose=purpose if purpose is not None else recorded.purpose,
                 )
+        _write_mirrored_file(entry, path, content, executable=mirror_executable)
         _move_to_new_version(entry, result)
         touched = True
     return touched
@@ -826,11 +898,12 @@ def record_file_removed(
 ) -> bool:
     """Drop ``path`` from every mirror that sat on the version the removal changed.
 
-    The mirror image of ``record_file_written``: a path left in the manifest
+    The counterpart to ``record_file_written``: a path left in the manifest
     after it is gone from the registry reads as a local deletion on the next
-    push. Entries recorded at another version are left for a pull, and an
-    updated entry's sync point moves onto the version the removal created.
-    Returns whether any entry changed.
+    push, and a copy left on disk is sent back by that push and undoes the
+    removal, so both go. Entries recorded at another version are left for a
+    pull, and an updated entry's sync point moves onto the version the removal
+    created. Returns whether any entry changed.
     """
     touched = False
     for entry in entries_at_version(
@@ -840,6 +913,7 @@ def record_file_removed(
         version_token=expected_version_token,
     ):
         entry.files = [f for f in entry.files if f.path != path]
+        _remove_mirrored_file(entry, path)
         _move_to_new_version(entry, result)
         touched = True
     return touched
