@@ -547,6 +547,145 @@ def test_put_file_leaves_a_manifest_new_path_out_of_the_record(
 
 
 @respx.mock
+def test_put_file_records_a_new_path_the_caller_labelled(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """A label set on a path the manifest never held has to survive the next push.
+
+    The push sends a full snapshot and reads labels only out of the index, so a
+    path missing from it goes out with no label and clears server-side the very
+    one just set. The mark and the label the caller passed are what the registry
+    now holds, so recording them invents nothing.
+    """
+    _setup_creds(monkeypatch, tmp_config_paths)
+    target_dir = tmp_path / "skills"
+    slug_dir = target_dir / "my-skill"
+    slug_dir.mkdir(parents=True)
+    (slug_dir / "SKILL.md").write_text(_SKILL_MD, encoding="utf-8")
+    _write_index(
+        tmp_config_paths,
+        slug="my-skill",
+        target_path=str(target_dir),
+        files=[],
+    )
+    source = tmp_path / "elsewhere" / "run.sh"
+    source.parent.mkdir()
+    source.write_bytes(b"#!/bin/sh\necho hi\n")
+    _detail_route()
+    _patch_route(changed=["scripts/run.sh"])
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "skills",
+            "put-file",
+            "my-skill",
+            "scripts/run.sh",
+            "--from-file",
+            str(source),
+            "--executable",
+            "--purpose",
+            "entrypoint",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+
+    entry = load_sync_state(tmp_config_paths).entries[0]
+    recorded = {f.path: f for f in entry.files}
+    assert recorded["scripts/run.sh"].sha256 == _sha(b"#!/bin/sh\necho hi\n")
+    assert recorded["scripts/run.sh"].executable is True
+    assert recorded["scripts/run.sh"].purpose == "entrypoint"
+
+    # No drift for a file that is already current, and the next full push
+    # re-sends the label rather than dropping it.
+    target = SyncTarget(path=str(target_dir), scope="owned")
+    assert not tree_push_drifted(entry, target, [])
+    payload, _ = build_files_payload(slug_dir, entry.files, [])
+    sent = {e["path"]: e for e in payload}
+    assert sent["scripts/run.sh"]["purpose"] == "entrypoint"
+    assert sent["scripts/run.sh"]["executable"] is True
+
+
+@respx.mock
+def test_put_file_records_a_new_path_labelled_without_a_mark(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """With only a label passed, the mark is read off the copy just written.
+
+    That is the value the next full push would read there anyway, so recording
+    it leaves what gets sent unchanged while the label stops being dropped.
+    """
+    _setup_creds(monkeypatch, tmp_config_paths)
+    target_dir = tmp_path / "skills"
+    slug_dir = target_dir / "my-skill"
+    slug_dir.mkdir(parents=True)
+    (slug_dir / "SKILL.md").write_text(_SKILL_MD, encoding="utf-8")
+    _write_index(tmp_config_paths, slug="my-skill", target_path=str(target_dir), files=[])
+    source = tmp_path / "elsewhere" / "rubric.md"
+    source.parent.mkdir()
+    source.write_bytes(b"score it\n")
+    _detail_route()
+    _patch_route(changed=["references/rubric.md"])
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "skills",
+            "put-file",
+            "my-skill",
+            "references/rubric.md",
+            "--from-file",
+            str(source),
+            "--purpose",
+            "rubric",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+
+    entry = load_sync_state(tmp_config_paths).entries[0]
+    recorded = {f.path: f for f in entry.files}
+    assert recorded["references/rubric.md"].purpose == "rubric"
+    assert recorded["references/rubric.md"].executable is False
+    target = SyncTarget(path=str(target_dir), scope="owned")
+    assert not tree_push_drifted(entry, target, [])
+
+
+@respx.mock
+def test_put_file_leaves_a_mirrored_new_path_unlabelled_out_of_the_record(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """A new path with neither a mark nor a label stays out even when mirrored.
+
+    Nothing is known about it beyond its bytes, so a recorded ``False`` /
+    ``None`` would be a guess that the next full push turns into a clear of
+    whatever the registry holds. Left out, it reads as ordinary drift that the
+    push resolves from disk.
+    """
+    _setup_creds(monkeypatch, tmp_config_paths)
+    target_dir = tmp_path / "skills"
+    slug_dir = target_dir / "my-skill"
+    slug_dir.mkdir(parents=True)
+    (slug_dir / "SKILL.md").write_text(_SKILL_MD, encoding="utf-8")
+    _write_index(tmp_config_paths, slug="my-skill", target_path=str(target_dir), files=[])
+    source = tmp_path / "elsewhere" / "notes.md"
+    source.parent.mkdir()
+    source.write_bytes(b"fresh notes\n")
+    _detail_route()
+    _patch_route()
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app, ["skills", "put-file", "my-skill", "notes.md", "--from-file", str(source)]
+    )
+    assert result.exit_code == 0, result.output
+
+    entry = load_sync_state(tmp_config_paths).entries[0]
+    assert [f.path for f in entry.files] == []
+
+
+@respx.mock
 def test_put_file_leaves_the_index_alone_when_no_target_tracks_the_slug(
     tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:

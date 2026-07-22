@@ -751,6 +751,20 @@ def _mirrored_path(entry: SyncEntry, path: str) -> Path | None:
     return slug_dir / path
 
 
+def _mirrored_executable(entry: SyncEntry, path: str) -> bool | None:
+    """Report the execute mark on this entry's local copy, or None when it has none.
+
+    Reads the mark rather than assuming one, for the path whose mark the caller
+    did not pass. It is the value the next full push would read off disk for
+    that file anyway, so recording it leaves what gets sent unchanged. None
+    means the entry keeps no copy of this path, so there is nothing to observe.
+    """
+    local = _mirrored_path(entry, path)
+    if local is None or not local.exists():
+        return None
+    return bool(os.stat(local).st_mode & 0o100)
+
+
 def _write_mirrored_file(
     entry: SyncEntry, path: str, content: bytes, *, executable: bool | None
 ) -> None:
@@ -842,14 +856,20 @@ def record_file_written(
 
     ``executable`` and ``purpose`` are carry-forward sentinels, mirroring the
     write itself: ``None`` keeps the value already recorded for that path, and
-    an explicit value replaces it. A path absent from the recorded manifest has
-    no value to carry forward and the response carries no metadata to consult,
-    so it is left out of the manifest rather than recorded with an invented
-    ``False`` / ``None``. Inventing them would be worse than leaving the path
-    unrecorded: a full push reads the recorded flags back and would send the
-    invented ones, clearing an executable bit or a role label the server holds.
-    Left out but still written to disk, the path reads as ordinary drift and the
-    next full push sends it with the values observed there.
+    an explicit value replaces it.
+
+    A path absent from the recorded manifest is recorded only when the caller
+    passed a mark or a label for it. Then there is nothing to invent: the value
+    passed is the value the registry now holds, and the other one is read off
+    the local copy the write just made rather than guessed. Without the record
+    the path is a stranger to the manifest, so the next full push both reports
+    drift for a file already current and sends it with no label at all, which
+    clears server-side the very label the caller just set (the push is a full
+    snapshot and reads labels only out of the index). A path the caller named
+    with neither a mark nor a label stays out: nothing is known about it beyond
+    its bytes, and a recorded ``False`` / ``None`` would be a guess that a full
+    push turns into a clear. Left out but still written to disk, that path
+    reads as ordinary drift the next full push resolves from disk.
 
     Returns whether any entry changed, so the caller can skip persisting an
     index that no target tracks this skill in at this version.
@@ -864,6 +884,7 @@ def record_file_written(
         version_token=expected_version_token,
     ):
         mirror_executable: bool | None = None
+        recorded: FileState | None = None
         if is_body:
             entry.body_sha256 = new_hash
         else:
@@ -884,6 +905,24 @@ def record_file_written(
                     purpose=purpose if purpose is not None else recorded.purpose,
                 )
         _write_mirrored_file(entry, path, content, executable=mirror_executable)
+        if not is_body and recorded is None and (executable is not None or purpose is not None):
+            # The mark comes off the copy just written when the caller did not
+            # pass one, which is the same value the next full push would read
+            # there, so recording it changes nothing about what gets sent. A
+            # path with no local copy is not recorded at all: the manifest must
+            # never describe content its directory does not hold, or the next
+            # push reads the record as a local deletion and removes the file
+            # from the registry.
+            local_mark = _mirrored_executable(entry, path)
+            if local_mark is not None:
+                entry.files.append(
+                    FileState(
+                        path=path,
+                        sha256=new_hash,
+                        executable=executable if executable is not None else local_mark,
+                        purpose=purpose,
+                    )
+                )
         _move_to_new_version(entry, result)
         touched = True
     return touched
