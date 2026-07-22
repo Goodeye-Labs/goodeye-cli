@@ -244,6 +244,24 @@ class WorkflowSaveResult(_WireBase):
     next_step: str | None = None
 
 
+class WorkflowFilePatchResult(_WireBase):
+    """Result of changing named files in a skill (PATCH /v1/skills/{id}/files).
+
+    ``changed`` and ``deleted`` are sorted path lists; ``carried_forward`` is a
+    count of the files the change left untouched, not a list of them.
+    """
+
+    workflow_id: str
+    version: int
+    version_token: str
+    name: str
+    slug: str = ""
+    changed: list[str] = Field(default_factory=list)
+    deleted: list[str] = Field(default_factory=list)
+    carried_forward: int = 0
+    authoring_notes: list[str] = Field(default_factory=list)
+
+
 class SaveWorkflowInput(_WireBase):
     """Flat POST /v1/skills body the CLI constructs (documentation + parity)."""
 

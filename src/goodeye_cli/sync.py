@@ -38,7 +38,7 @@ from goodeye_cli.prompts import confirm_destructive
 
 if TYPE_CHECKING:
     from goodeye_cli.client import GoodeyeClient
-    from goodeye_cli.wire import WorkflowSummary
+    from goodeye_cli.wire import WorkflowFilePatchResult, WorkflowSummary
 
 SyncScope = Literal["owned", "all", "selected"]
 
@@ -695,6 +695,267 @@ def upsert_entry(state: SyncState, entry: SyncEntry) -> None:
             state.entries[index] = entry
             return
     state.entries.append(entry)
+
+
+def entries_at_version(
+    state: SyncState, *, slug: str, skill_id: str, version_token: str
+) -> list[SyncEntry]:
+    """Return the tracked entries for one skill that sit at ``version_token``.
+
+    The same skill may be mirrored into more than one target, and those copies
+    can be recorded at different versions. A single-path change is made against
+    exactly one version, so only the copies recorded at that version describe
+    the content it started from and can be moved onto the version it produced.
+    A copy recorded at any other version is a different base: it is left
+    untouched for a pull to reconcile.
+
+    Matching on either identifier keeps a mirror recognized when one of them has
+    moved on: an entry written before a rename still carries the old slug under
+    the same id, and an entry from an older index may carry the slug the caller
+    typed while its id is what the registry returned.
+    """
+    return [
+        entry
+        for entry in state.entries
+        if (entry.slug == slug or entry.skill_id == skill_id)
+        and entry.version_token == version_token
+    ]
+
+
+def _recorded_body_sha256(raw: bytes) -> str:
+    """Return the body hash for raw ``SKILL.md`` bytes as a later read recomputes it.
+
+    Every reader of ``body_sha256`` compares against a hash taken over the body
+    read back from disk as text, and reading text translates ``\\r\\n`` and
+    ``\\r`` to ``\\n``. Hashing the bytes exactly as sent would leave a runbook
+    with CRLF line endings reporting drift on every status and push, forever,
+    with no local edit behind it: precisely the false drift the single-path
+    commands exist to remove. Applying the same translation here puts the
+    recorded hash on the same footing as the one it will be compared against.
+    """
+    text = raw.decode("utf-8")
+    return body_sha256(text.replace("\r\n", "\n").replace("\r", "\n"))
+
+
+def _mirrored_path(entry: SyncEntry, path: str) -> Path | None:
+    """Return where ``entry`` keeps ``path`` on disk, or None when there is no copy.
+
+    None when the skill has no directory under the target (nothing was ever
+    mirrored, so there is nothing to keep in step and a pull will materialize
+    it) or when the path fails the containment check every other writer here
+    applies.
+    """
+    slug_dir = expand_target_path(entry.target_path) / entry.slug
+    if not slug_dir.is_dir() or not _is_safe_sibling_path(slug_dir, path):
+        return None
+    return slug_dir / path
+
+
+def _mirrored_executable(entry: SyncEntry, path: str) -> bool | None:
+    """Report the execute mark on this entry's local copy, or None when it has none.
+
+    Reads the mark rather than assuming one, for the path whose mark the caller
+    did not pass. It is the value the next full push would read off disk for
+    that file anyway, so recording it leaves what gets sent unchanged. None
+    means the entry keeps no copy of this path, so there is nothing to observe.
+    """
+    local = _mirrored_path(entry, path)
+    if local is None or not local.exists():
+        return None
+    return bool(os.stat(local).st_mode & 0o100)
+
+
+def _write_mirrored_file(
+    entry: SyncEntry, path: str, content: bytes, *, executable: bool | None
+) -> None:
+    """Put the bytes just written to the registry into this entry's local copy.
+
+    The recorded manifest and the directory it describes have to move together.
+    Advancing one without the other is what turns a change into its own undoing:
+    a push builds its snapshot from the directory, so a stale copy on disk is
+    sent straight back and reverts the change, while a pull sees a sync point
+    already at the new version and reports the mirror up to date or refuses it
+    as locally modified. Neither reconciles, and the file the caller just wrote
+    is lost.
+
+    Written as raw bytes so the local copy is what the registry was given.
+    ``executable`` is applied only when it is known, so a file whose mark was
+    neither passed nor recorded keeps whatever mode it already had.
+    """
+    local = _mirrored_path(entry, path)
+    if local is None:
+        return
+    local.parent.mkdir(parents=True, exist_ok=True)
+    local.write_bytes(content)
+    if executable is not None:
+        mode = os.stat(local).st_mode
+        os.chmod(local, (mode | 0o111) if executable else (mode & ~0o111))
+
+
+def _remove_mirrored_file(entry: SyncEntry, path: str) -> None:
+    """Take a removed path out of this entry's local copy.
+
+    The counterpart to ``_write_mirrored_file``: a file left on disk after it is
+    gone from the registry is re-sent by the next push, which restores it and
+    undoes the removal, while a pull reports the mirror up to date and leaves it
+    sitting there.
+    """
+    local = _mirrored_path(entry, path)
+    if local is None or not local.exists():
+        return
+    try:
+        local.unlink()
+    except OSError as exc:
+        _log.warning("could not remove %s from the local copy: %s", local, exc)
+
+
+def _move_to_new_version(entry: SyncEntry, result: WorkflowFilePatchResult) -> None:
+    """Move an entry's recorded sync point onto the version the change created.
+
+    The registry moved and this entry's record of the content moved with it, so
+    the sync point has to move too. Leaving the superseded token behind makes
+    the next push send a token the server has already replaced: the server
+    rejects it, the push reports a conflict pointing at a pull, and that pull
+    refuses too whenever there is also a local edit (a local edit plus a moved
+    server is the skipped-conflict case). The only way out is then a forced
+    pull, which discards the local edit. No second writer appears anywhere in
+    that story: the conflict would be manufactured entirely by an index
+    describing a version that no longer exists.
+    """
+    entry.synced_version = result.version
+    entry.version_token = result.version_token
+
+
+def record_file_written(
+    state: SyncState,
+    result: WorkflowFilePatchResult,
+    *,
+    expected_version_token: str,
+    path: str,
+    content: bytes,
+    executable: bool | None = None,
+    purpose: str | None = None,
+) -> bool:
+    """Record a single-path write on every mirror that sat on the version it changed.
+
+    Called after the write lands on the registry so the local copy matches what
+    the server now holds. Without it the recorded manifest keeps the previous
+    hash and the next push reports drift for a file that is already current.
+
+    Each entry is updated whole or not at all: the recorded manifest, the file
+    on disk, and the sync point all move together, so an entry never claims
+    content from one version while claiming to be synced at another, and never
+    describes content its directory does not hold. The bytes go to disk even
+    when they came from somewhere outside the mirror, which is the case where
+    leaving the directory behind would let the next push send the old copy back
+    and revert the write.
+
+    ``SKILL.md`` is the body rather than a sibling, so it updates
+    ``body_sha256`` and never enters ``files``; recording it as a file would
+    manufacture permanent drift, since the on-disk walk never yields it.
+
+    ``executable`` and ``purpose`` are carry-forward sentinels, mirroring the
+    write itself: ``None`` keeps the value already recorded for that path, and
+    an explicit value replaces it.
+
+    A path absent from the recorded manifest is recorded only when the caller
+    passed a mark or a label for it. Then there is nothing to invent: the value
+    passed is the value the registry now holds, and the other one is read off
+    the local copy the write just made rather than guessed. Without the record
+    the path is a stranger to the manifest, so the next full push both reports
+    drift for a file already current and sends it with no label at all, which
+    clears server-side the very label the caller just set (the push is a full
+    snapshot and reads labels only out of the index). A path the caller named
+    with neither a mark nor a label stays out: nothing is known about it beyond
+    its bytes, and a recorded ``False`` / ``None`` would be a guess that a full
+    push turns into a clear. Left out but still written to disk, that path
+    reads as ordinary drift the next full push resolves from disk.
+
+    Returns whether any entry changed, so the caller can skip persisting an
+    index that no target tracks this skill in at this version.
+    """
+    is_body = path == "SKILL.md"
+    new_hash = _recorded_body_sha256(content) if is_body else hashlib.sha256(content).hexdigest()
+    touched = False
+    for entry in entries_at_version(
+        state,
+        slug=result.slug or result.name,
+        skill_id=result.workflow_id,
+        version_token=expected_version_token,
+    ):
+        mirror_executable: bool | None = None
+        recorded: FileState | None = None
+        if is_body:
+            entry.body_sha256 = new_hash
+        else:
+            recorded = next((f for f in entry.files if f.path == path), None)
+            # The mark to put on the local copy: what the caller passed, else
+            # what is already recorded for the path. A path the manifest never
+            # held has neither, so the copy keeps the mode it has.
+            mirror_executable = (
+                executable
+                if executable is not None
+                else (recorded.executable if recorded is not None else None)
+            )
+            if recorded is not None:
+                entry.files[entry.files.index(recorded)] = FileState(
+                    path=path,
+                    sha256=new_hash,
+                    executable=executable if executable is not None else recorded.executable,
+                    purpose=purpose if purpose is not None else recorded.purpose,
+                )
+        _write_mirrored_file(entry, path, content, executable=mirror_executable)
+        if not is_body and recorded is None and (executable is not None or purpose is not None):
+            # The mark comes off the copy just written when the caller did not
+            # pass one, which is the same value the next full push would read
+            # there, so recording it changes nothing about what gets sent. A
+            # path with no local copy is not recorded at all: the manifest must
+            # never describe content its directory does not hold, or the next
+            # push reads the record as a local deletion and removes the file
+            # from the registry.
+            local_mark = _mirrored_executable(entry, path)
+            if local_mark is not None:
+                entry.files.append(
+                    FileState(
+                        path=path,
+                        sha256=new_hash,
+                        executable=executable if executable is not None else local_mark,
+                        purpose=purpose,
+                    )
+                )
+        _move_to_new_version(entry, result)
+        touched = True
+    return touched
+
+
+def record_file_removed(
+    state: SyncState,
+    result: WorkflowFilePatchResult,
+    *,
+    expected_version_token: str,
+    path: str,
+) -> bool:
+    """Drop ``path`` from every mirror that sat on the version the removal changed.
+
+    The counterpart to ``record_file_written``: a path left in the manifest
+    after it is gone from the registry reads as a local deletion on the next
+    push, and a copy left on disk is sent back by that push and undoes the
+    removal, so both go. Entries recorded at another version are left for a
+    pull, and an updated entry's sync point moves onto the version the removal
+    created. Returns whether any entry changed.
+    """
+    touched = False
+    for entry in entries_at_version(
+        state,
+        slug=result.slug or result.name,
+        skill_id=result.workflow_id,
+        version_token=expected_version_token,
+    ):
+        entry.files = [f for f in entry.files if f.path != path]
+        _remove_mirrored_file(entry, path)
+        _move_to_new_version(entry, result)
+        touched = True
+    return touched
 
 
 # ----- scope selection + change detection -----
@@ -2440,6 +2701,31 @@ def _untracked_push_items(
     return items
 
 
+def inline_content_field(raw: bytes) -> dict[str, str]:
+    """Return the wire content field carrying *raw* inline.
+
+    Text and binary use distinct fields so the server never has to guess:
+    ``content`` is verbatim UTF-8 text, ``content_base64`` is base64-encoded
+    bytes. A short text file whose content is coincidentally valid base64
+    (e.g. ``test``) must go through ``content`` so it round-trips losslessly and
+    its stored sha matches the sha of the bytes on disk. Bytes that are not
+    valid UTF-8, or that carry a NUL, are binary.
+
+    The single decision point for both file-sending surfaces: the whole-tree
+    snapshot ``build_files_payload`` sends and the single-path change
+    ``goodeye skills put-file`` sends. Keeping it here is what stops the two
+    from disagreeing about whether a given file is text.
+    """
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    else:
+        if "\x00" not in text:
+            return {"content": text}
+    return {"content_base64": base64.b64encode(raw).decode("ascii")}
+
+
 def build_files_payload(
     skill_dir: Path,
     recorded_files: list[FileState] | None,
@@ -2515,27 +2801,14 @@ def build_files_payload(
                 entry["purpose"] = purpose
             entries.append(entry)
         else:
-            # Inline entry. Text and binary use distinct wire fields so the
-            # server never has to guess: ``content`` is verbatim UTF-8 text,
-            # ``content_base64`` is base64-encoded bytes. A short text file
-            # whose content is coincidentally valid base64 (e.g. ``test``) must
-            # go through ``content`` so it round-trips losslessly and its stored
-            # sha matches the on-disk sha recorded below.
-            try:
-                content_str = raw.decode("utf-8")
-                if "\x00" in content_str:
-                    raise ValueError("NUL byte")
-                inline: dict[str, Any] = {
-                    "path": rel,
-                    "content": content_str,
-                    "executable": executable,
-                }
-            except (UnicodeDecodeError, ValueError):
-                inline = {
-                    "path": rel,
-                    "content_base64": base64.b64encode(raw).decode("ascii"),
-                    "executable": executable,
-                }
+            # Inline entry: the shared decision picks the text or binary field,
+            # so this snapshot and a single-path change always agree on which
+            # channel a given file goes through.
+            inline: dict[str, Any] = {
+                "path": rel,
+                **inline_content_field(raw),
+                "executable": executable,
+            }
             if purpose is not None:
                 inline["purpose"] = purpose
             entries.append(inline)
@@ -2651,9 +2924,11 @@ __all__ = [
     "body_sha256",
     "build_files_payload",
     "ensure_identity",
+    "entries_at_version",
     "expand_target_path",
     "find_entry",
     "find_target_by_path",
+    "inline_content_field",
     "is_modified_locally",
     "list_targets",
     "load_sync_config",
@@ -2664,6 +2939,8 @@ __all__ = [
     "prune_from_allowlist",
     "pull",
     "read_local_body",
+    "record_file_removed",
+    "record_file_written",
     "remove_target",
     "resolve_preset",
     "save_sync_config",
