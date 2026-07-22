@@ -38,7 +38,7 @@ from goodeye_cli.prompts import confirm_destructive
 
 if TYPE_CHECKING:
     from goodeye_cli.client import GoodeyeClient
-    from goodeye_cli.wire import WorkflowSummary
+    from goodeye_cli.wire import WorkflowFilePatchResult, WorkflowSummary
 
 SyncScope = Literal["owned", "all", "selected"]
 
@@ -697,90 +697,151 @@ def upsert_entry(state: SyncState, entry: SyncEntry) -> None:
     state.entries.append(entry)
 
 
-def entries_for_skill(state: SyncState, *, slug: str, skill_id: str) -> list[SyncEntry]:
-    """Return every tracked entry for one skill, across all targets.
+def entries_at_version(
+    state: SyncState, *, slug: str, skill_id: str, version_token: str
+) -> list[SyncEntry]:
+    """Return the tracked entries for one skill that sit at ``version_token``.
 
-    The same skill may be mirrored into more than one target, so a change to it
-    touches every copy. Matching on either identifier keeps a mirror recognized
-    when one of them has moved on: an entry written before a rename still
-    carries the old slug under the same id, and an entry from an older index
-    may carry the slug the caller typed while its id is what the registry
-    returned.
+    The same skill may be mirrored into more than one target, and those copies
+    can be recorded at different versions. A single-path change is made against
+    exactly one version, so only the copies recorded at that version describe
+    the content it started from and can be moved onto the version it produced.
+    A copy recorded at any other version is a different base: it is left
+    untouched for a pull to reconcile.
+
+    Matching on either identifier keeps a mirror recognized when one of them has
+    moved on: an entry written before a rename still carries the old slug under
+    the same id, and an entry from an older index may carry the slug the caller
+    typed while its id is what the registry returned.
     """
-    return [entry for entry in state.entries if entry.slug == slug or entry.skill_id == skill_id]
+    return [
+        entry
+        for entry in state.entries
+        if (entry.slug == slug or entry.skill_id == skill_id)
+        and entry.version_token == version_token
+    ]
+
+
+def _recorded_body_sha256(raw: bytes) -> str:
+    """Return the body hash for raw ``SKILL.md`` bytes as a later read recomputes it.
+
+    Every reader of ``body_sha256`` compares against a hash taken over the body
+    read back from disk as text, and reading text translates ``\\r\\n`` and
+    ``\\r`` to ``\\n``. Hashing the bytes exactly as sent would leave a runbook
+    with CRLF line endings reporting drift on every status and push, forever,
+    with no local edit behind it: precisely the false drift the single-path
+    commands exist to remove. Applying the same translation here puts the
+    recorded hash on the same footing as the one it will be compared against.
+    """
+    text = raw.decode("utf-8")
+    return body_sha256(text.replace("\r\n", "\n").replace("\r", "\n"))
+
+
+def _move_to_new_version(entry: SyncEntry, result: WorkflowFilePatchResult) -> None:
+    """Move an entry's recorded sync point onto the version the change created.
+
+    The registry moved and this entry's record of the content moved with it, so
+    the sync point has to move too. Leaving the superseded token behind makes
+    the next push send a token the server has already replaced: the server
+    rejects it, the push reports a conflict pointing at a pull, and that pull
+    refuses too whenever there is also a local edit (a local edit plus a moved
+    server is the skipped-conflict case). The only way out is then a forced
+    pull, which discards the local edit. No second writer appears anywhere in
+    that story: the conflict would be manufactured entirely by an index
+    describing a version that no longer exists.
+    """
+    entry.synced_version = result.version
+    entry.version_token = result.version_token
 
 
 def record_file_written(
     state: SyncState,
+    result: WorkflowFilePatchResult,
     *,
-    slug: str,
-    skill_id: str,
+    expected_version_token: str,
     path: str,
-    sha256: str,
+    content: bytes,
     executable: bool | None = None,
     purpose: str | None = None,
 ) -> bool:
-    """Record that ``path`` now holds content hashing to ``sha256``.
+    """Record a single-path write on every mirror that sat on the version it changed.
 
-    Called after a single-path write lands on the registry so the index matches
-    what the server holds. Without it the recorded manifest keeps the previous
-    hash and the next push reports drift for a file that is already current.
+    Called after the write lands on the registry so the index matches what the
+    server now holds. Without it the recorded manifest keeps the previous hash
+    and the next push reports drift for a file that is already current.
 
-    ``executable`` and ``purpose`` are carry-forward sentinels, mirroring the
-    write itself: ``None`` keeps the value already recorded for that path (or
-    falls back to ``False`` / ``None`` for a path new to the manifest), and an
-    explicit value replaces it.
+    Each entry is updated whole or not at all: content and sync point move
+    together, so an entry never claims content from one version while claiming
+    to be synced at another.
 
     ``SKILL.md`` is the body rather than a sibling, so it updates
     ``body_sha256`` and never enters ``files``; recording it as a file would
     manufacture permanent drift, since the on-disk walk never yields it.
 
+    ``executable`` and ``purpose`` are carry-forward sentinels, mirroring the
+    write itself: ``None`` keeps the value already recorded for that path, and
+    an explicit value replaces it. A path absent from the recorded manifest has
+    no value to carry forward and the response carries no metadata to consult,
+    so it is left out of the manifest rather than recorded with an invented
+    ``False`` / ``None``. Inventing them would be worse than leaving the path
+    unrecorded: a full push reads the recorded flags back and would send the
+    invented ones, clearing an executable bit or a role label the server holds.
+    Left out, the path reads as ordinary drift and the next full push sends it
+    with the values observed on disk.
+
     Returns whether any entry changed, so the caller can skip persisting an
-    index no target tracks this skill in.
+    index that no target tracks this skill in at this version.
     """
+    is_body = path == "SKILL.md"
+    new_hash = _recorded_body_sha256(content) if is_body else hashlib.sha256(content).hexdigest()
     touched = False
-    for entry in entries_for_skill(state, slug=slug, skill_id=skill_id):
-        if path == "SKILL.md":
-            entry.body_sha256 = sha256
-            touched = True
-            continue
-        recorded = next((f for f in entry.files if f.path == path), None)
-        updated = FileState(
-            path=path,
-            sha256=sha256,
-            executable=(
-                executable
-                if executable is not None
-                else (recorded.executable if recorded is not None else False)
-            ),
-            purpose=(
-                purpose
-                if purpose is not None
-                else (recorded.purpose if recorded is not None else None)
-            ),
-        )
-        if recorded is None:
-            entry.files.append(updated)
+    for entry in entries_at_version(
+        state,
+        slug=result.slug or result.name,
+        skill_id=result.workflow_id,
+        version_token=expected_version_token,
+    ):
+        if is_body:
+            entry.body_sha256 = new_hash
         else:
-            entry.files[entry.files.index(recorded)] = updated
-        entry.files.sort(key=lambda f: f.path)
+            recorded = next((f for f in entry.files if f.path == path), None)
+            if recorded is not None:
+                entry.files[entry.files.index(recorded)] = FileState(
+                    path=path,
+                    sha256=new_hash,
+                    executable=executable if executable is not None else recorded.executable,
+                    purpose=purpose if purpose is not None else recorded.purpose,
+                )
+        _move_to_new_version(entry, result)
         touched = True
     return touched
 
 
-def record_file_removed(state: SyncState, *, slug: str, skill_id: str, path: str) -> bool:
-    """Drop ``path`` from every tracked copy of a skill's recorded manifest.
+def record_file_removed(
+    state: SyncState,
+    result: WorkflowFilePatchResult,
+    *,
+    expected_version_token: str,
+    path: str,
+) -> bool:
+    """Drop ``path`` from every mirror that sat on the version the removal changed.
 
-    The mirror image of ``record_file_written`` for a removal: a path left in
-    the manifest after it is gone from the registry reads as a local deletion
-    on the next push. Returns whether any entry changed.
+    The mirror image of ``record_file_written``: a path left in the manifest
+    after it is gone from the registry reads as a local deletion on the next
+    push. Entries recorded at another version are left for a pull, and an
+    updated entry's sync point moves onto the version the removal created.
+    Returns whether any entry changed.
     """
     touched = False
-    for entry in entries_for_skill(state, slug=slug, skill_id=skill_id):
-        remaining = [f for f in entry.files if f.path != path]
-        if len(remaining) != len(entry.files):
-            entry.files = remaining
-            touched = True
+    for entry in entries_at_version(
+        state,
+        slug=result.slug or result.name,
+        skill_id=result.workflow_id,
+        version_token=expected_version_token,
+    ):
+        entry.files = [f for f in entry.files if f.path != path]
+        _move_to_new_version(entry, result)
+        touched = True
     return touched
 
 
@@ -2750,7 +2811,7 @@ __all__ = [
     "body_sha256",
     "build_files_payload",
     "ensure_identity",
-    "entries_for_skill",
+    "entries_at_version",
     "expand_target_path",
     "find_entry",
     "find_target_by_path",

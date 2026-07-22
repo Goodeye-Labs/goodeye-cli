@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import re
 import sys
@@ -659,39 +658,49 @@ def _resolve_expected_version_token(
 def _refresh_sync_index(
     result: WorkflowFilePatchResult,
     *,
+    expected_version_token: str,
     path: str,
-    sha256: str | None,
+    content: bytes | None,
     executable: bool | None = None,
     purpose: str | None = None,
 ) -> None:
     """Bring the local sync index in line with the change that just landed.
 
-    A tracked mirror records a hash per file. Leaving it stale after a
-    single-path change makes the next `goodeye skills sync push` report drift
-    for a file the registry already holds, so the change would introduce false
-    drift on its own. When no target tracks this skill there is nothing to
-    record and the index is left untouched.
+    A tracked mirror records a hash per file plus the version it is synced at.
+    Leaving either stale after a single-path change makes the next
+    `goodeye skills sync push` report a change that is not real, so the command
+    would introduce false drift on its own.
+
+    Only mirrors recorded at the version the change was written against are
+    updated, and each one is moved onto the new version along with the file it
+    records. A mirror sitting at any other version has a different base and is
+    left for a pull. When no mirror matches there is nothing to record and the
+    index is left untouched.
+
+    ``content`` is the bytes just written, or None for a removal.
 
     Best-effort: the write already succeeded, so an unreadable or unwritable
     index is reported and moves on rather than failing the command.
     """
     from goodeye_cli import sync
 
-    slug = result.slug or result.name
     try:
         paths = get_config_paths()
         state = sync.load_sync_state(paths)
-        if sha256 is None:
+        if content is None:
             touched = sync.record_file_removed(
-                state, slug=slug, skill_id=result.workflow_id, path=path
+                state,
+                result,
+                expected_version_token=expected_version_token,
+                path=path,
             )
         else:
             touched = sync.record_file_written(
                 state,
-                slug=slug,
-                skill_id=result.workflow_id,
+                result,
+                expected_version_token=expected_version_token,
                 path=path,
-                sha256=sha256,
+                content=content,
                 executable=executable,
                 purpose=purpose,
             )
@@ -817,8 +826,9 @@ def put_file(
     _print_file_change(result)
     _refresh_sync_index(
         result,
+        expected_version_token=token,
         path=path,
-        sha256=hashlib.sha256(raw).hexdigest(),
+        content=raw,
         executable=executable,
         purpose=purpose,
     )
@@ -861,7 +871,7 @@ def rm_file(
         )
 
     _print_file_change(result)
-    _refresh_sync_index(result, path=path, sha256=None)
+    _refresh_sync_index(result, expected_version_token=token, path=path, content=None)
 
 
 @app.command("lineage")

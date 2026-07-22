@@ -3,8 +3,11 @@
 These commands change named paths in a hosted skill and keep the rest, unlike
 `goodeye skills publish <dir>`, which replaces the whole tree. The suite covers
 the content sources, how text and binary pick their wire field, how the
-expected version token is resolved, and the local sync-index refresh that keeps
-a later `sync push` from reporting drift that is not real.
+expected version token is resolved, how the server's errors surface, and the
+local sync-index refresh that keeps a later `sync push` from reporting drift
+that is not real. That refresh is version-aware: it moves the mirrors recorded
+at the version the change was written against onto the version it produced, and
+leaves mirrors at any other version for a pull.
 """
 
 from __future__ import annotations
@@ -21,7 +24,7 @@ from typer.testing import CliRunner
 
 from goodeye_cli.app import app
 from goodeye_cli.config import ConfigPaths, save_credentials
-from goodeye_cli.errors import ValidationFailed
+from goodeye_cli.errors import Conflict, Forbidden, GoodeyeError, NotFound, ValidationFailed
 from goodeye_cli.sync import (
     FileState,
     SyncEntry,
@@ -29,7 +32,9 @@ from goodeye_cli.sync import (
     SyncTarget,
     body_sha256,
     build_files_payload,
+    is_modified_locally,
     load_sync_state,
+    read_local_body,
     save_sync_state,
     tree_push_drifted,
 )
@@ -97,6 +102,19 @@ def _sent(route: respx.Route) -> dict:
     return _json.loads(route.calls.last.request.content.decode())
 
 
+def _me_route(email: str = "owner@example.com") -> respx.Route:
+    """Mock the read the sync identity guard makes before a push."""
+    return respx.get(f"{SERVER}/v1/me").mock(
+        return_value=httpx.Response(200, json={"email": email})
+    )
+
+
+def _seed_target(path: str) -> None:
+    """Configure a sync target through the CLI, as a user would."""
+    add = CliRunner().invoke(app, ["skills", "sync", "target", "add", path, "--scope", "owned"])
+    assert add.exit_code == 0, add.output
+
+
 # ----- content sources -----
 
 
@@ -123,9 +141,7 @@ def test_put_file_sends_local_text_file_inline(
 
 
 @respx.mock
-def test_put_file_reads_content_from_stdin(
-    tmp_config_paths: ConfigPaths, monkeypatch
-) -> None:
+def test_put_file_reads_content_from_stdin(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     """--stdin is the other content source, for generated agent output."""
     _setup_creds(monkeypatch, tmp_config_paths)
     _detail_route()
@@ -160,9 +176,7 @@ def test_put_file_rejects_both_content_sources(
     assert isinstance(result.exception, ValidationFailed)
 
 
-def test_put_file_requires_a_content_source(
-    tmp_config_paths: ConfigPaths, monkeypatch
-) -> None:
+def test_put_file_requires_a_content_source(tmp_config_paths: ConfigPaths, monkeypatch) -> None:
     """Neither source given is a usage error: there is nothing to write."""
     _setup_creds(monkeypatch, tmp_config_paths)
 
@@ -461,7 +475,9 @@ def test_put_file_updates_the_tracked_file_state(
         slug="my-skill",
         target_path=str(tmp_path / "skills"),
         files=[
-            FileState(path="notes.md", sha256=_sha(b"stale\n"), executable=True, purpose="reference")
+            FileState(
+                path="notes.md", sha256=_sha(b"stale\n"), executable=True, purpose="reference"
+            )
         ],
     )
     local = tmp_path / "notes.md"
@@ -475,19 +491,32 @@ def test_put_file_updates_the_tracked_file_state(
     )
     assert result.exit_code == 0, result.output
 
-    reloaded = load_sync_state(tmp_config_paths)
-    recorded = {f.path: f for f in reloaded.entries[0].files}
+    entry = load_sync_state(tmp_config_paths).entries[0]
+    recorded = {f.path: f for f in entry.files}
     assert recorded["notes.md"].sha256 == _sha(b"fresh notes\n")
     # Flags the caller did not pass carry the recorded value forward, matching
     # what the server does with the same absent fields.
     assert recorded["notes.md"].executable is True
     assert recorded["notes.md"].purpose == "reference"
+    # The content and the sync point move together: an entry that claimed the
+    # new content while still claiming the old version would send a superseded
+    # token on the next push and be told it conflicts.
+    assert entry.synced_version == 3
+    assert entry.version_token == "tok-2"
 
 
 @respx.mock
-def test_put_file_records_a_path_new_to_the_tracked_tree(
+def test_put_file_leaves_a_manifest_new_path_out_of_the_record(
     tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
 ) -> None:
+    """A path the manifest never held is not recorded on a guess.
+
+    The response carries no per-file metadata, so there is nothing to record the
+    executable mark and role label from. Writing invented values would be worse
+    than recording nothing: a full push reads those flags back out of the index
+    and would send the invented ones, clearing what the server holds. Left out,
+    the path reads as ordinary drift that the next full push resolves from disk.
+    """
     _setup_creds(monkeypatch, tmp_config_paths)
     _write_index(
         tmp_config_paths,
@@ -502,27 +531,17 @@ def test_put_file_records_a_path_new_to_the_tracked_tree(
 
     runner = CliRunner()
     result = runner.invoke(
-        app,
-        [
-            "skills",
-            "put-file",
-            "my-skill",
-            "notes.md",
-            "--from-file",
-            str(local),
-            "--executable",
-            "--purpose",
-            "reference",
-        ],
+        app, ["skills", "put-file", "my-skill", "notes.md", "--from-file", str(local)]
     )
     assert result.exit_code == 0, result.output
 
-    recorded = {f.path: f for f in load_sync_state(tmp_config_paths).entries[0].files}
-    assert set(recorded) == {"other.md", "notes.md"}
-    assert recorded["notes.md"].sha256 == _sha(b"fresh notes\n")
-    assert recorded["notes.md"].executable is True
-    assert recorded["notes.md"].purpose == "reference"
+    entry = load_sync_state(tmp_config_paths).entries[0]
+    recorded = {f.path: f for f in entry.files}
+    assert set(recorded) == {"other.md"}
     assert recorded["other.md"].sha256 == _sha(b"other\n")
+    # The version still moved: the registry did write a new version.
+    assert entry.synced_version == 3
+    assert entry.version_token == "tok-2"
 
 
 @respx.mock
@@ -627,6 +646,67 @@ def test_put_file_updates_every_target_mirroring_the_skill(
         _sha(b"fresh notes\n"),
         _sha(b"fresh notes\n"),
     ]
+    assert [entry.version_token for entry in reloaded.entries] == ["tok-2", "tok-2"]
+
+
+@respx.mock
+def test_put_file_leaves_a_target_recorded_at_another_version_untouched(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """Two mirrors of one skill can sit at different versions.
+
+    The change is written against one version, so only the mirrors recorded at
+    that version describe the content it started from. A mirror left behind at
+    an older version has a different base: recording the new file state on it
+    would claim content it was never given, and moving its sync point forward
+    would claim a version it never received. It is left for a pull.
+    """
+    _setup_creds(monkeypatch, tmp_config_paths)
+    behind = SyncEntry(
+        skill_id="skl_01",
+        slug="my-skill",
+        target_path=str(tmp_path / "agents"),
+        synced_version=1,
+        version_token="tok-older",
+        body_sha256=body_sha256("an older body\n"),
+        files=[FileState(path="notes.md", sha256=_sha(b"older\n"), purpose="reference")],
+    )
+    state = SyncState(
+        identity="owner@example.com",
+        entries=[
+            SyncEntry(
+                skill_id="skl_01",
+                slug="my-skill",
+                target_path=str(tmp_path / "claude"),
+                synced_version=2,
+                version_token="tok-1",
+                body_sha256=body_sha256(_SKILL_MD),
+                files=[FileState(path="notes.md", sha256=_sha(b"stale\n"))],
+            ),
+            behind,
+        ],
+    )
+    save_sync_state(state, tmp_config_paths)
+    before_behind = behind.model_dump()
+    local = tmp_path / "notes.md"
+    local.write_bytes(b"fresh notes\n")
+    _detail_route(token="tok-1")
+    _patch_route()
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app, ["skills", "put-file", "my-skill", "notes.md", "--from-file", str(local)]
+    )
+    assert result.exit_code == 0, result.output
+
+    reloaded = {entry.target_path: entry for entry in load_sync_state(tmp_config_paths).entries}
+    current = reloaded[str(tmp_path / "claude")]
+    assert current.files[0].sha256 == _sha(b"fresh notes\n")
+    assert current.synced_version == 3
+    assert current.version_token == "tok-2"
+    # Nothing about the older mirror changed, not the file state and not the
+    # version it reports being synced at.
+    assert reloaded[str(tmp_path / "agents")].model_dump() == before_behind
 
 
 @respx.mock
@@ -650,8 +730,10 @@ def test_rm_file_drops_the_tracked_file_state(
     result = runner.invoke(app, ["skills", "rm-file", "my-skill", "notes.md"])
     assert result.exit_code == 0, result.output
 
-    recorded = [f.path for f in load_sync_state(tmp_config_paths).entries[0].files]
-    assert recorded == ["other.md"]
+    entry = load_sync_state(tmp_config_paths).entries[0]
+    assert [f.path for f in entry.files] == ["other.md"]
+    assert entry.synced_version == 3
+    assert entry.version_token == "tok-2"
 
 
 @respx.mock
@@ -717,22 +799,171 @@ def test_put_file_from_a_mirrored_directory_leaves_no_push_drift(
     assert not tree_push_drifted(load_sync_state(tmp_config_paths).entries[0], target, [])
 
 
+@respx.mock
+def test_put_file_then_a_further_local_edit_pushes_cleanly(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """The ordinary authoring loop: send one file, keep editing, then push.
+
+    The push must go out against the version the change created. Sending the
+    superseded one is rejected by the server, and the resulting conflict has no
+    way out: the pull it points at refuses while a local edit is present, so the
+    only unblock is a forced pull, which discards that edit. No second writer
+    appears in this story, so any conflict here would be manufactured.
+    """
+    _setup_creds(monkeypatch, tmp_config_paths)
+    _me_route()
+    target_dir = tmp_path / "skills"
+    _seed_target(str(target_dir))
+    slug_dir = target_dir / "my-skill"
+    slug_dir.mkdir(parents=True)
+    (slug_dir / "SKILL.md").write_text(_SKILL_MD, encoding="utf-8")
+    (slug_dir / "notes.md").write_bytes(b"stale\n")
+    _write_index(
+        tmp_config_paths,
+        slug="my-skill",
+        target_path=str(target_dir),
+        files=[FileState(path="notes.md", sha256=_sha(b"stale\n"))],
+    )
+
+    (slug_dir / "notes.md").write_bytes(b"fresh notes\n")
+    _detail_route()
+    _patch_route()
+    runner = CliRunner()
+    patched = runner.invoke(
+        app,
+        ["skills", "put-file", "my-skill", "notes.md", "--from-file", str(slug_dir / "notes.md")],
+    )
+    assert patched.exit_code == 0, patched.output
+
+    # The author keeps working: one more edit before pushing.
+    (slug_dir / "SKILL.md").write_text(_SKILL_MD + "\nOne more step.\n", encoding="utf-8")
+    save_route = respx.post(f"{SERVER}/v1/skills").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "skill_id": "skl_01",
+                "version": 4,
+                "name": "my-skill",
+                "version_token": "tok-3",
+                "verifiers": [],
+            },
+        )
+    )
+    pushed = runner.invoke(app, ["skills", "sync", "push"])
+    assert pushed.exit_code == 0, pushed.output
+
+    item = _json.loads(pushed.output)["items"][0]
+    assert item["action"] == "pushed"
+    assert _sent(save_route)["expected_version_token"] == "tok-2"
+
+
+@respx.mock
+def test_put_file_on_a_crlf_runbook_records_the_hash_a_read_recomputes(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """A runbook with CRLF line endings must not be left drifting forever.
+
+    The recorded body hash is compared against one recomputed from the body read
+    back as text, and that read translates CRLF to LF. Recording the hash of the
+    bytes as sent would never match it again, so the entry would report drift on
+    every status and push with no local edit behind it.
+    """
+    _setup_creds(monkeypatch, tmp_config_paths)
+    target_dir = tmp_path / "skills"
+    slug_dir = target_dir / "my-skill"
+    slug_dir.mkdir(parents=True)
+    crlf_body = _SKILL_MD.replace("\n", "\r\n")
+    (slug_dir / "SKILL.md").write_bytes(crlf_body.encode("utf-8"))
+    _write_index(
+        tmp_config_paths,
+        slug="my-skill",
+        target_path=str(target_dir),
+        files=[],
+        body="an older body\n",
+    )
+    _detail_route()
+    _patch_route(changed=["SKILL.md"])
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["skills", "put-file", "my-skill", "SKILL.md", "--from-file", str(slug_dir / "SKILL.md")],
+    )
+    assert result.exit_code == 0, result.output
+
+    entry = load_sync_state(tmp_config_paths).entries[0]
+    target = SyncTarget(path=str(target_dir), scope="owned")
+    assert not is_modified_locally(entry, read_local_body(target, "my-skill"))
+    assert not tree_push_drifted(entry, target, [])
+
+
+# ----- server errors -----
+
+
+@pytest.mark.parametrize(
+    ("status", "slug", "expected"),
+    [
+        pytest.param(400, "validation_error", ValidationFailed, id="rejected-request"),
+        pytest.param(409, "conflict", Conflict, id="version-moved"),
+        pytest.param(403, "forbidden", Forbidden, id="no-edit-access"),
+        pytest.param(404, "not_found", NotFound, id="unknown-skill"),
+    ],
+)
+@pytest.mark.parametrize("command", ["put-file", "rm-file"])
+@respx.mock
+def test_file_commands_surface_server_errors(
+    command: str,
+    status: int,
+    slug: str,
+    expected: type[GoodeyeError],
+    tmp_path: Path,
+    tmp_config_paths: ConfigPaths,
+    monkeypatch,
+) -> None:
+    """A rejected change fails the command with the server's own error."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    local = tmp_path / "notes.md"
+    local.write_bytes(b"fresh notes\n")
+    _detail_route()
+    respx.patch(f"{SERVER}/v1/skills/my-skill/files").mock(
+        return_value=httpx.Response(status, json={"error": slug, "message": "Nope."})
+    )
+
+    args = ["skills", command, "my-skill", "notes.md"]
+    if command == "put-file":
+        args += ["--from-file", str(local)]
+
+    result = CliRunner().invoke(app, args)
+    assert result.exit_code != 0
+    assert isinstance(result.exception, expected)
+    assert result.exception.slug == slug
+
+
 # ----- help text -----
 
 
-def test_put_file_help_contrasts_with_publish(plain) -> None:
-    runner = CliRunner()
-    result = runner.invoke(app, ["skills", "put-file", "--help"])
+def _help_text(plain, command: str) -> str:
+    """Return the command's help as one line, so wrapping cannot hide a phrase."""
+    result = CliRunner().invoke(app, ["skills", command, "--help"])
     assert result.exit_code == 0, result.output
-    text = plain(result.output)
-    assert "publish" in text
+    return " ".join(plain(result.output).split())
+
+
+def test_put_file_help_contrasts_with_publish(plain) -> None:
+    """Naming publish is not enough: the help has to say how the two differ."""
+    text = _help_text(plain, "put-file")
+    assert "Only the path you name changes" in text
+    assert "the rest of the skill's files ride forward untouched" in text
+    assert "unlike `goodeye skills publish <dir>`, which replaces the whole tree" in text
+    assert "any path missing from the directory is deleted" in text
     assert "—" not in text
 
 
 def test_rm_file_help_contrasts_with_publish(plain) -> None:
-    runner = CliRunner()
-    result = runner.invoke(app, ["skills", "rm-file", "--help"])
-    assert result.exit_code == 0, result.output
-    text = plain(result.output)
-    assert "publish" in text
+    text = _help_text(plain, "rm-file")
+    assert "Only the path you name is removed" in text
+    assert "the rest of the skill's files ride forward untouched" in text
+    assert "unlike `goodeye skills publish <dir>`, which replaces the whole tree" in text
+    assert "any path missing from the directory is deleted" in text
     assert "—" not in text
