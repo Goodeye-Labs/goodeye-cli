@@ -76,6 +76,7 @@ from goodeye_cli.wire import (
     WorkflowDeleteResult,
     WorkflowDeleteVersionResult,
     WorkflowDetail,
+    WorkflowFilePatchResult,
     WorkflowGrantList,
     WorkflowGrantResult,
     WorkflowGrantRevokeResult,
@@ -528,6 +529,39 @@ class GoodeyeClient:
             payload["files"] = list(files)
         response = self._request("POST", "/v1/skills", json_body=payload)
         return WorkflowSaveResult.model_validate(_alias_skill_id(response.json()))
+
+    def patch_workflow_files(
+        self,
+        id_or_slug: str,
+        *,
+        expected_version_token: str,
+        files: list[dict[str, Any]] | None = None,
+        delete_paths: list[str] | None = None,
+        source: str | None = None,
+    ) -> WorkflowFilePatchResult:
+        """PATCH /v1/skills/{id_or_slug}/files: change named paths, keep the rest.
+
+        Only the paths named in ``files`` and ``delete_paths`` are touched;
+        every other path in the skill rides forward unchanged. This is the
+        opposite of ``save_workflow``, whose ``files`` is a whole-tree snapshot
+        that deletes any path left out.
+
+        Each entry in ``files`` carries ``path`` plus exactly one of
+        ``content`` (verbatim UTF-8 text), ``content_base64`` (base64-encoded
+        bytes), or ``sha256`` (a blob the registry can already read). Omitting
+        ``executable`` or ``purpose`` on an entry keeps that file's current
+        value, so a flag the caller did not set must be left off entirely
+        rather than sent as a default.
+        """
+        payload: dict[str, Any] = {
+            "expected_version_token": expected_version_token,
+            "files": list(files or []),
+            "delete_paths": list(delete_paths or []),
+        }
+        if source is not None:
+            payload["source"] = source
+        response = self._request("PATCH", f"/v1/skills/{id_or_slug}/files", json_body=payload)
+        return WorkflowFilePatchResult.model_validate(_alias_skill_id(response.json()))
 
     def archive_workflow(self, workflow_id: str) -> WorkflowArchiveResult:
         response = self._request("POST", f"/v1/skills/{workflow_id}/archive", json_body={})

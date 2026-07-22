@@ -697,6 +697,93 @@ def upsert_entry(state: SyncState, entry: SyncEntry) -> None:
     state.entries.append(entry)
 
 
+def entries_for_skill(state: SyncState, *, slug: str, skill_id: str) -> list[SyncEntry]:
+    """Return every tracked entry for one skill, across all targets.
+
+    The same skill may be mirrored into more than one target, so a change to it
+    touches every copy. Matching on either identifier keeps a mirror recognized
+    when one of them has moved on: an entry written before a rename still
+    carries the old slug under the same id, and an entry from an older index
+    may carry the slug the caller typed while its id is what the registry
+    returned.
+    """
+    return [entry for entry in state.entries if entry.slug == slug or entry.skill_id == skill_id]
+
+
+def record_file_written(
+    state: SyncState,
+    *,
+    slug: str,
+    skill_id: str,
+    path: str,
+    sha256: str,
+    executable: bool | None = None,
+    purpose: str | None = None,
+) -> bool:
+    """Record that ``path`` now holds content hashing to ``sha256``.
+
+    Called after a single-path write lands on the registry so the index matches
+    what the server holds. Without it the recorded manifest keeps the previous
+    hash and the next push reports drift for a file that is already current.
+
+    ``executable`` and ``purpose`` are carry-forward sentinels, mirroring the
+    write itself: ``None`` keeps the value already recorded for that path (or
+    falls back to ``False`` / ``None`` for a path new to the manifest), and an
+    explicit value replaces it.
+
+    ``SKILL.md`` is the body rather than a sibling, so it updates
+    ``body_sha256`` and never enters ``files``; recording it as a file would
+    manufacture permanent drift, since the on-disk walk never yields it.
+
+    Returns whether any entry changed, so the caller can skip persisting an
+    index no target tracks this skill in.
+    """
+    touched = False
+    for entry in entries_for_skill(state, slug=slug, skill_id=skill_id):
+        if path == "SKILL.md":
+            entry.body_sha256 = sha256
+            touched = True
+            continue
+        recorded = next((f for f in entry.files if f.path == path), None)
+        updated = FileState(
+            path=path,
+            sha256=sha256,
+            executable=(
+                executable
+                if executable is not None
+                else (recorded.executable if recorded is not None else False)
+            ),
+            purpose=(
+                purpose
+                if purpose is not None
+                else (recorded.purpose if recorded is not None else None)
+            ),
+        )
+        if recorded is None:
+            entry.files.append(updated)
+        else:
+            entry.files[entry.files.index(recorded)] = updated
+        entry.files.sort(key=lambda f: f.path)
+        touched = True
+    return touched
+
+
+def record_file_removed(state: SyncState, *, slug: str, skill_id: str, path: str) -> bool:
+    """Drop ``path`` from every tracked copy of a skill's recorded manifest.
+
+    The mirror image of ``record_file_written`` for a removal: a path left in
+    the manifest after it is gone from the registry reads as a local deletion
+    on the next push. Returns whether any entry changed.
+    """
+    touched = False
+    for entry in entries_for_skill(state, slug=slug, skill_id=skill_id):
+        remaining = [f for f in entry.files if f.path != path]
+        if len(remaining) != len(entry.files):
+            entry.files = remaining
+            touched = True
+    return touched
+
+
 # ----- scope selection + change detection -----
 
 
@@ -2440,6 +2527,31 @@ def _untracked_push_items(
     return items
 
 
+def inline_content_field(raw: bytes) -> dict[str, str]:
+    """Return the wire content field carrying *raw* inline.
+
+    Text and binary use distinct fields so the server never has to guess:
+    ``content`` is verbatim UTF-8 text, ``content_base64`` is base64-encoded
+    bytes. A short text file whose content is coincidentally valid base64
+    (e.g. ``test``) must go through ``content`` so it round-trips losslessly and
+    its stored sha matches the sha of the bytes on disk. Bytes that are not
+    valid UTF-8, or that carry a NUL, are binary.
+
+    The single decision point for both file-sending surfaces: the whole-tree
+    snapshot ``build_files_payload`` sends and the single-path change
+    ``goodeye skills put-file`` sends. Keeping it here is what stops the two
+    from disagreeing about whether a given file is text.
+    """
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    else:
+        if "\x00" not in text:
+            return {"content": text}
+    return {"content_base64": base64.b64encode(raw).decode("ascii")}
+
+
 def build_files_payload(
     skill_dir: Path,
     recorded_files: list[FileState] | None,
@@ -2515,27 +2627,14 @@ def build_files_payload(
                 entry["purpose"] = purpose
             entries.append(entry)
         else:
-            # Inline entry. Text and binary use distinct wire fields so the
-            # server never has to guess: ``content`` is verbatim UTF-8 text,
-            # ``content_base64`` is base64-encoded bytes. A short text file
-            # whose content is coincidentally valid base64 (e.g. ``test``) must
-            # go through ``content`` so it round-trips losslessly and its stored
-            # sha matches the on-disk sha recorded below.
-            try:
-                content_str = raw.decode("utf-8")
-                if "\x00" in content_str:
-                    raise ValueError("NUL byte")
-                inline: dict[str, Any] = {
-                    "path": rel,
-                    "content": content_str,
-                    "executable": executable,
-                }
-            except (UnicodeDecodeError, ValueError):
-                inline = {
-                    "path": rel,
-                    "content_base64": base64.b64encode(raw).decode("ascii"),
-                    "executable": executable,
-                }
+            # Inline entry: the shared decision picks the text or binary field,
+            # so this snapshot and a single-path change always agree on which
+            # channel a given file goes through.
+            inline: dict[str, Any] = {
+                "path": rel,
+                **inline_content_field(raw),
+                "executable": executable,
+            }
             if purpose is not None:
                 inline["purpose"] = purpose
             entries.append(inline)
@@ -2651,9 +2750,11 @@ __all__ = [
     "body_sha256",
     "build_files_payload",
     "ensure_identity",
+    "entries_for_skill",
     "expand_target_path",
     "find_entry",
     "find_target_by_path",
+    "inline_content_field",
     "is_modified_locally",
     "list_targets",
     "load_sync_config",
@@ -2664,6 +2765,8 @@ __all__ = [
     "prune_from_allowlist",
     "pull",
     "read_local_body",
+    "record_file_removed",
+    "record_file_written",
     "remove_target",
     "resolve_preset",
     "save_sync_config",

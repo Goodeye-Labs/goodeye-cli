@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import sys
@@ -16,7 +17,7 @@ from rich.table import Table
 from goodeye_cli.client import GoodeyeClient
 from goodeye_cli.commands import workflows_sync
 from goodeye_cli.commands.prompts import confirm_destructive
-from goodeye_cli.config import get_api_key, get_server
+from goodeye_cli.config import get_api_key, get_config_paths, get_server
 from goodeye_cli.errors import AuthRequired, ValidationFailed
 from goodeye_cli.frontmatter import (
     coerce_outcome,
@@ -32,7 +33,7 @@ from goodeye_cli.output import (
     next_page_hint,
     resolve_output_mode,
 )
-from goodeye_cli.wire import SafetyCheckResult, WorkflowDetail
+from goodeye_cli.wire import SafetyCheckResult, WorkflowDetail, WorkflowFilePatchResult
 
 _log = logging.getLogger(__name__)
 
@@ -601,6 +602,266 @@ def publish(
     )
     extra_notes = [result.next_step] if result.next_step else []
     _print_authoring_notes([*result.authoring_notes, *extra_notes])
+
+
+def _read_file_bytes(source: Path) -> bytes:
+    """Read the raw bytes of a local file named as file content."""
+    if not source.exists():
+        raise ValidationFailed(
+            slug="validation_error",
+            message=f"File not found: {source}",
+        )
+    if not source.is_file():
+        raise ValidationFailed(
+            slug="validation_error",
+            message=f"Not a file: {source}",
+        )
+    try:
+        return source.read_bytes()
+    except OSError as exc:
+        raise ValidationFailed(
+            slug="validation_error",
+            message=f"Could not read file: {source}",
+        ) from exc
+
+
+def _read_stdin_bytes() -> bytes:
+    """Read standard input as raw bytes so binary content survives the pipe."""
+    buffer = getattr(sys.stdin, "buffer", None)
+    if buffer is None:  # pragma: no cover - only on a text-only stdin stub
+        return sys.stdin.read().encode("utf-8")
+    return buffer.read()
+
+
+def _resolve_expected_version_token(
+    client: GoodeyeClient, skill_id: str, supplied: str | None
+) -> str:
+    """Return the token to write against, reading the current one when unset.
+
+    Resolving it here is not a weaker guard than demanding the flag: the server
+    still rejects the write if another writer landed between this read and it,
+    which is the only race a single command invocation can have. The flag stays
+    for scripts that already hold a token and want to skip the round-trip.
+    """
+    if supplied:
+        return supplied
+    detail = client.get_workflow(skill_id)
+    assert isinstance(detail, WorkflowDetail)
+    if not detail.version_token:
+        raise ValidationFailed(
+            slug="validation_error",
+            message=f"Could not read the current version token for {skill_id}.",
+            hint="Pass --expected-version-token with the token from `goodeye skills get --json`.",
+        )
+    return detail.version_token
+
+
+def _refresh_sync_index(
+    result: WorkflowFilePatchResult,
+    *,
+    path: str,
+    sha256: str | None,
+    executable: bool | None = None,
+    purpose: str | None = None,
+) -> None:
+    """Bring the local sync index in line with the change that just landed.
+
+    A tracked mirror records a hash per file. Leaving it stale after a
+    single-path change makes the next `goodeye skills sync push` report drift
+    for a file the registry already holds, so the change would introduce false
+    drift on its own. When no target tracks this skill there is nothing to
+    record and the index is left untouched.
+
+    Best-effort: the write already succeeded, so an unreadable or unwritable
+    index is reported and moves on rather than failing the command.
+    """
+    from goodeye_cli import sync
+
+    slug = result.slug or result.name
+    try:
+        paths = get_config_paths()
+        state = sync.load_sync_state(paths)
+        if sha256 is None:
+            touched = sync.record_file_removed(
+                state, slug=slug, skill_id=result.workflow_id, path=path
+            )
+        else:
+            touched = sync.record_file_written(
+                state,
+                slug=slug,
+                skill_id=result.workflow_id,
+                path=path,
+                sha256=sha256,
+                executable=executable,
+                purpose=purpose,
+            )
+        if touched:
+            sync.save_sync_state(state, paths)
+    except Exception:
+        _log.debug("could not refresh the local sync index", exc_info=True)
+        Console(stderr=True).print(
+            "[yellow]Note[/yellow] the local sync index could not be updated; "
+            "run `goodeye skills sync pull` to resync."
+        )
+
+
+def _print_file_change(result: WorkflowFilePatchResult) -> None:
+    """Report what the change touched, and what it left alone.
+
+    Paths and the skill name come back from the server, so they are escaped: a
+    path containing square brackets would otherwise read as Rich markup.
+    """
+    console = Console()
+    console.print(
+        f"[green]Updated[/green] {rich_escape(result.name)} v{result.version} "
+        f"(skill_id={result.workflow_id}, version_token={result.version_token})"
+    )
+    if result.changed:
+        console.print(f"  changed: {rich_escape(', '.join(result.changed))}")
+    if result.deleted:
+        console.print(f"  deleted: {rich_escape(', '.join(result.deleted))}")
+    console.print(f"  kept unchanged: {result.carried_forward} file(s)")
+    _print_authoring_notes(result.authoring_notes)
+
+
+@app.command("put-file")
+def put_file(
+    skill_id: str = typer.Argument(..., help="Skill UUID or name."),
+    path: str = typer.Argument(
+        ...,
+        help=(
+            "Path of the file inside the skill, relative and POSIX-style "
+            "(e.g. references/rubric.md). Use SKILL.md to rewrite the runbook."
+        ),
+    ),
+    from_file: Path | None = typer.Option(
+        None, "--from-file", help="Read the new content for PATH from this local file."
+    ),
+    stdin: bool = typer.Option(
+        False, "--stdin", help="Read the new content for PATH from standard input."
+    ),
+    executable: bool | None = typer.Option(
+        None,
+        "--executable/--no-executable",
+        help=(
+            "Mark the file executable when extracted, or clear that mark. "
+            "Omit both to keep the file's current setting."
+        ),
+    ),
+    purpose: str | None = typer.Option(
+        None,
+        "--purpose",
+        help=(
+            "Short label for the file's role in the skill. Omit to keep the file's current label."
+        ),
+    ),
+    expected_version_token: str | None = typer.Option(
+        None,
+        "--expected-version-token",
+        help=(
+            "Token for the version you are changing, for scripts that already "
+            "hold one. Omit to read the current token first."
+        ),
+    ),
+) -> None:
+    """Write one file in a hosted skill, keeping every other path unchanged.
+
+    Only the path you name changes: the rest of the skill's files ride forward
+    untouched, unlike `goodeye skills publish <dir>`, which replaces the whole
+    tree so any path missing from the directory is deleted. Send the file's
+    complete new content, not a patch or a diff.
+
+    \b
+    goodeye skills put-file my-skill references/rubric.md --from-file ./rubric.md
+    cat rubric.md | goodeye skills put-file my-skill references/rubric.md --stdin
+
+    The file's executable mark and role label keep their current values unless
+    you set them, and the skill's description, outcome, tags, and verifier
+    references carry forward untouched. This writes the next version of the
+    skill and requires edit access.
+    """
+    if from_file is not None and stdin:
+        raise ValidationFailed(
+            slug="validation_error",
+            message="Use either --from-file or --stdin, not both.",
+        )
+    if from_file is None and not stdin:
+        raise ValidationFailed(
+            slug="validation_error",
+            message="No content given for the file.",
+            hint="Pass --from-file <path> to read a local file, or --stdin to pipe it in.",
+        )
+
+    from goodeye_cli.sync import inline_content_field
+
+    # Exactly one source is set by the checks above, so an unset --from-file
+    # means the content is on stdin.
+    raw = _read_stdin_bytes() if from_file is None else _read_file_bytes(from_file)
+    entry: dict[str, object] = {"path": path, **inline_content_field(raw)}
+    # An absent `executable` or `purpose` means "keep the current value" on this
+    # route, so a flag the caller did not pass must be left off entirely rather
+    # than sent as a default that would reset a setting they never mentioned.
+    if executable is not None:
+        entry["executable"] = executable
+    if purpose is not None:
+        entry["purpose"] = purpose
+
+    with _client(require_auth=True) as client:
+        token = _resolve_expected_version_token(client, skill_id, expected_version_token)
+        result = client.patch_workflow_files(
+            skill_id,
+            expected_version_token=token,
+            files=[entry],
+        )
+
+    _print_file_change(result)
+    _refresh_sync_index(
+        result,
+        path=path,
+        sha256=hashlib.sha256(raw).hexdigest(),
+        executable=executable,
+        purpose=purpose,
+    )
+
+
+@app.command("rm-file")
+def rm_file(
+    skill_id: str = typer.Argument(..., help="Skill UUID or name."),
+    path: str = typer.Argument(
+        ...,
+        help=(
+            "Path of the file to remove from the skill, relative and "
+            "POSIX-style (e.g. references/rubric.md)."
+        ),
+    ),
+    expected_version_token: str | None = typer.Option(
+        None,
+        "--expected-version-token",
+        help=(
+            "Token for the version you are changing, for scripts that already "
+            "hold one. Omit to read the current token first."
+        ),
+    ),
+) -> None:
+    """Remove one file from a hosted skill, keeping every other path unchanged.
+
+    Only the path you name is removed: the rest of the skill's files ride
+    forward untouched, unlike `goodeye skills publish <dir>`, which replaces the
+    whole tree so any path missing from the directory is deleted. The path must
+    already be in the skill, and the runbook (SKILL.md) cannot be removed.
+
+    This writes the next version of the skill and requires edit access.
+    """
+    with _client(require_auth=True) as client:
+        token = _resolve_expected_version_token(client, skill_id, expected_version_token)
+        result = client.patch_workflow_files(
+            skill_id,
+            expected_version_token=token,
+            delete_paths=[path],
+        )
+
+    _print_file_change(result)
+    _refresh_sync_index(result, path=path, sha256=None)
 
 
 @app.command("lineage")
@@ -1178,7 +1439,9 @@ __all__ = [
     "optimize",
     "optimize_description",
     "publish",
+    "put_file",
     "revoke_grant",
+    "rm_file",
     "teach",
     "transfer_ownership",
     "unarchive",
