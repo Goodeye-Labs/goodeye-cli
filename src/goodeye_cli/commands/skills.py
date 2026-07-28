@@ -590,7 +590,7 @@ def publish(
             # without changing the fallback behavior.
             _log.debug("could not fetch ignore defaults from server config", exc_info=True)
         files_payload, file_states = build_files_payload(skill_dir, None, ignore_defaults)
-        _carry_recorded_purposes(files_payload, file_states, skill_dir, effective_name)
+        _carry_recorded_file_metadata(files_payload, file_states, skill_dir, effective_name)
     else:
         files_payload = None
 
@@ -692,28 +692,38 @@ def _warn_sync_index_stale() -> None:
     )
 
 
-def _carry_recorded_purposes(
+def _carry_recorded_file_metadata(
     payload: list[dict[str, Any]],
     states: list[FileState],
     skill_dir: Path,
     effective_name: str,
 ) -> None:
-    """Re-attach the file labels a tracked mirror already recorded.
+    """Re-attach the file metadata a tracked mirror already recorded.
 
-    A file's label says what it is for, and it lives only in the registry: a
-    file on disk has nowhere to hold one. A directory publish sends a full
-    snapshot, and an entry carrying no label clears the stored one, so
-    publishing a directory strips every label the skill had. Copying the
-    recorded label back onto each surviving path is what a push already does
-    by sending its recorded manifest.
+    A directory publish sends a full snapshot built from the walk alone, so
+    anything the registry holds that the walk cannot recover is cleared by the
+    upload. Two fields sit in that position, and a push already carries both
+    forward by sending its recorded manifest.
 
-    Labels are read only when the directory is published as the skill it
+    A file's role label says what it is for and lives only in the registry: a
+    file on disk has nowhere to hold one, so an entry carrying no label clears
+    the stored one, stripping every label the skill had.
+
+    The execute bit does live on disk, but not on every filesystem: a Windows
+    checkout or a FAT/exFAT mount reports every file as non-executable, which
+    would clear a flag the registry rightly holds and then record that loss in
+    the manifest. So for a file whose content is unchanged the recorded bit is
+    authoritative, the same rule ``build_files_payload`` applies on a push. A
+    file whose content changed carries the bit just observed on disk, since its
+    content, and any permission meant to go with it, is what is being uploaded.
+
+    Metadata is read only when the directory is published as the skill it
     mirrors. Republished under another name it is a different skill, and one
-    skill's labels are not another's.
+    skill's metadata is not another's.
 
-    A path the mirror never recorded keeps no label rather than being given an
-    invented one, and a mirror with no labels at all leaves the payload
-    untouched.
+    A path the mirror never recorded keeps what the walk found rather than
+    being given an invented label, and a mirror recording no files at all
+    leaves the payload untouched.
     """
     from goodeye_cli import sync
 
@@ -721,21 +731,31 @@ def _carry_recorded_purposes(
         state = sync.load_sync_state(get_config_paths())
         entry = sync.published_dir_entry(state, skill_dir)
     except Exception:
-        _log.debug("could not read the local sync index for file labels", exc_info=True)
+        _log.debug("could not read the local sync index for file metadata", exc_info=True)
         return
     if entry is None or entry.slug != effective_name:
         return
-    labels = {f.path: f.purpose for f in entry.files if f.purpose is not None}
-    if not labels:
+    recorded = {f.path: f for f in entry.files}
+    if not recorded:
         return
+    fresh = {s.path: s for s in states}
     for wire_entry in payload:
-        label = labels.get(wire_entry["path"])
-        if label is not None:
-            wire_entry["purpose"] = label
+        prior = recorded.get(wire_entry["path"])
+        if prior is None:
+            continue
+        if prior.purpose is not None:
+            wire_entry["purpose"] = prior.purpose
+        local = fresh.get(wire_entry["path"])
+        if local is not None and local.sha256 == prior.sha256:
+            wire_entry["executable"] = prior.executable
     for state_entry in states:
-        label = labels.get(state_entry.path)
-        if label is not None:
-            state_entry.purpose = label
+        prior = recorded.get(state_entry.path)
+        if prior is None:
+            continue
+        if prior.purpose is not None:
+            state_entry.purpose = prior.purpose
+        if state_entry.sha256 == prior.sha256:
+            state_entry.executable = prior.executable
 
 
 def _record_publish_sync_point(

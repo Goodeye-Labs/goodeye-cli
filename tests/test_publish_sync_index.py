@@ -213,9 +213,7 @@ def test_folder_publish_under_another_name_leaves_the_index_alone(
     # A different name resolves to a different skill server-side.
     _save_route(workflow_id="skl_other")
 
-    result = CliRunner().invoke(
-        app, ["skills", "publish", str(skill_dir), "--name", "other-skill"]
-    )
+    result = CliRunner().invoke(app, ["skills", "publish", str(skill_dir), "--name", "other-skill"])
     assert result.exit_code == 0, result.output
     assert tmp_config_paths.sync_state_file.read_text(encoding="utf-8") == before
 
@@ -298,8 +296,75 @@ def test_folder_publish_does_not_invent_a_label(
     result = CliRunner().invoke(app, ["skills", "publish", str(skill_dir)])
     assert result.exit_code == 0, result.output
 
-    uploaded = {f["path"]: f for f in _json.loads(route.calls.last.request.content.decode())["files"]}
+    uploaded = {
+        f["path"]: f for f in _json.loads(route.calls.last.request.content.decode())["files"]
+    }
     assert "purpose" not in uploaded["fresh.md"]
+
+
+# ----- file execute bit -----
+
+
+@respx.mock
+def test_folder_publish_keeps_a_recorded_execute_bit(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """An unchanged file keeps the execute bit the registry already held.
+
+    A Windows checkout or a FAT/exFAT mount reports every file as
+    non-executable, so reading the bit off disk would clear a flag the registry
+    rightly holds and then record that loss in the manifest.
+    """
+    _setup_creds(monkeypatch, tmp_config_paths)
+    skill_dir = _mirror(tmp_path)
+    (skill_dir / "notes.md").chmod(0o644)
+    _track(
+        tmp_config_paths,
+        tmp_path,
+        files=[FileState(path="notes.md", sha256=_sha(b"notes\n"), executable=True)],
+    )
+    route = _save_route()
+
+    result = CliRunner().invoke(app, ["skills", "publish", str(skill_dir)])
+    assert result.exit_code == 0, result.output
+
+    uploaded = {
+        f["path"]: f for f in _json.loads(route.calls.last.request.content.decode())["files"]
+    }
+    assert uploaded["notes.md"]["executable"] is True
+    recorded = {f.path: f for f in load_sync_state(tmp_config_paths).entries[0].files}
+    assert recorded["notes.md"].executable is True
+
+
+@respx.mock
+def test_folder_publish_takes_the_local_bit_for_a_changed_file(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """A file whose content changed carries the bit disk reports now.
+
+    Its content, and any permission meant to go with it, is what is being
+    uploaded, so the recorded bit is no longer the better answer.
+    """
+    _setup_creds(monkeypatch, tmp_config_paths)
+    skill_dir = _mirror(tmp_path)
+    (skill_dir / "notes.md").write_bytes(b"edited notes\n")
+    (skill_dir / "notes.md").chmod(0o644)
+    _track(
+        tmp_config_paths,
+        tmp_path,
+        files=[FileState(path="notes.md", sha256=_sha(b"notes\n"), executable=True)],
+    )
+    route = _save_route()
+
+    result = CliRunner().invoke(app, ["skills", "publish", str(skill_dir)])
+    assert result.exit_code == 0, result.output
+
+    uploaded = {
+        f["path"]: f for f in _json.loads(route.calls.last.request.content.decode())["files"]
+    }
+    assert uploaded["notes.md"]["executable"] is False
+    recorded = {f.path: f for f in load_sync_state(tmp_config_paths).entries[0].files}
+    assert recorded["notes.md"].executable is False
 
 
 # ----- piped mode -----
