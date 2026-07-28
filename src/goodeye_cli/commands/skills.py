@@ -6,7 +6,7 @@ import logging
 import re
 import sys
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 import typer
 from rich.console import Console
@@ -32,7 +32,17 @@ from goodeye_cli.output import (
     next_page_hint,
     resolve_output_mode,
 )
-from goodeye_cli.wire import SafetyCheckResult, WorkflowDetail, WorkflowFilePatchResult
+from goodeye_cli.wire import (
+    SafetyCheckResult,
+    WorkflowDetail,
+    WorkflowFilePatchResult,
+    WorkflowSaveResult,
+)
+
+if TYPE_CHECKING:
+    # Imported for annotations only: `sync` is loaded lazily inside the
+    # commands that need it, to keep CLI startup off that import.
+    from goodeye_cli.sync import FileState
 
 _log = logging.getLogger(__name__)
 
@@ -556,12 +566,14 @@ def publish(
     )
 
     # Build the files payload.
-    # Directory mode: upload the full tree (everything is inline since there is
-    # no recorded state to compare against).
+    # Directory mode: upload the full tree (every file inline, so a stale
+    # recorded hash can never turn into a reference to a blob the registry no
+    # longer holds).
     # Single-file / stdin: omit files entirely so the server carries the
     # existing tree forward.
     # --clear-files: send an empty list to wipe the tree.
     files_payload: list[dict] | None
+    file_states: list[FileState] = []
     if clear_files:
         files_payload = []
     elif is_dir_mode:
@@ -577,7 +589,8 @@ def publish(
             # swallowed error at debug level so a misconfiguration is diagnosable
             # without changing the fallback behavior.
             _log.debug("could not fetch ignore defaults from server config", exc_info=True)
-        files_payload, _ = build_files_payload(skill_dir, None, ignore_defaults)
+        files_payload, file_states = build_files_payload(skill_dir, None, ignore_defaults)
+        _carry_recorded_file_metadata(files_payload, file_states, skill_dir, effective_name)
     else:
         files_payload = None
 
@@ -594,6 +607,16 @@ def publish(
             image_generators=image_generator_payload,
             files=files_payload,
         )
+
+    _record_publish_sync_point(
+        result,
+        is_dir_mode=is_dir_mode,
+        skill_dir=skill_dir,
+        body=body,
+        file_states=file_states,
+        expected_version_token=expected_version_token,
+        clear_files=clear_files,
+    )
 
     console.print(
         f"[green]Saved[/green] {result.name} v{result.version} "
@@ -655,6 +678,161 @@ def _resolve_expected_version_token(
     return detail.version_token
 
 
+def _warn_sync_index_stale() -> None:
+    """Report that the local copy is behind, without failing the command.
+
+    Every caller reaches this after its write already landed on the registry.
+    Raising here would report a completed publish as a failure, so an
+    unreadable index or an unwritable mirror says so and moves on.
+    """
+    _log.debug("could not refresh the local sync index", exc_info=True)
+    Console(stderr=True).print(
+        "[yellow]Note[/yellow] the local copy could not be updated; "
+        "run `goodeye skills sync pull` to resync."
+    )
+
+
+def _carry_recorded_file_metadata(
+    payload: list[dict[str, Any]],
+    states: list[FileState],
+    skill_dir: Path,
+    effective_name: str,
+) -> None:
+    """Re-attach the file metadata a tracked mirror already recorded.
+
+    A directory publish sends a full snapshot built from the walk alone, so
+    anything the registry holds that the walk cannot recover is cleared by the
+    upload. Two fields sit in that position, and a push already carries both
+    forward by sending its recorded manifest.
+
+    A file's role label says what it is for and lives only in the registry: a
+    file on disk has nowhere to hold one, so an entry carrying no label clears
+    the stored one, stripping every label the skill had.
+
+    The execute bit does live on disk, but not on every filesystem: a Windows
+    checkout or a FAT/exFAT mount reports every file as non-executable, which
+    would clear a flag the registry rightly holds and then record that loss in
+    the manifest. So for a file whose content is unchanged the recorded bit is
+    authoritative, the same rule ``build_files_payload`` applies on a push. A
+    file whose content changed carries the bit just observed on disk, since its
+    content, and any permission meant to go with it, is what is being uploaded.
+
+    Metadata is read only when the directory is published as the skill it
+    mirrors. Republished under another name it is a different skill, and one
+    skill's metadata is not another's.
+
+    A path the mirror never recorded keeps what the walk found rather than
+    being given an invented label, and a mirror recording no files at all
+    leaves the payload untouched.
+    """
+    from goodeye_cli import sync
+
+    try:
+        state = sync.load_sync_state(get_config_paths())
+        entry = sync.published_dir_entry(state, skill_dir)
+    except Exception:
+        _log.debug("could not read the local sync index for file metadata", exc_info=True)
+        return
+    if entry is None or entry.slug != effective_name:
+        return
+    recorded = {f.path: f for f in entry.files}
+    if not recorded:
+        return
+    fresh = {s.path: s for s in states}
+    for wire_entry in payload:
+        prior = recorded.get(wire_entry["path"])
+        if prior is None:
+            continue
+        if prior.purpose is not None:
+            wire_entry["purpose"] = prior.purpose
+        local = fresh.get(wire_entry["path"])
+        if local is not None and local.sha256 == prior.sha256:
+            wire_entry["executable"] = prior.executable
+    for state_entry in states:
+        prior = recorded.get(state_entry.path)
+        if prior is None:
+            continue
+        if prior.purpose is not None:
+            state_entry.purpose = prior.purpose
+        if state_entry.sha256 == prior.sha256:
+            state_entry.executable = prior.executable
+
+
+def _record_publish_sync_point(
+    result: WorkflowSaveResult,
+    *,
+    is_dir_mode: bool,
+    skill_dir: Path,
+    body: str,
+    file_states: list[FileState],
+    expected_version_token: str | None,
+    clear_files: bool,
+) -> None:
+    """Record the version a publish created on whatever mirror it belongs to.
+
+    The two input modes know different things and so record different things.
+    A directory publish uploaded the tree, so the whole sync point moves. A
+    body-only publish read no directory, so only mirrors recorded at the
+    version it replaced can be moved, and only their body moves.
+
+    ``--clear-files`` records nothing: it drops files the mirror still lists,
+    which a pull reconciles. A body-only publish with no token records nothing
+    either, since without one there is no way to tell which version the
+    publish was written against.
+    """
+    if is_dir_mode:
+        _record_published_tree(result, skill_dir=skill_dir, body=body, file_states=file_states)
+    elif expected_version_token and not clear_files:
+        _record_published_body(result, expected_version_token=expected_version_token, body=body)
+
+
+def _record_published_tree(
+    result: WorkflowSaveResult,
+    *,
+    skill_dir: Path,
+    body: str,
+    file_states: list[FileState],
+) -> None:
+    """Bring the mirror this directory belongs to onto the version just published.
+
+    Best-effort, for the reason given on ``_warn_sync_index_stale``.
+    """
+    from goodeye_cli import sync
+
+    try:
+        paths = get_config_paths()
+        state = sync.load_sync_state(paths)
+        if sync.record_tree_published(
+            state, result, skill_dir=skill_dir, body=body, file_states=file_states
+        ):
+            sync.save_sync_state(state, paths)
+    except Exception:
+        _warn_sync_index_stale()
+
+
+def _record_published_body(
+    result: WorkflowSaveResult,
+    *,
+    expected_version_token: str,
+    body: str,
+) -> None:
+    """Record a body-only publish on every mirror sitting at the replaced version.
+
+    Best-effort, for the reason given on ``_warn_sync_index_stale``.
+    """
+    from goodeye_cli import sync
+
+    try:
+        paths = get_config_paths()
+        state = sync.load_sync_state(paths)
+        if sync.record_body_published(
+            state, result, expected_version_token=expected_version_token, body=body
+        ):
+            sync.save_sync_state(state, paths)
+    except Exception:
+        _warn_sync_index_stale()
+
+
 def _refresh_sync_index(
     result: WorkflowFilePatchResult,
     *,
@@ -708,11 +886,7 @@ def _refresh_sync_index(
         if touched:
             sync.save_sync_state(state, paths)
     except Exception:
-        _log.debug("could not refresh the local sync index", exc_info=True)
-        Console(stderr=True).print(
-            "[yellow]Note[/yellow] the local copy could not be updated; "
-            "run `goodeye skills sync pull` to resync."
-        )
+        _warn_sync_index_stale()
 
 
 def _print_file_change(result: WorkflowFilePatchResult) -> None:

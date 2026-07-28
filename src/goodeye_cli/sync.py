@@ -38,7 +38,7 @@ from goodeye_cli.prompts import confirm_destructive
 
 if TYPE_CHECKING:
     from goodeye_cli.client import GoodeyeClient
-    from goodeye_cli.wire import WorkflowFilePatchResult, WorkflowSummary
+    from goodeye_cli.wire import WorkflowFilePatchResult, WorkflowSaveResult, WorkflowSummary
 
 SyncScope = Literal["owned", "all", "selected"]
 
@@ -809,7 +809,9 @@ def _remove_mirrored_file(entry: SyncEntry, path: str) -> None:
         _log.warning("could not remove %s from the local copy: %s", local, exc)
 
 
-def _move_to_new_version(entry: SyncEntry, result: WorkflowFilePatchResult) -> None:
+def _move_to_new_version(
+    entry: SyncEntry, result: WorkflowFilePatchResult | WorkflowSaveResult
+) -> None:
     """Move an entry's recorded sync point onto the version the change created.
 
     The registry moved and this entry's record of the content moved with it, so
@@ -953,6 +955,134 @@ def record_file_removed(
     ):
         entry.files = [f for f in entry.files if f.path != path]
         _remove_mirrored_file(entry, path)
+        _move_to_new_version(entry, result)
+        touched = True
+    return touched
+
+
+def _bindings_from_save(result: WorkflowSaveResult) -> list[SyncVerifierBinding]:
+    """Record the verifier refs a save left on the skill.
+
+    A push always re-sends the recorded bindings, so an entry holding the set
+    from before the save would reattach superseded refs and undo the change.
+    """
+    return [
+        SyncVerifierBinding(name=v.name, verifier_id=v.verifier_id, version=v.version)
+        for v in result.verifiers
+    ]
+
+
+def published_dir_entry(state: SyncState, skill_dir: Path) -> SyncEntry | None:
+    """Return the tracked mirror a published directory is, or None.
+
+    A mirror lives at ``<target>/<slug>``, so the directory's own name is the
+    slug and its parent is the target. The path is made absolute and collapsed
+    lexically, never through ``Path.resolve``: targets are stored the same way,
+    and resolving symlinks here would fail to match a target reached through
+    one, leaving the caller to quietly skip an index it should have updated.
+    """
+    resolved = Path(os.path.abspath(os.path.expanduser(str(skill_dir))))
+    return find_entry(state, slug=resolved.name, target_path=str(resolved.parent))
+
+
+def record_tree_published(
+    state: SyncState,
+    result: WorkflowSaveResult,
+    *,
+    skill_dir: Path,
+    body: str,
+    file_states: list[FileState],
+) -> bool:
+    """Move the mirror a published directory belongs to onto the version it created.
+
+    A directory publish uploads the whole tree, so once it lands the registry
+    holds exactly what that directory holds. There is nothing left to
+    reconcile, and the recorded sync point can move with no version check at
+    all: unlike a single-path change, this does not describe a delta against
+    one base, so a mirror recorded at any other version is still described by
+    it. That is also what lets this recover a mirror already stuck at a stale
+    version rather than leaving it for a forced pull.
+
+    Without it the recorded hashes stay on the superseded content while the
+    registry moves, which reads as a local edit and a moved server at once:
+    the ``conflict`` state, which no pull or push can clear because a pull
+    refuses a dirty tree and a push sends a token the registry has replaced.
+
+    The entry is left alone when the publish went to a different skill than the
+    one the mirror tracks, which is what a republish under another ``--name``
+    does, and what a mirror of a skill the caller cannot write produces.
+
+    Returns whether the entry changed, so the caller can skip persisting an
+    index no target tracks this directory in.
+    """
+    entry = published_dir_entry(state, skill_dir)
+    if entry is None or entry.skill_id != result.workflow_id:
+        return False
+    entry.synced_version = result.version
+    entry.version_token = result.version_token
+    entry.body_sha256 = _recorded_body_sha256(body.encode("utf-8"))
+    entry.files = file_states
+    entry.verifier_bindings = _bindings_from_save(result)
+    return True
+
+
+def _mirror_body_unchanged(entry: SyncEntry) -> bool:
+    """Report whether this mirror's ``SKILL.md`` still matches its recorded hash.
+
+    False when the copy is missing or unreadable as well as when it differs.
+    The caller uses this to decide whether writing is safe, and the only safe
+    answer about a file that cannot be read is to leave it alone.
+    """
+    local = _mirrored_path(entry, "SKILL.md")
+    if local is None or not local.is_file():
+        return False
+    try:
+        text = local.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    return not is_modified_locally(entry, text)
+
+
+def record_body_published(
+    state: SyncState,
+    result: WorkflowSaveResult,
+    *,
+    expected_version_token: str,
+    body: str,
+) -> bool:
+    """Record a body-only publish on every mirror that sat on the version it replaced.
+
+    A publish that streams its body sends no file tree, so the registry carries
+    the previous one forward and the recorded manifest still describes it. Only
+    the body and the sync point move. Nothing here reads the mirror's directory
+    to decide what was published, so only entries recorded at the version the
+    publish was written against are touched: any other entry has a different
+    base, exactly as for a single-path change.
+
+    The new body goes to disk only when the mirror's copy still matches its
+    recorded hash. A mirror holding unsaved edits keeps them: they read as
+    ordinary local drift the caller resolves with a push, which is a decision
+    to make rather than one to lose. Either way the recorded hash moves to the
+    published body, so the mirror is measured against what the registry now
+    holds. Leaving it behind would let the next push send the superseded body
+    back and quietly revert the version just published.
+
+    Returns whether any entry changed.
+    """
+    raw = body.encode("utf-8")
+    new_hash = _recorded_body_sha256(raw)
+    bindings = _bindings_from_save(result)
+    touched = False
+    for entry in entries_at_version(
+        state,
+        slug=result.name,
+        skill_id=result.workflow_id,
+        version_token=expected_version_token,
+    ):
+        if _mirror_body_unchanged(entry):
+            _write_mirrored_file(entry, "SKILL.md", raw, executable=None)
+        entry.body_sha256 = new_hash
+        entry.verifier_bindings = bindings
         _move_to_new_version(entry, result)
         touched = True
     return touched
@@ -2888,10 +3018,7 @@ def _push_candidate(
     entry.synced_version = save_result.version
     entry.version_token = save_result.version_token
     entry.body_sha256 = body_sha256(body)
-    entry.verifier_bindings = [
-        SyncVerifierBinding(name=v.name, verifier_id=v.verifier_id, version=v.version)
-        for v in save_result.verifiers
-    ]
+    entry.verifier_bindings = _bindings_from_save(save_result)
     # Record the file states (each sha256 is over the raw on-disk bytes, so a
     # binary file converges to a reference on the next push rather than re-uploading).
     entry.files = file_states
@@ -2937,10 +3064,13 @@ __all__ = [
     "local_skill_path",
     "normalize_target_path",
     "prune_from_allowlist",
+    "published_dir_entry",
     "pull",
     "read_local_body",
+    "record_body_published",
     "record_file_removed",
     "record_file_written",
+    "record_tree_published",
     "remove_target",
     "resolve_preset",
     "save_sync_config",
