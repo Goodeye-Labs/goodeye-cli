@@ -17,6 +17,7 @@ import httpx
 import respx
 from typer.testing import CliRunner
 
+from goodeye_cli import sync as sync_module
 from goodeye_cli.app import app
 from goodeye_cli.config import ConfigPaths, save_credentials
 from goodeye_cli.sync import (
@@ -484,3 +485,50 @@ def test_piped_publish_clearing_files_leaves_the_index_alone(
     )
     assert result.exit_code == 0, result.output
     assert tmp_config_paths.sync_state_file.read_text(encoding="utf-8") == before
+
+
+# ----- best effort -----
+
+
+def _boom(*_args, **_kwargs):
+    raise OSError("no")
+
+
+@respx.mock
+def test_folder_publish_survives_an_unreadable_index(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """An index that cannot be read says so rather than failing the publish.
+
+    The registry write has already landed by the time the index is touched, so
+    raising here would report a completed publish as a failure.
+    """
+    _setup_creds(monkeypatch, tmp_config_paths)
+    skill_dir = _mirror(tmp_path)
+    _track(tmp_config_paths, tmp_path)
+    _save_route()
+    monkeypatch.setattr(sync_module, "load_sync_state", _boom)
+
+    result = CliRunner().invoke(app, ["skills", "publish", str(skill_dir)])
+    assert result.exit_code == 0, result.output
+    assert "could not be updated" in result.stderr
+
+
+@respx.mock
+def test_piped_publish_survives_an_unwritable_mirror(
+    tmp_path: Path, tmp_config_paths: ConfigPaths, monkeypatch
+) -> None:
+    """A mirror that cannot be written warns, for the same reason."""
+    _setup_creds(monkeypatch, tmp_config_paths)
+    _mirror(tmp_path)
+    _track(tmp_config_paths, tmp_path, version_token="tok-old")
+    _save_route(version=3, token="tok-new")
+    monkeypatch.setattr(sync_module, "_write_mirrored_file", _boom)
+
+    result = CliRunner().invoke(
+        app,
+        ["skills", "publish", "-", "--expected-version-token", "tok-old"],
+        input=_NEW_BODY,
+    )
+    assert result.exit_code == 0, result.output
+    assert "could not be updated" in result.stderr

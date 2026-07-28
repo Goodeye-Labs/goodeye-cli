@@ -3018,10 +3018,7 @@ def _push_candidate(
     entry.synced_version = save_result.version
     entry.version_token = save_result.version_token
     entry.body_sha256 = body_sha256(body)
-    entry.verifier_bindings = [
-        SyncVerifierBinding(name=v.name, verifier_id=v.verifier_id, version=v.version)
-        for v in save_result.verifiers
-    ]
+    entry.verifier_bindings = _bindings_from_save(save_result)
     # Record the file states (each sha256 is over the raw on-disk bytes, so a
     # binary file converges to a reference on the next push rather than re-uploading).
     entry.files = file_states
