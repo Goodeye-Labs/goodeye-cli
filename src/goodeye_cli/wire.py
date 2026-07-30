@@ -8,9 +8,29 @@ do not break old CLI releases.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+
+
+def _empty_when_null(value: Any) -> Any:
+    """Coerce an explicit JSON null to an empty string.
+
+    Optional server columns arrive as null once a caller clears them, rather
+    than being omitted from the payload. Every field annotated with
+    ``NullableStr`` already defaults to "", so an absent value is expected;
+    without this coercion one null row fails validation and takes down the
+    whole response, including the rows that parsed fine.
+    """
+    return "" if value is None else value
+
+
+NullableStr = Annotated[str, BeforeValidator(_empty_when_null)]
+"""A string field that tolerates null on the wire and reads as "" in Python.
+
+Use for any optional text the server may return as null. Consumers keep a
+plain ``str``, so callers that format or concatenate the value stay safe.
+"""
 
 
 class _WireBase(BaseModel):
@@ -108,8 +128,8 @@ class WorkflowSummary(_WireBase):
     id: str
     name: str
     current_version: int
-    description: str = ""
-    outcome: str = ""
+    description: NullableStr = ""
+    outcome: NullableStr = ""
     tags: list[str] = Field(default_factory=list)
     updated_at: datetime | None = None
     owner_user_id: str | None = None
@@ -136,8 +156,8 @@ class WorkflowSearchItem(_WireBase):
     match_reason: str
     slug: str | None = None
     name: str | None = None
-    description: str = ""
-    outcome: str = ""
+    description: NullableStr = ""
+    outcome: NullableStr = ""
     tags: list[str] = Field(default_factory=list)
 
 
@@ -207,8 +227,8 @@ class WorkflowDetail(_WireBase):
     name: str
     version: int
     body: str
-    description: str = ""
-    outcome: str = ""
+    description: NullableStr = ""
+    outcome: NullableStr = ""
     tags: list[str] = Field(default_factory=list)
     owner_user_id: str | None = None
     updated_at: datetime | None = None
@@ -255,7 +275,7 @@ class WorkflowFilePatchResult(_WireBase):
     version: int
     version_token: str
     name: str
-    slug: str = ""
+    slug: NullableStr = ""
     changed: list[str] = Field(default_factory=list)
     deleted: list[str] = Field(default_factory=list)
     carried_forward: int = 0
@@ -369,7 +389,7 @@ class DesignCheckCriterion(_WireBase):
 
     criterion: str
     passed: bool
-    reason: str = ""
+    reason: NullableStr = ""
 
 
 class DesignChecks(_WireBase):
@@ -395,8 +415,8 @@ class TemplateSummary(_WireBase):
     handle: str
     owner_user_id: str
     latest_version: int
-    description: str = ""
-    outcome: str = ""
+    description: NullableStr = ""
+    outcome: NullableStr = ""
     tags: list[str] = Field(default_factory=list)
     publishing_handle: str
     safety_verification_status: str = "unverified"
@@ -415,11 +435,11 @@ class TemplateSearchItem(_WireBase):
     id: str
     rank: int
     match_reason: str
-    slug: str = ""
-    name: str = ""
-    handle: str = ""
-    description: str = ""
-    outcome: str = ""
+    slug: NullableStr = ""
+    name: NullableStr = ""
+    handle: NullableStr = ""
+    description: NullableStr = ""
+    outcome: NullableStr = ""
     tags: list[str] = Field(default_factory=list)
 
 
@@ -486,8 +506,8 @@ class TemplateDetail(_WireBase):
     owner_user_id: str
     version: int
     body: str
-    description: str = ""
-    outcome: str = ""
+    description: NullableStr = ""
+    outcome: NullableStr = ""
     tags: list[str] = Field(default_factory=list)
     release_notes: str | None = None
     publishing_handle: str
@@ -797,7 +817,7 @@ class ImageGeneratorSummary(_WireBase):
 
     generator_id: str
     name: str
-    description: str = ""
+    description: NullableStr = ""
     current_version: int
     version_token: str
     status: str
@@ -816,7 +836,7 @@ class ImageGeneratorDetail(_WireBase):
 
     generator_id: str
     name: str
-    description: str = ""
+    description: NullableStr = ""
     current_version: int
     version: int
     version_token: str
@@ -836,7 +856,7 @@ class ImageGeneratorDeployResult(_WireBase):
 
     generator_id: str
     name: str
-    description: str = ""
+    description: NullableStr = ""
     current_version: int
     version: int
     version_token: str
