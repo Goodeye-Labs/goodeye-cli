@@ -1,12 +1,15 @@
 [project]
 name = "goodeye"
-version = "0.25.5"
+version = "0.25.6"
 description = "Goodeye CLI: a private home for the skills your AI follows and the verifiers its work must pass, from the terminal."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.12"
 authors = [
-  { name = "Goodeye Labs" },
+  { name = "Goodeye Labs", email = "hello@goodeyelabs.com" },
+]
+maintainers = [
+  { name = "Goodeye Labs", email = "hello@goodeyelabs.com" },
 ]
 keywords = ["goodeye", "cli", "ai", "agents", "llm", "mcp", "skills", "verifiers"]
 classifiers = [
