@@ -95,7 +95,7 @@ Browsing, fetching, and running public templates need no sign-in.
 
 ```sh
 goodeye templates list
-goodeye templates get @randalolson/high-signal-chart-workflow
+goodeye templates get @goodeye/high-signal-chart-workflow
 ```
 
 `templates get` prints the template body (the skill), and your agent follows it: it finds a dataset, renders a chart, and runs the template's pinned verifier, revising until the chart passes. That verifier run is the step your agent makes, drawing on a small per-network credit grant:
@@ -106,7 +106,7 @@ goodeye verifiers run 89dcc843-d056-44d9-ae34-ebcff4903885 \
   --version 1 --media-url '<public-https-chart-url>' --anonymous
 ```
 
-Fork it into a skill of your own with `goodeye templates fork @randalolson/high-signal-chart-workflow`. That is the one step here that needs an account, since the fork lands in your own registry. To publish one of your own, claim a handle first with `goodeye me claim-handle your-handle`, then run `goodeye templates publish my-skill`.
+Fork it into a skill of your own with `goodeye templates fork @goodeye/high-signal-chart-workflow`. That is the one step here that needs an account, since the fork lands in your own registry. To publish one of your own, claim a handle first with `goodeye me claim-handle your-handle`, then run `goodeye templates publish my-skill`.
 
 ## What the CLI can do
 

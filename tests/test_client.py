@@ -80,12 +80,12 @@ def test_get_template_json_preserves_verifier_snapshots() -> None:
                 "id": "tpl_1",
                 "slug": "sample",
                 "name": "sample",
-                "handle": "randy",
+                "handle": "goodeye",
                 "owner_user_id": "user_1",
                 "version": 1,
                 "body": "runbook",
                 "description": "sample template",
-                "publishing_handle": "randy",
+                "publishing_handle": "goodeye",
                 "verifier_snapshots": [
                     {
                         "name": "tone",

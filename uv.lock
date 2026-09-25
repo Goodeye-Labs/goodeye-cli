@@ -176,7 +176,7 @@ wheels = [
 
 [[package]]
 name = "goodeye"
-version = "0.25.4"
+version = "0.25.8"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
